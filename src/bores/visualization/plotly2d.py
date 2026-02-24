@@ -2,10 +2,10 @@
 Plotly-based 2D Visualization Suite for 2 Dimensional Reservoir Simulation Data and Results.
 """
 
-from abc import ABC, abstractmethod
 import collections.abc
-from enum import Enum
 import typing
+from abc import ABC, abstractmethod
+from enum import Enum
 
 import attrs
 import numpy as np
@@ -167,7 +167,7 @@ class BaseRenderer(ABC):
         :param kwargs: Additional plotting parameters
         :return: Updated Plotly figure
         """
-        pass
+        ...
 
     def normalize_data(
         self,
@@ -231,8 +231,7 @@ class BaseRenderer(ABC):
             # Convert back from log space for display
             original_value = 10**value
             return f"{original_value:.{precision}g}"
-        else:
-            return f"{value:.{precision}g}"
+        return f"{value:.{precision}g}"
 
     def help(self) -> str:
         """

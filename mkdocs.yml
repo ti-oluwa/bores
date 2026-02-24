@@ -1,0 +1,213 @@
+site_name: BORES
+site_description: 3D Three-Phase Black-Oil Reservoir Simulation in Python
+site_author: ti-oluwa
+site_url: https://ti-oluwa.github.io/bores
+
+repo_name: ti-oluwa/bores
+repo_url: https://github.com/ti-oluwa/bores
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; 2025 ti-oluwa
+
+theme:
+  name: material
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      primary: slate
+      accent: cyan
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: slate
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: slate
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+  font:
+    text: DM Sans
+    code: Roboto Mono
+
+  features:
+    - announce.dismiss
+    - content.action.edit
+    - content.action.view
+    - content.code.annotate
+    - content.code.copy
+    - content.tabs.link
+    - content.tooltips
+    - navigation.expand
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - navigation.path
+    - navigation.sections
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil
+    view: material/eye
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/ti-oluwa
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/bores-framework/
+
+  version:
+    provider: mike
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+
+  - Getting Started:
+    - getting-started/index.md
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Core Concepts: getting-started/core-concepts.md
+
+  - Tutorials:
+    - tutorials/index.md
+    - "1. Your First Simulation": tutorials/01-first-simulation.md
+    - "2. Building a 3D Model": tutorials/02-reservoir-model.md
+    - "3. Water Injection": tutorials/03-waterflood.md
+    - "4. Gas Injection": tutorials/04-gas-injection.md
+    - "5. Miscible Gas Flooding": tutorials/05-miscible-flooding.md
+
+  - User Guide:
+    - guides/index.md
+    - Building Models: guides/building-models.md
+    - Rock & Fluid Properties: guides/rock-fluid-properties.md
+    - Wells & Controls: guides/wells-and-controls.md
+    - Running Simulations: guides/running-simulations.md
+    - States, Streams & Stores: guides/states-streams-stores.md
+    - Analyzing Results: guides/analyzing-results.md
+    - Visualization: guides/visualization.md
+
+  - Relative Permeability:
+    - relative-permeability/index.md
+    - Brooks-Corey Model: relative-permeability/brooks-corey.md
+    - Mixing Rules: relative-permeability/mixing-rules.md
+    - Lookup Tables: relative-permeability/tables.md
+    - Custom Rules: relative-permeability/custom-rules.md
+
+  - Capillary Pressure:
+    - capillary-pressure/index.md
+    - Brooks-Corey Model: capillary-pressure/brooks-corey.md
+    - van Genuchten Model: capillary-pressure/van-genuchten.md
+    - Leverett J-Function: capillary-pressure/leverett-j.md
+    - Lookup Tables: capillary-pressure/tables.md
+
+  - Visualization:
+    - visualization/index.md
+    - 1D Time Series: visualization/plotly1d.md
+    - 2D Maps: visualization/plotly2d.md
+    - 3D Volume Rendering: visualization/plotly3d.md
+
+  - Advanced Topics:
+    - advanced/index.md
+    - Boundary Conditions: advanced/boundary-conditions.md
+    - Faults & Fractures: advanced/faults-fractures.md
+    - PVT Tables: advanced/pvt-tables.md
+    - Performance Optimization: advanced/performance-optimization.md
+    - Storage & Serialization: advanced/storage-serialization.md
+
+  - Examples:
+    - examples/index.md
+    - Model Setup: examples/setup.md
+    - Stabilization: examples/stabilization.md
+    - Primary Depletion: examples/primary-depletion.md
+    - Waterflood Pattern: examples/waterflood-pattern.md
+    - Gas Cap Expansion: examples/gas-cap-expansion.md
+    - Miscible EOR: examples/miscible-eor.md
+
+  - Best Practices:
+    - best-practices/index.md
+    - Grid Design: best-practices/grid-design.md
+    - Solver Selection: best-practices/solver-selection.md
+    - Timestep Control: best-practices/timestep-control.md
+    - Validation: best-practices/validation.md
+
+  - Reference:
+    - reference/index.md
+    - API Reference: reference/api.md
+    - Constants & Configuration: reference/constants.md
+    - Glossary: reference/glossary.md

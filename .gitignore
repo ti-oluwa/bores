@@ -19,3 +19,4 @@ scenarios/**/
 .ruff_cache/
 CLAUDE.md
 .claude/
+site/

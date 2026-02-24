@@ -1,7 +1,7 @@
 """Capillary pressure models and tables for multiphase flow simulations."""
 
-import typing
 import threading
+import typing
 
 import attrs
 import numpy as np
@@ -12,14 +12,13 @@ from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
 from bores.types import CapillaryPressures, FloatOrArray, FluidPhase, WettabilityType
 
-
 __all__ = [
-    "capillary_pressure_table",
-    "TwoPhaseCapillaryPressureTable",
-    "ThreePhaseCapillaryPressureTable",
     "BrooksCoreyCapillaryPressureModel",
-    "VanGenuchtenCapillaryPressureModel",
     "LeverettJCapillaryPressureModel",
+    "ThreePhaseCapillaryPressureTable",
+    "TwoPhaseCapillaryPressureTable",
+    "VanGenuchtenCapillaryPressureModel",
+    "capillary_pressure_table",
 ]
 
 
@@ -514,7 +513,6 @@ class BrooksCoreyCapillaryPressureModel(
         :param residual_gas_saturation: Optional override for Sgr - scalar or array.
         :return: Dictionary with oil_water and gas_oil capillary pressures.
         """
-        # Use provided values or fall back to defaults
         swc = (
             irreducible_water_saturation
             if irreducible_water_saturation is not None
@@ -536,7 +534,6 @@ class BrooksCoreyCapillaryPressureModel(
             else self.residual_gas_saturation
         )
 
-        # Ensure all required parameters are available
         params_missing = []
         if swc is None:
             params_missing.append("Swc")
@@ -827,7 +824,6 @@ class VanGenuchtenCapillaryPressureModel(
         :param residual_gas_saturation: Optional override for Sgr - scalar or array.
         :return: Dictionary with oil_water and gas_oil capillary pressures.
         """
-        # Use provided values or fall back to defaults
         swc = (
             irreducible_water_saturation
             if irreducible_water_saturation is not None
@@ -849,7 +845,6 @@ class VanGenuchtenCapillaryPressureModel(
             else self.residual_gas_saturation
         )
 
-        # Ensure all required parameters are available
         params_missing = []
         if swc is None:
             params_missing.append("Swc")
@@ -1166,7 +1161,6 @@ class LeverettJCapillaryPressureModel(
         :param residual_gas_saturation: Optional override for Sgr - scalar or array.
         :return: Dictionary with oil_water and gas_oil capillary pressures.
         """
-        # Use provided values or fall back to defaults
         swc = (
             irreducible_water_saturation
             if irreducible_water_saturation is not None
@@ -1188,7 +1182,6 @@ class LeverettJCapillaryPressureModel(
             else self.residual_gas_saturation
         )
 
-        # Ensure all required parameters are available
         params_missing = []
         if swc is None:
             params_missing.append("Swc")

@@ -6,7 +6,6 @@ from bores.capillary_pressures import CapillaryPressureTable
 from bores.relperm import RelativePermeabilityTable
 from bores.serialization import Serializable
 
-
 __all__ = ["RockFluidTables"]
 
 

@@ -8,6 +8,7 @@ import numpy as np
 from bores._precision import get_dtype
 from bores.config import Config
 from bores.constants import c
+from bores.correlations.core import compute_harmonic_mean
 from bores.diffusivity.base import (
     EvolutionResult,
     _warn_injection_rate_is_negative,
@@ -17,7 +18,6 @@ from bores.diffusivity.base import (
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
-from bores.correlations.core import compute_harmonic_mean
 from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells import Wells
 
@@ -721,9 +721,16 @@ def compute_well_rate_grid(
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
 
-        # Second pass: compute rates using cached well indices
+        # For the second pass, compute rates using cached well indices
         injected_fluid = well.injected_fluid
         injected_phase = injected_fluid.phase
+        water_bubble_point_pressure_grid = (
+            fluid_properties.water_bubble_point_pressure_grid
+        )
+        gas_formation_volume_factor_grid = (
+            fluid_properties.gas_formation_volume_factor_grid
+        )
+        gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
 
         for (i, j, k), well_index in well_index_cache:
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
@@ -744,13 +751,11 @@ def compute_well_rate_grid(
                     float, water_relative_mobility_grid[i, j, k]
                 )
                 compressibility_kwargs = {
-                    "bubble_point_pressure": fluid_properties.oil_bubble_point_pressure_grid[
+                    "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
+                    "gas_formation_volume_factor": gas_formation_volume_factor_grid[
                         i, j, k
                     ],
-                    "gas_formation_volume_factor": phase_fvf,
-                    "gas_solubility_in_water": fluid_properties.gas_solubility_in_water_grid[
-                        i, j, k
-                    ],
+                    "gas_solubility_in_water": gas_solubility_in_water_grid[i, j, k],
                 }
 
             # Get fluid properties
@@ -764,11 +769,9 @@ def compute_well_rate_grid(
             use_pseudo_pressure = (
                 config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
             )
-
             allocation_fraction = (
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
-
             # Compute injection rate (bbls/day for liquids, ft³/day for gas)
             cell_injection_rate = well.get_flow_rate(
                 pressure=cell_oil_pressure,
@@ -890,7 +893,6 @@ def compute_well_rate_grid(
                 use_pseudo_pressure = (
                     config.use_pseudo_pressure and produced_phase == FluidPhase.GAS
                 )
-
                 # Compute production rate (bbls/day for liquids, ft³/day for gas)
                 # Note: Production rates are negative by convention
                 production_rate = well.get_flow_rate(

@@ -1,18 +1,18 @@
-from collections.abc import Mapping, Sequence
-from enum import Enum
 import sys
 import threading
 import typing
 import warnings
+from collections.abc import Mapping, Sequence
+from enum import Enum
+from typing import TypeGuard
 
 import attrs
 import cattrs
-from typing_extensions import Self, TypeGuard
+from typing_extensions import Self
 
 from bores.errors import DeserializationError, SerializationError, ValidationError
 
-
-__all__ = ["Serializable", "dump", "load", "converter"]
+__all__ = ["Serializable", "converter", "dump", "load"]
 
 
 _TYPE_SERIALIZERS: typing.Dict[
@@ -804,7 +804,7 @@ class SerializableMeta(type):
             annotations = namespace.get("__annotations__", {})
             warnings.warn(
                 f"Could not resolve type hints for {cls.__name__}: {exc}. "
-                f"Using raw annotations which may not work with forward references.",
+                f"Using raw annotations which may not work well with forward references.",
                 RuntimeWarning,
             )
 
@@ -817,7 +817,7 @@ class SerializableMeta(type):
             if v is not None and not k.startswith("__")
         }
 
-        # NOTE: We don't discover type serializers/deserializers here anymore!
+        # NOTE: We don't discover type serializers/deserializers here.
         # Discovery happens lazily on first dump/load call.
         # We only store explicitly provided serializers/deserializers.
 

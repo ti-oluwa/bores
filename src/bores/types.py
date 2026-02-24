@@ -1,42 +1,42 @@
 import enum
 import typing
+from typing import TypeAlias
 
 import attrs
 import numpy as np
 from scipy.sparse import csr_array, csr_matrix  # type: ignore[import-untyped]
 from scipy.sparse.linalg import LinearOperator  # type: ignore[import-untyped]
-from typing_extensions import TypeAlias, TypedDict
+from typing_extensions import TypedDict
 
 from bores.errors import ValidationError
 from bores.serialization import Serializable
 
-
 __all__ = [
-    "NDimension",
+    "ArrayLike",
+    "CapillaryPressures",
     "Coordinates",
-    "ThreeDimensions",
-    "TwoDimensions",
+    "EvolutionScheme",
+    "FluidPhase",
+    "Interpolator",
+    "MiscibilityModel",
+    "MixingRule",
+    "NDimension",
     "OneDimension",
-    "ThreeDimensionalGrid",
-    "TwoDimensionalGrid",
     "OneDimensionalGrid",
     "Orientation",
-    "WellFluidType",
-    "EvolutionScheme",
-    "MiscibilityModel",
-    "ArrayLike",
-    "Interpolator",
-    "MixingRule",
-    "RelativePermeabilities",
-    "CapillaryPressures",
-    "FluidPhase",
-    "Wettability",
-    "WettabilityType",
     "Preconditioner",
-    "Solver",
-    "SolverFunc",
     "Range",
     "RelativeMobilityRange",
+    "RelativePermeabilities",
+    "Solver",
+    "SolverFunc",
+    "ThreeDimensionalGrid",
+    "ThreeDimensions",
+    "TwoDimensionalGrid",
+    "TwoDimensions",
+    "WellFluidType",
+    "Wettability",
+    "WettabilityType",
 ]
 
 T = typing.TypeVar("T")

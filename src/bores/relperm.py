@@ -20,31 +20,30 @@ from bores.types import (
     WettabilityType,
 )
 
-
 __all__ = [
-    "mixing_rule",
-    "relperm_table",
-    "get_relperm_table",
-    "list_relperm_tables",
-    "TwoPhaseRelPermTable",
+    "BrooksCoreyThreePhaseRelPermModel",
     "ThreePhaseRelPermTable",
-    "min_rule",
-    "stone_I_rule",
-    "stone_II_rule",
+    "TwoPhaseRelPermTable",
     "arithmetic_mean_rule",
-    "geometric_mean_rule",
-    "harmonic_mean_rule",
-    "saturation_weighted_interpolation_rule",
+    "aziz_settari_rule",
     "baker_linear_rule",
     "blunt_rule",
-    "hustad_hansen_rule",
-    "aziz_settari_rule",
-    "eclipse_rule",
-    "max_rule",
-    "product_saturation_weighted_rule",
-    "linear_interpolation_rule",
     "compute_corey_three_phase_relative_permeabilities",
-    "BrooksCoreyThreePhaseRelPermModel",
+    "eclipse_rule",
+    "geometric_mean_rule",
+    "get_relperm_table",
+    "harmonic_mean_rule",
+    "hustad_hansen_rule",
+    "linear_interpolation_rule",
+    "list_relperm_tables",
+    "max_rule",
+    "min_rule",
+    "mixing_rule",
+    "product_saturation_weighted_rule",
+    "relperm_table",
+    "saturation_weighted_interpolation_rule",
+    "stone_II_rule",
+    "stone_I_rule",
 ]
 
 
@@ -557,10 +556,7 @@ def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
     def aziz_settari_serializer(
         rule: MixingRule, recurse: bool = True
     ) -> typing.Dict[str, float]:
-        return {
-            "a": a,
-            "b": b,
-        }
+        return {"a": a, "b": b}
 
     def aziz_settari_deserializer(data: typing.Dict[str, float]) -> MixingRule:
         if not isinstance(data, dict) or "a" not in data or "b" not in data:

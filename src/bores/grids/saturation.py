@@ -7,7 +7,6 @@ from bores._precision import get_dtype
 from bores.errors import ValidationError
 from bores.types import NDimension, NDimensionalGrid
 
-
 __all__ = ["build_saturation_grids"]
 
 

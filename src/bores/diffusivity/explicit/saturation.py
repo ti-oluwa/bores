@@ -3,9 +3,13 @@ import logging
 import typing
 
 import attrs
+import numba
+import numpy as np
+
 from bores._precision import get_dtype
 from bores.config import Config
 from bores.constants import c
+from bores.correlations.core import compute_harmonic_mean
 from bores.diffusivity.base import (
     EvolutionResult,
     _warn_injection_rate_is_negative,
@@ -14,7 +18,6 @@ from bores.diffusivity.base import (
 )
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.models import FluidProperties, RockProperties
-from bores.correlations.core import compute_harmonic_mean
 from bores.types import (
     FluidPhase,
     OneDimensionalGrid,
@@ -24,10 +27,8 @@ from bores.types import (
 )
 from bores.utils import clip
 from bores.wells import Wells
-import numba
-import numpy as np
 
-__all__ = ["evolve_saturation", "evolve_miscible_saturation"]
+__all__ = ["evolve_miscible_saturation", "evolve_saturation"]
 
 logger = logging.getLogger(__name__)
 
@@ -922,6 +923,13 @@ def compute_well_rate_grids(
 
         injected_fluid = injection_well.injected_fluid
         injected_phase = injected_fluid.phase
+        water_bubble_point_pressure_grid = (
+            fluid_properties.water_bubble_point_pressure_grid
+        )
+        gas_formation_volume_factor_grid = (
+            fluid_properties.gas_formation_volume_factor_grid
+        )
+        gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
 
         # Cache to store (cell_location, well_index) pairs
         well_index_cache = []
@@ -964,18 +972,16 @@ def compute_well_rate_grids(
                 phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
                 compressibility_kwargs = {}
             else:
+                # Water here
                 phase_mobility = typing.cast(
                     float, water_relative_mobility_grid[i, j, k]
                 )
-                gas_solubility_in_water = fluid_properties.gas_solubility_in_water_grid[
-                    i, j, k
-                ]
                 compressibility_kwargs = {
-                    "bubble_point_pressure": fluid_properties.oil_bubble_point_pressure_grid[
+                    "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
+                    "gas_formation_volume_factor": gas_formation_volume_factor_grid[
                         i, j, k
                     ],
-                    "gas_formation_volume_factor": phase_fvf,
-                    "gas_solubility_in_water": gas_solubility_in_water,
+                    "gas_solubility_in_water": gas_solubility_in_water_grid[i, j, k],
                 }
 
             phase_compressibility = injected_fluid.get_compressibility(
@@ -988,11 +994,9 @@ def compute_well_rate_grids(
             use_pseudo_pressure = (
                 config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
             )
-
             allocation_fraction = (
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
-
             # The rate returned here is in bbls/day for oil and water, and ft³/day for gas
             # Since phase relative mobility does not include formation volume factor
             cell_injection_rate = injection_well.get_flow_rate(
@@ -1089,7 +1093,6 @@ def compute_well_rate_grids(
             allocation_fraction = (
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
-
             cell_water_production_rate = 0.0
             cell_oil_production_rate = 0.0
             cell_gas_production_rate = 0.0
@@ -1130,7 +1133,6 @@ def compute_well_rate_grids(
                 use_pseudo_pressure = (
                     config.use_pseudo_pressure and produced_phase == FluidPhase.GAS
                 )
-
                 # The rate returned here is in bbls/day for oil and water, and ft³/day for gas
                 # Since phase relative mobility does not include formation volume factor
                 production_rate = production_well.get_flow_rate(
@@ -2259,8 +2261,8 @@ def compute_miscible_well_rate_grids(
     :param production_grid: Optional grid to store production rates (ft³/day)
     :param dtype: Data type for output arrays
     :return: Tuple of (net_water_well_rate_grid, net_oil_well_rate_grid, net_gas_well_rate_grid,
-                       solvent_injection_concentration_grid, gas_injection_rate_grid)
-             where rates are in ft³/day (volumetric rates) and concentration is dimensionless (-)
+        solvent_injection_concentration_grid, gas_injection_rate_grid)
+        where rates are in ft³/day (volumetric rates) and concentration is dimensionless (-)
     """
     # Initialize well rate grids
     net_water_well_rate_grid = np.zeros(
@@ -2292,6 +2294,13 @@ def compute_miscible_well_rate_grids(
         # Cache to store (cell_location, well_index) pairs
         well_index_cache = []
         total_well_index = 0.0
+        water_bubble_point_pressure_grid = (
+            fluid_properties.water_bubble_point_pressure_grid
+        )
+        gas_formation_volume_factor_grid = (
+            fluid_properties.gas_formation_volume_factor_grid
+        )
+        gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
 
         # Iterate over perforated cells to compute total WI and cache well indices
         for start, end in injection_well.perforating_intervals:
@@ -2333,15 +2342,12 @@ def compute_miscible_well_rate_grids(
                 phase_mobility = typing.cast(
                     float, water_relative_mobility_grid[i, j, k]
                 )
-                gas_solubility_in_water = fluid_properties.gas_solubility_in_water_grid[
-                    i, j, k
-                ]
                 compressibility_kwargs = {
-                    "bubble_point_pressure": fluid_properties.oil_bubble_point_pressure_grid[
+                    "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
+                    "gas_formation_volume_factor": gas_formation_volume_factor_grid[
                         i, j, k
                     ],
-                    "gas_formation_volume_factor": phase_fvf,
-                    "gas_solubility_in_water": gas_solubility_in_water,
+                    "gas_solubility_in_water": gas_solubility_in_water_grid[i, j, k],
                 }
 
             phase_compressibility = injected_fluid.get_compressibility(
@@ -2354,11 +2360,9 @@ def compute_miscible_well_rate_grids(
             use_pseudo_pressure = (
                 config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
             )
-
             allocation_fraction = (
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
-
             cell_injection_rate = injection_well.get_flow_rate(
                 pressure=cell_oil_pressure,
                 temperature=cell_temperature,
@@ -2468,7 +2472,6 @@ def compute_miscible_well_rate_grids(
             allocation_fraction = (
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
-
             cell_water_production_rate = 0.0
             cell_oil_production_rate = 0.0
             cell_gas_production_rate = 0.0
@@ -2713,7 +2716,6 @@ def apply_saturation_and_solvent_updates(
                 if new_oil_saturation > 1e-9:  # Avoid division by zero
                     # New oil volume (after saturation updates)
                     new_oil_volume = new_oil_saturation * cell_pore_volume
-
                     # Current solvent volume in oil
                     old_solvent_volume = (
                         cell_solvent_concentration * oil_saturation * cell_pore_volume
@@ -2751,7 +2753,6 @@ def apply_saturation_and_solvent_updates(
                     )
                     # New concentration
                     new_concentration = new_solvent_volume / new_oil_volume
-
                     # Clamp to [0, 1] (should already be satisfied, but ensure numerical stability)
                     updated_solvent_concentration_grid[i, j, k] = clip(
                         new_concentration, 0.0, 1.0

@@ -10,21 +10,20 @@ from bores.serialization import Serializable
 from bores.states import ModelState
 from bores.stores import StoreSerializable
 from bores.types import Coordinates, S, T
-from bores.wells.base import InjectionWell, ProductionWell, Well, WellT, Wells
+from bores.wells.base import InjectionWell, ProductionWell, Well, Wells, WellT
 from bores.wells.controls import WellControl
 from bores.wells.core import InjectedFluid, ProducedFluid, WellFluid
 
-
 __all__ = [
+    "EventAction",
+    "EventActions",
+    "EventPredicate",
+    "EventPredicates",
     "WellEvent",
     "WellSchedule",
     "WellSchedules",
-    "EventPredicates",
-    "EventActions",
-    "EventPredicate",
-    "EventAction",
-    "event_predicate",
     "event_action",
+    "event_predicate",
     "time_predicate",
     "update_well",
 ]
@@ -36,7 +35,7 @@ ActionFunc = typing.Callable[[S, T], None]
 """A function that takes two arguments of types S and T and returns None."""
 
 
-class EventPredicates(typing.Generic[WellT, Coordinates], Serializable):
+class EventPredicates(Serializable, typing.Generic[WellT, Coordinates]):
     """Composite predicate that chains multiple predicate functions."""
 
     __abstract_serializable__ = True
@@ -92,7 +91,7 @@ class EventPredicates(typing.Generic[WellT, Coordinates], Serializable):
         return cls(*predicates, on_any=data["on_any"])
 
 
-class EventActions(typing.Generic[WellT, Coordinates], Serializable):
+class EventActions(Serializable, typing.Generic[WellT, Coordinates]):
     """Composite action that chains multiple action functions."""
 
     __abstract_serializable__ = True
@@ -138,7 +137,7 @@ class EventActions(typing.Generic[WellT, Coordinates], Serializable):
 
 
 @attrs.define(slots=True)
-class EventPredicate(typing.Generic[WellT, Coordinates], Serializable):
+class EventPredicate(Serializable, typing.Generic[WellT, Coordinates]):
     """A predicate that can be serialized and composed with complex expressions."""
 
     _func: typing.Optional[PredicateFunc[WellT, ModelState[Coordinates]]] = attrs.field(
@@ -254,7 +253,7 @@ class EventPredicate(typing.Generic[WellT, Coordinates], Serializable):
 
 
 @attrs.define(slots=True)
-class EventAction(typing.Generic[WellT, Coordinates], Serializable):
+class EventAction(Serializable, typing.Generic[WellT, Coordinates]):
     """An action that can be serialized and composed."""
 
     _func: typing.Optional[ActionFunc[WellT, ModelState[Coordinates]]] = attrs.field(
@@ -679,7 +678,7 @@ def deserialize_event_action(
 
 @typing.final
 @attrs.define(slots=True, hash=True)
-class WellEvent(typing.Generic[Coordinates], Serializable):
+class WellEvent(Serializable, typing.Generic[Coordinates]):
     """
     Represents a scheduled event for a well at a specific time step.
 
@@ -725,7 +724,7 @@ class WellEvent(typing.Generic[Coordinates], Serializable):
 
 @typing.final
 @attrs.frozen(slots=True)
-class WellSchedule(typing.Generic[Coordinates], Serializable):
+class WellSchedule(Serializable, typing.Generic[Coordinates]):
     """
     A collection of scheduled events for a well.
 
@@ -886,7 +885,7 @@ class WellSchedule(typing.Generic[Coordinates], Serializable):
 
 @typing.final
 @attrs.define(slots=True)
-class WellSchedules(typing.Generic[Coordinates], StoreSerializable):
+class WellSchedules(StoreSerializable, typing.Generic[Coordinates]):
     """
     A collection of schedules for multiple wells.
 

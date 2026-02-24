@@ -3,7 +3,11 @@ import typing
 
 import attrs
 import numpy as np
-from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator, interp1d  # type: ignore[import-untyped]
+from scipy.interpolate import (  # type: ignore[import-untyped]
+    RectBivariateSpline,
+    RegularGridInterpolator,
+    interp1d,
+)
 
 from bores._precision import get_dtype
 from bores.constants import c

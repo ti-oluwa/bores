@@ -1,34 +1,33 @@
 """State storage backends."""
 
-from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
 import functools
 import logging
-from os import PathLike
-from pathlib import Path
 import sys
 import typing
+from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
+from os import PathLike
+from pathlib import Path
 
 import h5py  # type: ignore[import-untyped]
-from numcodecs import Blosc
 import numpy as np
 import orjson
-from typing_extensions import Self
-from typing_extensions import ParamSpec
 import yaml
 import zarr  # type: ignore[import-untyped]
+from numcodecs import Blosc
+from typing_extensions import ParamSpec, Self
 from zarr.storage import StoreLike  # type: ignore[import-untyped]
 
 from bores.errors import StorageError, ValidationError
 from bores.serialization import Serializable, SerializableT
 
 __all__ = [
-    "new_store",
-    "storage_backend",
-    "ZarrStore",
     "HDF5Store",
     "JSONStore",
     "YAMLStore",
+    "ZarrStore",
+    "new_store",
+    "storage_backend",
 ]
 
 IS_PYTHON_310_OR_LOWER = sys.version_info < (3, 11)
@@ -1442,3 +1441,5 @@ class StoreSerializable(Serializable):
         ext = path.suffix.lower().lstrip(".")
         store = new_store(ext, path)
         self.to_store(store, **dump_kwargs)
+
+    save = to_file

@@ -1,9 +1,9 @@
 """Simulation time management with smart and adaptive time stepping."""
 
-from collections import deque
-from datetime import timedelta
 import logging
 import typing
+from collections import deque
+from datetime import timedelta
 
 import attrs
 from typing_extensions import Self
@@ -187,10 +187,7 @@ class Timer(StoreSerializable):
         # Use small tolerance for floating-point comparison
         if self.elapsed_time >= (self.simulation_time - 1e-9):
             return True
-
-        if self.max_steps is not None and self.step >= self.max_steps:
-            return True
-        return False
+        return self.max_steps is not None and self.step >= self.max_steps
 
     @property
     def time_remaining(self) -> float:
@@ -203,9 +200,7 @@ class Timer(StoreSerializable):
         if self.time_remaining <= 0:
             return True
 
-        if self.max_steps is not None and self.step >= self.max_steps:
-            return True
-        return False
+        return self.max_steps is not None and self.step >= self.max_steps
 
     def _is_near_failed_size(self, dt: float, tolerance: float = 0.15) -> bool:
         """Check if proposed step size is near a recently failed size."""
@@ -267,7 +262,6 @@ class Timer(StoreSerializable):
 
         dt = self.next_step_size
         remaining_time = self.time_remaining
-
         if dt > remaining_time:
             return (
                 max(remaining_time, self.min_step_size)
@@ -440,57 +434,60 @@ class Timer(StoreSerializable):
         if (
             max_saturation_change is not None
             and max_allowed_saturation_change is not None
+            and max_saturation_change > max_allowed_saturation_change
         ):
-            if max_saturation_change > max_allowed_saturation_change:
-                overshoot_ratio = max_saturation_change / max_allowed_saturation_change
+            overshoot_ratio = max_saturation_change / max_allowed_saturation_change
 
-                if overshoot_ratio > 3.0:
-                    # Very large saturation changes. Apply aggressive reduction
-                    sat_factor = 0.25
-                    logger.debug(
-                        f"Severe saturation change: {max_saturation_change:.4f} > {max_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
-                    )
-                elif overshoot_ratio > 2.0:
-                    # Large saturation changes
-                    sat_factor = 0.4
-                    logger.debug(
-                        f"Large saturation change: {max_saturation_change:.4f} > {max_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
-                    )
-                else:
-                    # Moderate overshoot. Apply proportional reduction
-                    sat_factor = max_allowed_saturation_change / max_saturation_change
-                    sat_factor = max(sat_factor, 0.5)  # Don't reduce too much
-                    logger.debug(
-                        f"Moderate saturation change: {max_saturation_change:.4f} > {max_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
-                    )
-                factors.append(sat_factor)
+            if overshoot_ratio > 3.0:
+                # Very large saturation changes. Apply aggressive reduction
+                sat_factor = 0.25
+                logger.debug(
+                    f"Severe saturation change: {max_saturation_change:.4f} > {max_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
+                )
+            elif overshoot_ratio > 2.0:
+                # Large saturation changes
+                sat_factor = 0.4
+                logger.debug(
+                    f"Large saturation change: {max_saturation_change:.4f} > {max_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
+                )
+            else:
+                # Moderate overshoot. Apply proportional reduction
+                sat_factor = max_allowed_saturation_change / max_saturation_change
+                sat_factor = max(sat_factor, 0.5)  # Don't reduce too much
+                logger.debug(
+                    f"Moderate saturation change: {max_saturation_change:.4f} > {max_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
+                )
+            factors.append(sat_factor)
 
         # Pressure change backoff
-        if max_pressure_change is not None and max_allowed_pressure_change is not None:
-            if max_pressure_change > max_allowed_pressure_change:
-                overshoot_ratio = max_pressure_change / max_allowed_pressure_change
+        if (
+            max_pressure_change is not None
+            and max_allowed_pressure_change is not None
+            and max_pressure_change > max_allowed_pressure_change
+        ):
+            overshoot_ratio = max_pressure_change / max_allowed_pressure_change
 
-                if overshoot_ratio > 3.0:
-                    # Very large pressure changes
-                    pressure_factor = 0.25
-                    logger.debug(
-                        f"Severe pressure change: {max_pressure_change:.4e} > {max_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
-                    )
-                elif overshoot_ratio > 2.0:
-                    # Large pressure changes
-                    pressure_factor = 0.4
-                    logger.debug(
-                        f"Large pressure change: {max_pressure_change:.4e} > {max_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
-                    )
-                else:
-                    # Moderate overshoot
-                    pressure_factor = max_allowed_pressure_change / max_pressure_change
-                    pressure_factor = max(pressure_factor, 0.5)
-                    logger.debug(
-                        f"Moderate pressure change: {max_pressure_change:.4e} > {max_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
-                    )
+            if overshoot_ratio > 3.0:
+                # Very large pressure changes
+                pressure_factor = 0.25
+                logger.debug(
+                    f"Severe pressure change: {max_pressure_change:.4e} > {max_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
+                )
+            elif overshoot_ratio > 2.0:
+                # Large pressure changes
+                pressure_factor = 0.4
+                logger.debug(
+                    f"Large pressure change: {max_pressure_change:.4e} > {max_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
+                )
+            else:
+                # Moderate overshoot
+                pressure_factor = max_allowed_pressure_change / max_pressure_change
+                pressure_factor = max(pressure_factor, 0.5)
+                logger.debug(
+                    f"Moderate pressure change: {max_pressure_change:.4e} > {max_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
+                )
 
-                factors.append(pressure_factor)
+            factors.append(pressure_factor)
 
         # Newton iteration failure backoff
         if newton_iterations is not None:
@@ -538,6 +535,17 @@ class Timer(StoreSerializable):
         max_pressure_change: typing.Optional[float] = None,
         max_allowed_pressure_change: typing.Optional[float] = None,
     ) -> bool:
+        """
+        Determine if a time step is acceptable based on given criteria
+
+        :param max_cfl_encountered: The maximum CFL number encountered during the step.
+        :param cfl_threshold: The CFL threshold used during the step.
+        :param max_saturation_change: Maximum saturation change in the accepted step.
+        :param max_allowed_saturation_change: Maximum allowed saturation change threshold.
+        :param max_pressure_change: Maximum pressure change in the accepted step.
+        :param max_allowed_pressure_change: Maximum allowed pressure change threshold.
+        :return: True if the timestep is acceptable. Else, Flase.
+        """
         cfl_limit = cfl_threshold if cfl_threshold is not None else self.max_cfl_number
         if max_cfl_encountered is not None and max_cfl_encountered > cfl_limit:
             return False
@@ -549,14 +557,11 @@ class Timer(StoreSerializable):
         ):
             return False
 
-        if (
+        return (
             max_pressure_change is not None
             and max_allowed_pressure_change is not None
             and max_pressure_change > max_allowed_pressure_change
-        ):
-            return False
-
-        return True
+        )
 
     def accept_step(
         self,
@@ -585,7 +590,7 @@ class Timer(StoreSerializable):
         :return: The next proposed time step size.
         """
         # Use small tolerance for floating point comparison as step sizes may slightly overshoot
-        if step_size > self.time_remaining + 1e-9:
+        if step_size > (self.time_remaining + 1e-9):
             raise TimingError(
                 f"Step size {step_size} exceeds remaining time {self.time_remaining}. "
                 "This indicates a bug in the time stepping logic."
@@ -651,87 +656,90 @@ class Timer(StoreSerializable):
         if (
             max_saturation_change is not None
             and max_allowed_saturation_change is not None
+            and max_saturation_change > 0.0
         ):
-            if max_saturation_change > 0.0:
-                sat_utilization = max_saturation_change / max_allowed_saturation_change
+            sat_utilization = max_saturation_change / max_allowed_saturation_change
 
-                if sat_utilization > 0.95:
-                    # Very close to limit. Reduce step size
-                    sat_factor = 0.85
-                    logger.debug(
-                        f"Saturation change very high ({sat_utilization:.2%}), reducing step"
-                    )
-                elif sat_utilization > 0.85:
-                    # Getting close, maintain or slightly reduce
-                    sat_factor = 0.95
-                    logger.debug(
-                        f"Saturation change high ({sat_utilization:.2%}), maintaining step"
-                    )
-                elif sat_utilization > 0.7:
-                    # Moderate usage, allow modest growth
-                    sat_factor = 1.05
-                    logger.debug(
-                        f"Saturation change moderate ({sat_utilization:.2%}), modest growth"
-                    )
-                elif sat_utilization < 0.3:
-                    # Very low usage, could grow more aggressively
-                    sat_factor = min(
-                        1.3, max_allowed_saturation_change / max_saturation_change * 0.8
-                    )
-                    logger.debug(
-                        f"Saturation change low ({sat_utilization:.2%}), allowing growth"
-                    )
-                else:
-                    # Normal range. Apply proportional adjustment
-                    sat_factor = min(
-                        1.15,
-                        max_allowed_saturation_change / max_saturation_change * 0.9,
-                    )
-                    logger.debug(
-                        f"Saturation change normal ({sat_utilization:.2%}), proportional growth"
-                    )
-                adjustment_factors.append(("Saturation", sat_factor))
+            if sat_utilization > 0.95:
+                # Very close to limit. Reduce step size
+                sat_factor = 0.85
+                logger.debug(
+                    f"Saturation change very high ({sat_utilization:.2%}), reducing step"
+                )
+            elif sat_utilization > 0.85:
+                # Getting close, maintain or slightly reduce
+                sat_factor = 0.95
+                logger.debug(
+                    f"Saturation change high ({sat_utilization:.2%}), maintaining step"
+                )
+            elif sat_utilization > 0.7:
+                # Moderate usage, allow modest growth
+                sat_factor = 1.05
+                logger.debug(
+                    f"Saturation change moderate ({sat_utilization:.2%}), modest growth"
+                )
+            elif sat_utilization < 0.3:
+                # Very low usage, could grow more aggressively
+                sat_factor = min(
+                    1.3, max_allowed_saturation_change / max_saturation_change * 0.8
+                )
+                logger.debug(
+                    f"Saturation change low ({sat_utilization:.2%}), allowing growth"
+                )
+            else:
+                # Normal range. Apply proportional adjustment
+                sat_factor = min(
+                    1.15,
+                    max_allowed_saturation_change / max_saturation_change * 0.9,
+                )
+                logger.debug(
+                    f"Saturation change normal ({sat_utilization:.2%}), proportional growth"
+                )
+            adjustment_factors.append(("Saturation", sat_factor))
 
         # Pressure change adjustment with intelligent scaling
-        if max_pressure_change is not None and max_allowed_pressure_change is not None:
-            if max_pressure_change > 0.0:
-                pres_utilization = max_pressure_change / max_allowed_pressure_change
+        if (
+            max_pressure_change is not None
+            and max_allowed_pressure_change is not None
+            and max_pressure_change > 0.0
+        ):
+            pres_utilization = max_pressure_change / max_allowed_pressure_change
 
-                if pres_utilization > 0.95:
-                    # Very close to limit. Reduce step size
-                    pressure_factor = 0.85
-                    logger.debug(
-                        f"Pressure change very high ({pres_utilization:.2%}), reducing step"
-                    )
-                elif pres_utilization > 0.85:
-                    # Getting close. Maintain or slightly reduce
-                    pressure_factor = 0.95
-                    logger.debug(
-                        f"Pressure change high ({pres_utilization:.2%}), maintaining step"
-                    )
-                elif pres_utilization > 0.7:
-                    # Moderate usage. Allow modest growth
-                    pressure_factor = 1.05
-                    logger.debug(
-                        f"Pressure change moderate ({pres_utilization:.2%}), modest growth"
-                    )
-                elif pres_utilization < 0.3:
-                    # Very low usage, could grow more aggressively
-                    pressure_factor = min(
-                        1.3, max_allowed_pressure_change / max_pressure_change * 0.8
-                    )
-                    logger.debug(
-                        f"Pressure change low ({pres_utilization:.2%}), allowing growth"
-                    )
-                else:
-                    # Normal range. Apply proportional adjustment
-                    pressure_factor = min(
-                        1.15, max_allowed_pressure_change / max_pressure_change * 0.9
-                    )
-                    logger.debug(
-                        f"Pressure change normal ({pres_utilization:.2%}), proportional growth"
-                    )
-                adjustment_factors.append(("Pressure", pressure_factor))
+            if pres_utilization > 0.95:
+                # Very close to limit. Reduce step size
+                pressure_factor = 0.85
+                logger.debug(
+                    f"Pressure change very high ({pres_utilization:.2%}), reducing step"
+                )
+            elif pres_utilization > 0.85:
+                # Getting close. Maintain or slightly reduce
+                pressure_factor = 0.95
+                logger.debug(
+                    f"Pressure change high ({pres_utilization:.2%}), maintaining step"
+                )
+            elif pres_utilization > 0.7:
+                # Moderate usage. Allow modest growth
+                pressure_factor = 1.05
+                logger.debug(
+                    f"Pressure change moderate ({pres_utilization:.2%}), modest growth"
+                )
+            elif pres_utilization < 0.3:
+                # Very low usage, could grow more aggressively
+                pressure_factor = min(
+                    1.3, max_allowed_pressure_change / max_pressure_change * 0.8
+                )
+                logger.debug(
+                    f"Pressure change low ({pres_utilization:.2%}), allowing growth"
+                )
+            else:
+                # Normal range. Apply proportional adjustment
+                pressure_factor = min(
+                    1.15, max_allowed_pressure_change / max_pressure_change * 0.9
+                )
+                logger.debug(
+                    f"Pressure change normal ({pres_utilization:.2%}), proportional growth"
+                )
+            adjustment_factors.append(("Pressure", pressure_factor))
 
         # Performance-based factor from historical trends
         performance_factor = self._compute_performance_factor()
@@ -855,7 +863,6 @@ class Timer(StoreSerializable):
         ```
         """
         return {
-            # Configuration parameters
             "initial_step_size": self.initial_step_size,
             "max_step_size": self.max_step_size,
             "min_step_size": self.min_step_size,
@@ -869,7 +876,6 @@ class Timer(StoreSerializable):
             "failure_memory_window": self.failure_memory_window,
             "metrics_history_size": self.metrics_history_size,
             "use_constant_step_size": self.use_constant_step_size,
-            # Current state
             "elapsed_time": self.elapsed_time,
             "step": self.step,
             "step_size": self.step_size,
@@ -878,10 +884,9 @@ class Timer(StoreSerializable):
             "last_step_failed": self.last_step_failed,
             "rejection_count": self.rejection_count,
             "steps_since_last_failure": self.steps_since_last_failure,
-            # History
             "recent_metrics": [
-                typing.cast(StepMetricsDict, attrs.asdict(m))
-                for m in self.recent_metrics
+                typing.cast(StepMetricsDict, attrs.asdict(metric))
+                for metric in self.recent_metrics
             ],
             "failed_step_sizes": list(self.failed_step_sizes),
         }
@@ -909,7 +914,6 @@ class Timer(StoreSerializable):
             process(state)
         ```
         """
-        # Validate required keys
         required_keys = {
             "initial_step_size",
             "max_step_size",
@@ -923,7 +927,6 @@ class Timer(StoreSerializable):
         if missing_keys:
             raise ValidationError(f"Timer state missing required keys: {missing_keys}")
 
-        # Extract configuration parameters
         config_params = {
             "initial_step_size": state["initial_step_size"],
             "max_step_size": state["max_step_size"],
@@ -940,7 +943,7 @@ class Timer(StoreSerializable):
         }
         timer = cls(**config_params)  # type: ignore
 
-        # Restore runtime state (use object.__setattr__ since timer may be frozen)
+        # Restore runtime state (use `object.__setattr__` just in case `Timer` is frozen)
         object.__setattr__(timer, "elapsed_time", state["elapsed_time"])
         object.__setattr__(timer, "step", state["step"])
         object.__setattr__(timer, "step_size", state["step_size"])
@@ -963,7 +966,7 @@ class Timer(StoreSerializable):
         # Restore history
         recent_metrics_data = state.get("recent_metrics", [])
         recent_metrics = deque(
-            [StepMetrics(**m) for m in recent_metrics_data],
+            [StepMetrics(**metric_data) for metric_data in recent_metrics_data],
             maxlen=timer.metrics_history_size,
         )
         object.__setattr__(timer, "recent_metrics", recent_metrics)

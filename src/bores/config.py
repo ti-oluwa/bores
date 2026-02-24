@@ -19,8 +19,7 @@ from bores.types import (
     SolverStr,
     ThreeDimensions,
 )
-from bores.wells import WellSchedules, Wells
-
+from bores.wells import Wells, WellSchedules
 
 __all__ = ["Config"]
 

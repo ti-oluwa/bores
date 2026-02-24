@@ -33,11 +33,11 @@ from bores.wells.core import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Well", "InjectionWell", "ProductionWell", "Wells", "well_type"]
+__all__ = ["InjectionWell", "ProductionWell", "Well", "Wells", "well_type"]
 
 
 @attrs.define(hash=True)
-class Well(typing.Generic[Coordinates, WellFluidT], StoreSerializable):
+class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
     """Models a well in the reservoir model."""
 
     name: str
@@ -533,7 +533,7 @@ class _WellsProxy(typing.Generic[Coordinates, WellT]):
         self.wells_map[location] = well
 
 
-# Serialize /deserialize list of wells as dictionaries of well name to well object
+# Serialize/deserialize list of wells as dictionaries of well name to well object
 def _serialize_wells(
     wells: typing.Sequence[WellT], recurse: bool = True
 ) -> typing.Dict[str, typing.Dict[str, typing.Any]]:
@@ -561,8 +561,8 @@ _wells_deserializers = {
 @typing.final
 @attrs.frozen
 class Wells(
-    typing.Generic[Coordinates],
     StoreSerializable,
+    typing.Generic[Coordinates],
     fields={
         "injection_wells": typing.Sequence[InjectionWell],
         "production_wells": typing.Sequence[ProductionWell],

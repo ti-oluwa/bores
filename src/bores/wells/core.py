@@ -10,14 +10,32 @@ import numpy as np
 from bores.constants import c
 from bores.correlations.arrays import (
     compute_gas_compressibility as compute_gas_compressibility_vectorized,
+)
+from bores.correlations.arrays import (
     compute_gas_compressibility_factor as compute_gas_compressibility_factor_vectorized,
+)
+from bores.correlations.arrays import (
     compute_gas_density as compute_gas_density_vectorized,
+)
+from bores.correlations.arrays import (
     compute_gas_formation_volume_factor as compute_gas_formation_volume_factor_vectorized,
+)
+from bores.correlations.arrays import (
     compute_gas_free_water_formation_volume_factor as compute_gas_free_water_formation_volume_factor_vectorized,
+)
+from bores.correlations.arrays import (
     compute_gas_viscosity as compute_gas_viscosity_vectorized,
+)
+from bores.correlations.arrays import (
     compute_water_compressibility as compute_water_compressibility_vectorized,
+)
+from bores.correlations.arrays import (
     compute_water_density as compute_water_density_vectorized,
+)
+from bores.correlations.arrays import (
     compute_water_formation_volume_factor as compute_water_formation_volume_factor_vectorized,
+)
+from bores.correlations.arrays import (
     compute_water_viscosity as compute_water_viscosity_vectorized,
 )
 from bores.correlations.core import (
@@ -51,16 +69,16 @@ from bores.types import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "compute_well_index",
-    "compute_3D_effective_drainage_radius",
-    "compute_2D_effective_drainage_radius",
-    "compute_oil_well_rate",
-    "compute_gas_well_rate",
-    "compute_required_bhp_for_oil_rate",
-    "compute_required_bhp_for_gas_rate",
-    "WellFluid",
     "InjectedFluid",
     "ProducedFluid",
+    "WellFluid",
+    "compute_2D_effective_drainage_radius",
+    "compute_3D_effective_drainage_radius",
+    "compute_gas_well_rate",
+    "compute_oil_well_rate",
+    "compute_required_bhp_for_gas_rate",
+    "compute_required_bhp_for_oil_rate",
+    "compute_well_index",
 ]
 
 
@@ -637,15 +655,15 @@ class WellFluid(Serializable):
         ```python
         # These two fluids will share the same cached table:
         methane1 = WellFluid(
-            name="CH4-1", 
+            name="CH4-1",
             phase=FluidPhase.GAS,
-            specific_gravity=0.65, 
+            specific_gravity=0.65,
             molecular_weight=16.04
         )
         methane2 = WellFluid(
-            name="CH4-2", 
+            name="CH4-2",
             phase=FluidPhase.GAS,
-            specific_gravity=0.65, 
+            specific_gravity=0.65,
             molecular_weight=16.04
         )
 
@@ -758,9 +776,9 @@ class InjectedFluid(WellFluid):
     )
     """Concentration (preferrably volume-based) of the fluid in the mixture (0 to 1). Relevant for miscible fluids."""
     density: typing.Optional[float] = None
-    """Override density (lbm/ft³). If provided, bypasses table/correlation-based density calculations. Useful for non-ideal gases like CO2."""
+    """Fluid density (lbm/ft³) at reservoir conditions. If provided, bypasses table/correlation-based density calculations. Useful for non-ideal gases like CO2."""
     viscosity: typing.Optional[float] = None
-    """Override viscosity (cP). If provided, bypasses table/correlation-based viscosity calculations. Useful for non-ideal gases like CO2."""
+    """Fluid viscosity (cP) at reservoir conditions. If provided, bypasses table/correlation-based viscosity calculations. Useful for non-ideal gases like CO2."""
 
     def __attrs_post_init__(self) -> None:
         """Validate the fluid properties."""

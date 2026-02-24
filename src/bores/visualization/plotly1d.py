@@ -2,10 +2,10 @@
 Plotly-based 1D Visualization Suite for 1 Dimensional Series and Time-Series Data.
 """
 
-from abc import ABC, abstractmethod
 import collections.abc
-from enum import Enum
 import typing
+from abc import ABC, abstractmethod
+from enum import Enum
 
 import attrs
 import numpy as np
@@ -14,7 +14,6 @@ from plotly.subplots import make_subplots  # type: ignore[import-untyped]
 
 from bores.errors import ValidationError
 from bores.types import TwoDimensionalGrid
-
 
 SeriesData = typing.Union[
     TwoDimensionalGrid,  # Single series as (n, 2) array with (x, y) pairs
@@ -261,8 +260,7 @@ class BaseRenderer(ABC):
                     f"number of series ({num_series})"
                 )
             return list(param)
-        else:
-            raise ValidationError(f"Invalid type for {param_name}")
+        raise ValidationError(f"Invalid type for {param_name}")
 
     def get_color(self, index: int, custom_color: typing.Optional[str] = None) -> str:
         """

@@ -224,8 +224,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 self._state_count,
             )
 
-        # Per-instance memoization caches prevent memory leaks.
-        # Using @functools.cache on instance methods inserts self into a class-level LRU cache,
+        # We use per-instance memoization caches prevent memory leaks.
+        # Using `@functools.cache` on instance methods inserts self into a class-level LRU cache,
         # preventing garbage collection for the lifetime of the class.
         self._cell_area_cache: typing.Dict[typing.Tuple, float] = {}
         self._oil_in_place_cache: typing.Dict[int, float] = {}
@@ -2058,7 +2058,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - (slice, slice, slice): Region
         :return: `InstantaneousRates` containing detailed rate analysis.
         """
-        # Bug 1 & 13: resolve step and convert cells before building cache key
+        # Resolve step and convert cells before building cache key
         step = self._resolve_step(step)
         cells_obj = _ensure_cells(cells)
         cache_key = (step, cells_obj)
@@ -2369,7 +2369,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         # Solution Gas Drive (oil expansion + liberated gas)
         # ΔVo = N * (Bo - Boi) + N * (Rsi - Rs) * Bg
         oil_expansion_factor = current_oil_fvf / initial_oil_fvf
-        # Oil expansion contribution (dimensionally consistent: fraction × volume factor)
+        # Oil expansion contribution (dimensionally consistent: fraction x volume factor)
         oil_expansion_drive = (
             (cumulative_oil / initial_oil) * (current_oil_fvf - initial_oil_fvf)
             if initial_oil > 0
@@ -3807,14 +3807,14 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 q_final = qi / (1 + b * di * effective_steps) ** (1 / b)
 
         # Calculate cumulative production analytically
-        # NOTE: These formulas give results in units of [rate × time]
-        # Since rate is in per-day units and time is in timesteps, we get [per-day × timesteps]
+        # NOTE: These formulas give results in units of [rate x time]
+        # Since rate is in per-day units and time is in timesteps, we get [per-day x timesteps]
         # This naturally gives us the correct volume units (STB or scf) as long as
         # the decline rate Di is per timestep and qi, qf are per day
 
         if decline_result.decline_type == "exponential":
             # Q = (qi - q_final) / Di
-            # Units: [(STB/day) / (1/timestep)] = [STB/day × timestep]
+            # Units: [(STB/day) / (1/timestep)] = [STB/day x timestep]
             # If timestep = 1 day, this gives STB ✓
             cumulative = (qi - q_final) / di
 

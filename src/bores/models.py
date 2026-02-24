@@ -18,9 +18,9 @@ from bores.types import NDimension, NDimensionalGrid
 
 __all__ = [
     "FluidProperties",
-    "RockProperties",
     "ReservoirModel",
     "RockPermeability",
+    "RockProperties",
     "SaturationHistory",
 ]
 
@@ -292,8 +292,8 @@ class SaturationHistory(PadMixin[NDimension], StoreSerializable):
 
 
 class ReservoirModel(
-    typing.Generic[NDimension],
     StoreSerializable,
+    typing.Generic[NDimension],
     fields={
         "grid_shape": tuple,
         "cell_dimension": tuple,

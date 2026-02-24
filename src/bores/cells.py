@@ -2,17 +2,19 @@ import typing
 
 import attrs
 import numpy as np
+from typing_extensions import Self
 
 from bores.errors import ValidationError
+from bores.wells.base import Well, Wells, _expand_intervals
 
-__all__ = ["Cells", "CellFilter", "CellLocation"]
+__all__ = ["CellFilter", "CellLocation", "Cells"]
 
 
 def _make_hashable(obj: typing.Any) -> typing.Any:
     """
     Convert potentially unhashable objects to hashable equivalents.
 
-    This is used for making cell filters hashable for functools.cache.
+    This is used for making cell filters hashable for caching.
     Handles lists, numpy arrays, Well/Wells objects, and other sequences by converting to tuples.
 
     :param obj: Object to make hashable
@@ -38,7 +40,7 @@ def _make_hashable(obj: typing.Any) -> typing.Any:
         )
 
     if isinstance(obj, Wells):
-        # This is a Wells object
+        # This is a `Wells` object
         inj_names = tuple(sorted(w.name for w in obj.injection_wells))
         prod_names = tuple(sorted(w.name for w in obj.production_wells))
         return ("__wells__", inj_names, prod_names)
@@ -68,9 +70,9 @@ def _make_hashable(obj: typing.Any) -> typing.Any:
     # If we can't make it hashable, convert to string representation
     try:
         hash(obj)
-        return obj
     except TypeError:
         return str(obj)
+    return obj
 
 
 def _get_cell_mask(
@@ -87,8 +89,6 @@ def _get_cell_mask(
     :param wells: Wells object (required if cells is a well name)
     :return: Boolean mask array or None if no filtering
     """
-    from bores.wells.base import _expand_intervals, Well, Wells
-
     if cells is None:
         return None
 
@@ -291,13 +291,11 @@ class Cells:
     """
 
     filter: CellFilter = attrs.field()
-    _hashable_filter: typing.Any = attrs.field(
-        init=False, repr=False, hash=True, eq=True
-    )
+    _hash: typing.Any = attrs.field(init=False, repr=False, hash=True, eq=True)
 
     def __attrs_post_init__(self) -> None:
         """Convert filter to hashable form after initialization."""
-        object.__setattr__(self, "_hashable_filter", _make_hashable(self.filter))
+        object.__setattr__(self, "_hash", hash(_make_hashable(self.filter)))
 
     def __hash__(self) -> int:
         """
@@ -306,10 +304,10 @@ class Cells:
         This ensures that even if users pass lists or other unhashable types,
         the Cells object can still be hashed for use with functools.cache.
         """
-        return hash(self._hashable_filter)
+        return self._hash
 
     @classmethod
-    def from_filter(cls, cells: typing.Optional[CellFilter]) -> "Cells":
+    def from_filter(cls, cells: typing.Optional[CellFilter] = None) -> Self:
         """
         Create a Cells instance from a CellFilter specification.
 
@@ -376,15 +374,16 @@ class Cells:
 
     def __repr__(self) -> str:
         """String representation."""
+        cls_name = self.__class__.__name__
         if self.is_none:
-            return "Cells(entire reservoir)"
+            return f"{cls_name}(entire reservoir)"
         elif self.is_well_name:
-            return f"Cells(well='{self.filter}')"
+            return f"{cls_name}(well='{self.filter}')"
         elif self.is_single_cell:
-            return f"Cells(cell={self.filter})"
+            return f"{cls_name}(cell={self.filter})"
         elif self.is_multiple_cells:
             assert isinstance(self.filter, (tuple, list))  # Type narrowing
-            return f"Cells({len(self.filter)} cells)"
+            return f"{cls_name}({len(self.filter)} cells)"
         elif self.is_slice:
-            return "Cells(slice region)"
-        return f"Cells({self.filter})"
+            return f"{cls_name}(slice region)"
+        return f"{cls_name}({self.filter})"

@@ -1,4 +1,3 @@
-from bores.serialization import Serializable
 import typing
 
 import attrs
@@ -8,6 +7,7 @@ from typing_extensions import Self
 
 from bores._precision import get_dtype
 from bores.errors import ValidationError
+from bores.serialization import Serializable
 from bores.types import (
     ArrayLike,
     NDimension,
@@ -19,24 +19,24 @@ from bores.types import (
 )
 
 __all__ = [
-    "array",
-    "uniform_grid",
-    "layered_grid",
-    "build_uniform_grid",
-    "build_layered_grid",
-    "elevation_grid",
-    "depth_grid",
-    "build_elevation_grid",
-    "build_depth_grid",
-    "apply_structural_dip",
-    "pad_grid",
-    "get_pad_mask",
-    "unpad_grid",
-    "coarsen_grid",
-    "flatten_multilayer_grid_to_surface",
+    "CapillaryPressureGrids",
     "RateGrids",
     "RelativeMobilityGrids",
-    "CapillaryPressureGrids",
+    "apply_structural_dip",
+    "array",
+    "build_depth_grid",
+    "build_elevation_grid",
+    "build_layered_grid",
+    "build_uniform_grid",
+    "coarsen_grid",
+    "depth_grid",
+    "elevation_grid",
+    "flatten_multilayer_grid_to_surface",
+    "get_pad_mask",
+    "layered_grid",
+    "pad_grid",
+    "uniform_grid",
+    "unpad_grid",
 ]
 
 
@@ -63,7 +63,12 @@ def build_uniform_grid(
     :param value: Initial value to fill the grid with
     :return: Numpy array representing the grid
     """
-    return np.full(grid_shape, fill_value=value, dtype=get_dtype(), order="C")  # type: ignore
+    return np.full(  # type: ignore
+        grid_shape,
+        fill_value=value,
+        dtype=get_dtype(),
+        order="C",
+    )
 
 
 uniform_grid = build_uniform_grid  # Alias for convenience
@@ -147,7 +152,7 @@ def _compute_elevation_downward(
     :param dtype: NumPy dtype for array allocation
     :return: 3D elevation grid (ft)
     """
-    nx, ny, nz = thickness_grid.shape
+    _, _, nz = thickness_grid.shape
     elevation_grid = np.zeros_like(thickness_grid, dtype=dtype)
 
     # Start from top layer
@@ -174,7 +179,7 @@ def _compute_elevation_upward(
     :param dtype: NumPy dtype for array allocation
     :return: 3D elevation grid (ft)
     """
-    nx, ny, nz = thickness_grid.shape
+    _, _, nz = thickness_grid.shape
     elevation_grid = np.zeros_like(thickness_grid, dtype=dtype)
 
     # Start from bottom layer
@@ -422,8 +427,7 @@ def pad_grid(
     :param pad_width: Width of the padding to be applied on all sides of the grid
     :return: Padded N-Dimensional numpy array
     """
-    padded_grid = np.pad(grid, pad_width=pad_width, mode="edge")
-    return padded_grid  # type: ignore
+    return np.pad(grid, pad_width=pad_width, mode="edge")  # type: ignore[return-value]
 
 
 @numba.njit(cache=True)
@@ -486,16 +490,16 @@ def coarsen_grid(
     """
     Coarsen (downsample) a 2D or 3D grid by aggregating blocks of adjacent cells.
 
-    Pads the grid if necessary to make dimensions divisible by batch_size, so no cells are lost.
+    Pads the grid if necessary to make dimensions divisible by `batch_size`, so no cells are lost.
 
     :param data: 2D or 3D numpy array to coarsen. Shape can be (nx, ny) or (nx, ny, nz).
     :param batch_size: Tuple of ints representing the coarsening factor along each dimension.
-                       Length must match data.ndim.
-                       Example: (2,2) for 2D, (2,2,2) for 3D.
+        Length must match `data.ndim`.
+        Example: (2,2) for 2D, (2,2,2) for 3D.
     :param method: Aggregation method to use on each block. One of 'mean', 'sum', 'max', 'min'.
-                   Default is 'mean'.
+        Default is 'mean'.
     :return: Coarsened numpy array.
-    :raises ValueError: if batch_size length does not match data.ndim or if method is unsupported.
+    :raises ValueError: if `batch_size` length does not match `data.ndim` or if method is unsupported.
 
     Example:
     ```python

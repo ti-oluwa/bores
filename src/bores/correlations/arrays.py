@@ -1,28 +1,34 @@
-from bores.correlations import fahrenheit_to_rankine
-from bores._precision import get_dtype
 import logging
 import typing
 import warnings
 
-from CoolProp.CoolProp import PropsSI  # type: ignore[import, import-untyped]
 import numba  # type: ignore[import-untyped]
 import numpy as np
+from CoolProp.CoolProp import PropsSI  # type: ignore[import, import-untyped]
 from scipy.optimize import brentq  # type: ignore[import-untyped]
 
+from bores._precision import get_dtype
 from bores.constants import c
-from bores.errors import ComputationError, ValidationError
+from bores.correlations import fahrenheit_to_rankine
 from bores.correlations.core import (
     HENRY_COEFFICIENTS,
     SETSCHENOW_CONSTANTS,
     _get_gas_symbol,
     clip_pressure,
     clip_temperature,
-    compute_gas_solubility_in_water as compute_gas_solubility_in_water_scalar,
-    compute_gas_to_oil_ratio_standing as compute_gas_to_oil_ratio_standing_scalar,
-    estimate_solution_gor as estimate_solution_gor_scalar,
     fahrenheit_to_celsius,
     fahrenheit_to_kelvin,
 )
+from bores.correlations.core import (
+    compute_gas_solubility_in_water as compute_gas_solubility_in_water_scalar,
+)
+from bores.correlations.core import (
+    compute_gas_to_oil_ratio_standing as compute_gas_to_oil_ratio_standing_scalar,
+)
+from bores.correlations.core import (
+    estimate_solution_gor as estimate_solution_gor_scalar,
+)
+from bores.errors import ComputationError, ValidationError
 from bores.types import FloatOrArray, GasZFactorMethod, NDimension, NDimensionalGrid
 from bores.utils import apply_mask, clip, get_mask, max_, min_
 
@@ -3215,11 +3221,11 @@ def estimate_solution_gor(
     :return: Solution gas-to-oil ratio Rs array (SCF/STB)
 
     Notes:
-        - Convergence is typically achieved in 3-5 iterations
-        - Uses Standing correlation for initial guess (ignores T)
-        - Uses Vazquez-Beggs for Pb calculation (includes T)
-        - Handles both saturated and undersaturated conditions
-        - Parallelized for performance on large arrays
+    - Convergence is typically achieved in 3-5 iterations
+    - Uses Standing correlation for initial guess (ignores T)
+    - Uses Vazquez-Beggs for Pb calculation (includes T)
+    - Handles both saturated and undersaturated conditions
+    - Parallelized for performance on large arrays
     """
     flat_size = pressure.size
     dtype = pressure.dtype
@@ -3387,7 +3393,7 @@ def compute_hydrocarbon_in_place(
         raise ValidationError("Formation volume factor must be a positive value.")
 
     dtype = area.dtype
-    if hydrocarbon_type == "oil" or hydrocarbon_type == "water":
+    if hydrocarbon_type in {"oil", "water"}:
         # Oil in Place (OIP) calculation (May include dissolved gas in undersaturated reservoirs)
         oip = (
             acre_ft_to_bbl

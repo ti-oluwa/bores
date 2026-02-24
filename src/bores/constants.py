@@ -1,7 +1,7 @@
 """Physical constants and conversion factors"""
 
-from contextvars import ContextVar
 import typing
+from contextvars import ContextVar
 
 import attrs
 from typing_extensions import Self
@@ -9,8 +9,7 @@ from typing_extensions import Self
 from bores.serialization import Serializable
 from bores.stores import StoreSerializable
 
-
-__all__ = ["Constant", "Constants", "c", "ConstantsContext", "get_constant"]
+__all__ = ["Constant", "Constants", "ConstantsContext", "c", "get_constant"]
 
 
 @typing.final

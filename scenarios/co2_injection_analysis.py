@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.11"
+__generated_with = "0.20.2"
 app = marimo.App(width="full")
 
 
@@ -638,7 +638,7 @@ def _(analyst, bores, np, recovery_efficiency_history):
         },
         title="Recovery Efficiency Analysis",
         x_label="Time Step",
-        marker_sizes=6,
+        marker_sizes=4,
         width=720,
         height=460,
         line_colors="orange",
@@ -653,7 +653,7 @@ def _(analyst, bores, np, recovery_efficiency_history):
         },
         title="Recovery Factor Analysis",
         x_label="Time Step",
-        marker_sizes=6,
+        marker_sizes=4,
         width=720,
         height=460,
     )
@@ -709,7 +709,7 @@ def _(bores, states, viz):
     labels.add_well_labels(well_positions, well_names)
 
     shared_kwargs = dict(
-        plot_type="isosurface",
+        plot_type="volume",
         width=1260,
         height=960,
         opacity=0.7,
@@ -720,13 +720,15 @@ def _(bores, states, viz):
         show_wells=True,
         show_surface_marker=True,
         show_perforations=True,
-        # cmin=0.15,
-        # cmax=0.85,
+        # isomin=0.002,
+        # # isomax=0.07,
+        # cmin=0.0000005,
+        # cmax=0.01
     )
 
-    property = "oil-effective-density"
+    property = "z"
     figures = []
-    timesteps = [100]
+    timesteps = [750]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

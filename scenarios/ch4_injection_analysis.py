@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.20.1"
 app = marimo.App(width="full")
 
 
@@ -17,8 +17,9 @@ def _():
     store = bores.ZarrStore(
         store=Path("./scenarios/runs/ch4_injection/results/ch4_injection.zarr")
     )
-    stream = bores.StateStream(store=store, lazy_load=False)
-    states = list(stream.collect(key=lambda s: s.step == 0 or s.step % 5 == 0))
+    stream = bores.StateStream(store=store, auto_replay=True)
+
+    states = list(stream.replay(steps=lambda step: step == 0 or step % 2 == 0))
     return bores, itertools, np, states
 
 

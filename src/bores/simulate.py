@@ -1,10 +1,11 @@
 """Run a simulation workflow on a 3-Dimensional reservoir model."""
+
 import copy
-from datetime import datetime, timezone
 import logging
-from os import PathLike
 import typing
 import warnings
+from datetime import datetime, timezone
+from os import PathLike
 
 import attrs
 import numpy as np
@@ -23,8 +24,8 @@ from bores.errors import SimulationError, StopSimulation, TimingError, Validatio
 from bores.grids.base import (
     CapillaryPressureGrids,
     RateGrids,
-    RelPermGrids,
     RelativeMobilityGrids,
+    RelPermGrids,
     _RateGridsProxy,
     build_uniform_grid,
     pad_grid,
@@ -49,8 +50,7 @@ from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDim
 from bores.utils import clip
 from bores.wells import Wells
 
-
-__all__ = ["run", "Run"]
+__all__ = ["Run", "run"]
 
 logger = logging.getLogger(__name__)
 

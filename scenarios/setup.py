@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.20.2"
 app = marimo.App(width="full")
 
 
@@ -308,13 +308,13 @@ def setup_config(Path, bores, pvt_tables):
         capillary_pressure_table=capillary_pressure_table,
     )
 
-    ilu_preconditioner = bores.CachedPreconditionerFactory(
+    preconditioner_factory = bores.CachedPreconditionerFactory(
         factory="ilu",
         name="cached_ilu",
         update_frequency=10,
         recompute_threshold=0.3,
     )
-    ilu_preconditioner.register(override=True)
+    preconditioner_factory.register(override=True)
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,

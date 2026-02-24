@@ -7,7 +7,12 @@ import attrs
 import numba  # type: ignore[import-untyped]
 import numpy as np
 import pyamg  # type: ignore[import-untyped]
-from scipy.sparse import csr_array, csr_matrix, diags, isspmatrix_csr  # type: ignore[import-untyped]
+from scipy.sparse import (  # type: ignore[import-untyped]
+    csr_array,
+    csr_matrix,
+    diags,
+    isspmatrix_csr,
+)
 from scipy.sparse.linalg import (  # type: ignore[import-untyped]
     LinearOperator,
     bicgstab,
@@ -36,23 +41,23 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
+    "CachedPreconditionerFactory",
     "EvolutionResult",
-    "build_cpr_preconditioner",
-    "build_ilu_preconditioner",
-    "build_diagonal_preconditioner",
     "build_amg_preconditioner",
     "build_block_jacobi_preconditioner",
+    "build_cpr_preconditioner",
+    "build_diagonal_preconditioner",
+    "build_ilu_preconditioner",
     "build_polynomial_preconditioner",
-    "solve_linear_system",
-    "to_1D_index_interior_only",
     "from_1D_index_interior_only",
-    "CachedPreconditionerFactory",
-    "preconditioner_factory",
-    "solver_func",
-    "list_preconditioner_factories",
-    "list_solver_funcs",
     "get_preconditioner_factory",
     "get_solver_func",
+    "list_preconditioner_factories",
+    "list_solver_funcs",
+    "preconditioner_factory",
+    "solve_linear_system",
+    "solver_func",
+    "to_1D_index_interior_only",
 ]
 
 
@@ -326,8 +331,7 @@ def build_amg_preconditioner(
     :return: A SciPy `LinearOperator` that represents the AMG preconditioner.
     """
     ml_solver = pyamg.smoothed_aggregation_solver(A_csr, **kwargs)
-    M_amg = ml_solver.aspreconditioner(cycle=cycle)
-    return M_amg
+    return ml_solver.aspreconditioner(cycle=cycle)
 
 
 def build_diagonal_preconditioner(
@@ -442,8 +446,7 @@ def build_ilu_preconditioner(
     kwargs.setdefault("fill_factor", 10)  # Memory allocation factor
     ilu_factor = spilu(A_csc, **kwargs)
     # Create a `LinearOperator` that uses the .solve() method as the preconditioning step
-    M = LinearOperator(shape=A_csc.shape, matvec=ilu_factor.solve)  # type: ignore[arg-type]
-    return M
+    return LinearOperator(shape=A_csc.shape, matvec=ilu_factor.solve)  # type: ignore[arg-type]
 
 
 def build_polynomial_preconditioner(
@@ -542,12 +545,12 @@ def build_cpr_preconditioner(
     -----
     CPR workflow:
 
-        1. Restrict residual to pressure DOFs:      r_p = R * r
-        2. Solve pressure block:                    z_p = A_pp^{-1} * r_p   (AMG)
-        3. Prolongate correction to full space:     z = P * z_p
-        4. Compute remaining residual:              w = r - A * z
-        5. Smooth locally:                          y = ILU^{-1} * w
-        6. Final CPR output:                        x = z + y
+    1. Restrict residual to pressure DOFs:      r_p = R * r
+    2. Solve pressure block:                    z_p = A_pp^{-1} * r_p   (AMG)
+    3. Prolongate correction to full space:     z = P * z_p
+    4. Compute remaining residual:              w = r - A * z
+    5. Smooth locally:                          y = ILU^{-1} * w
+    6. Final CPR output:                        x = z + y
     """
     if not isspmatrix_csr(A_csr):
         A_csr = csr_matrix(A_csr)
@@ -568,11 +571,11 @@ def build_cpr_preconditioner(
         )
 
     # Extract the pressure-pressure block (A_pp)
-    A_pp = A_csr[pressure_dof_indices, :][:, pressure_dof_indices].tocsr()
+    A_pp = A_csr[pressure_dof_indices, :][:, pressure_dof_indices].tocsr()  # type: ignore
 
     # Build AMG preconditioner for A_pp
     try:
-        M_amg = build_amg_preconditioner(A_pp, **amg_kwargs)
+        M_amg = build_amg_preconditioner(A_pp, **amg_kwargs)  # type: ignore
     except Exception as exc:
         raise PreconditionerError(
             f"AMG construction for pressure block failed: {exc}"
@@ -650,7 +653,7 @@ def _lgmres(
         b,
         x0=x0,
         M=M,
-        tol=rtol,
+        rtol=rtol,
         atol=atol,
         maxiter=maxiter,
         callback=callback,
@@ -715,9 +718,9 @@ class CachedPreconditionerFactory:
         :param factory: Preconditioner factory function or string name (e.g., "ilu", "amg", "block_jacobi")
         :param name: The name of the preconditioner factory been cached or a new name for the cahed version of the factory.
         :param update_frequency: Rebuild preconditioner every N calls (0 = never auto-rebuild)
-        :param recompute_threshold: Rebuild if ||A_new - A_old||/||A_old|| > threshold
+        :param recompute_threshold: Rebuild if ||A_new - A_old||/||A_old|| > threshold.
+            Basically the absolute relative change must be greater than the threshold for a rebuild.
         """
-        # If factory is a string, look it up from the registry
         if isinstance(factory, str):
             self.factory = get_preconditioner_factory(factory)
             self._name = name or factory

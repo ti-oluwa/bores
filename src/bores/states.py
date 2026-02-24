@@ -1,6 +1,5 @@
 """Model state management."""
 
-import functools
 import logging
 import typing
 
@@ -12,8 +11,8 @@ from bores.errors import ValidationError
 from bores.grids.base import (
     CapillaryPressureGrids,
     RateGrids,
-    RelPermGrids,
     RelativeMobilityGrids,
+    RelPermGrids,
 )
 from bores.models import (
     FluidProperties,
@@ -34,72 +33,44 @@ __all__ = ["ModelState", "validate_state"]
 
 
 @typing.final
+@attrs.frozen(slots=True, eq=False, hash=False)
 class ModelState(
-    typing.Generic[NDimension],
     Serializable,
-    fields={
-        "step": int,
-        "step_size": float,
-        "time": float,
-        "model": ReservoirModel,
-        "wells": Wells,
-        "injection": RateGrids,
-        "production": RateGrids,
-        "relative_permeabilities": RelPermGrids,
-        "relative_mobilities": RelativeMobilityGrids,
-        "capillary_pressures": CapillaryPressureGrids,
-        "timer_state": typing.Optional[TimerState],
-    },
+    typing.Generic[NDimension],
+    dump_exclude={"_well_exists"},
+    load_exclude={"_well_exists"},
 ):
-    """
-    A captured state of the reservoir model at a specific time step during a simulation run.
-    """
+    """A captured state of the reservoir model at a specific time step during a simulation run."""
 
-    def __init__(
-        self,
-        step: int,
-        step_size: float,
-        time: float,
-        model: ReservoirModel[NDimension],
-        wells: Wells[NDimension],
-        injection: RateGrids[NDimension],
-        production: RateGrids[NDimension],
-        relative_permeabilities: RelPermGrids[NDimension],
-        relative_mobilities: RelativeMobilityGrids[NDimension],
-        capillary_pressures: CapillaryPressureGrids[NDimension],
-        timer_state: typing.Optional[TimerState] = None,
-    ) -> None:
-        """
-        Initialize the model state.
+    step: int
+    """The time step index"""
+    step_size: float
+    """The time step size in seconds"""
+    time: float
+    """The simulation time reached in seconds"""
+    model: ReservoirModel[NDimension]
+    """The reservoir model at this state"""
+    wells: Wells[NDimension]
+    """The wells configuration at this state"""
+    injection: RateGrids[NDimension]
+    """Fluids injection rates at this state in ft³/day"""
+    production: RateGrids[NDimension]
+    """Fluids production rates at this state in ft³/day"""
+    relative_permeabilities: RelPermGrids[NDimension]
+    """Relative permeabilities at this state"""
+    relative_mobilities: RelativeMobilityGrids[NDimension]
+    """Relative mobilities at this state"""
+    capillary_pressures: CapillaryPressureGrids[NDimension]
+    """Capillary pressures at this state"""
+    timer_state: typing.Optional[TimerState] = None
+    """Optional timer configuration state at this model state"""
+    _well_exists: typing.Optional[bool] = attrs.field(default=None, init=False)
 
-        :param step: The time step index
-        :param step_size: The time step size in seconds
-        :param time: The simulation time in seconds
-        :param model: The reservoir model at this state
-        :param wells: The wells configuration at this state
-        :param injection: Fluids injection rates at this state in ft³/day
-        :param production: Fluids production rates at this state in ft³/day
-        :param relative_permeabilities: Relative permeabilities at this state
-        :param relative_mobilities: Relative mobilities at this state
-        :param capillary_pressures: Capillary pressures at this state
-        :param timer_state: Optional timer state at this model state
-        """
-        self.step = step
-        self.step_size = step_size
-        self.time = time
-        self.model = model
-        self.wells = wells
-        self.injection = injection
-        self.production = production
-        self.relative_permeabilities = relative_permeabilities
-        self.relative_mobilities = relative_mobilities
-        self.capillary_pressures = capillary_pressures
-        self.timer_state = timer_state
-
-    @functools.lru_cache(maxsize=32)
     def wells_exists(self) -> bool:
         """Check if there are any wells in this state."""
-        return self.wells.exists()
+        if self._well_exists is None:
+            object.__setattr__(self, "_well_exists", self.wells.exists())
+        return self._well_exists  # type: ignore[return-value]
 
 
 def _validate_array(

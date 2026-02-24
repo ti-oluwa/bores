@@ -2,8 +2,8 @@ import functools
 import itertools
 import logging
 import typing
-import attrs
 
+import attrs
 import numba
 import numpy as np
 from scipy.sparse import lil_matrix
@@ -11,6 +11,7 @@ from scipy.sparse import lil_matrix
 from bores._precision import get_dtype
 from bores.config import Config
 from bores.constants import c
+from bores.correlations.core import compute_harmonic_mean
 from bores.diffusivity.base import (
     EvolutionResult,
     _warn_injection_pressure_is_low,
@@ -19,11 +20,10 @@ from bores.diffusivity.base import (
     solve_linear_system,
     to_1D_index_interior_only,
 )
-from bores.errors import SolverError, PreconditionerError
+from bores.errors import PreconditionerError, SolverError
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
-from bores.correlations.core import compute_harmonic_mean
 from bores.types import (
     FluidPhase,
     OneDimensionalGrid,
@@ -884,9 +884,16 @@ def add_well_contributions(
                 well_index_cache.append(((i, j, k, cell_1D_index), well_index))
                 total_well_index += well_index
 
-        # Second pass: compute rates using cached well indices
+        # For the second pass, compute rates using cached well indices
         injected_fluid = well.injected_fluid
         injected_phase = injected_fluid.phase
+        water_bubble_point_pressure_grid = (
+            fluid_properties.water_bubble_point_pressure_grid
+        )
+        gas_formation_volume_factor_grid = (
+            fluid_properties.gas_formation_volume_factor_grid
+        )
+        gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
 
         for (i, j, k, cell_1D_index), well_index in well_index_cache:
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
@@ -907,16 +914,13 @@ def add_well_contributions(
                     float, water_relative_mobility_grid[i, j, k]
                 )
                 compressibility_kwargs = {
-                    "bubble_point_pressure": fluid_properties.oil_bubble_point_pressure_grid[
+                    "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
+                    "gas_formation_volume_factor": gas_formation_volume_factor_grid[
                         i, j, k
                     ],
-                    "gas_formation_volume_factor": phase_fvf,
-                    "gas_solubility_in_water": fluid_properties.gas_solubility_in_water_grid[
-                        i, j, k
-                    ],
+                    "gas_solubility_in_water": gas_solubility_in_water_grid[i, j, k],
                 }
 
-            # Skip if no mobility
             if phase_mobility <= 0.0:
                 continue
 
@@ -931,7 +935,6 @@ def add_well_contributions(
             use_pseudo_pressure = (
                 config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
             )
-
             allocation_fraction = (
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
@@ -980,7 +983,7 @@ def add_well_contributions(
         well_index_cache = []
         total_well_index = 0.0
 
-        # First pass over perforated cells: compute total WI and cache well indices
+        # First pass over perforated cells, compute total WI and cache well indices
         for start, end in well.perforating_intervals:
             for i, j, k in itertools.product(
                 range(start[0], end[0] + 1),
@@ -1003,7 +1006,7 @@ def add_well_contributions(
                 well_index_cache.append(((i, j, k, cell_1D_index), well_index))
                 total_well_index += well_index
 
-        # Second pass: compute rates using cached well indices
+        # For the second pass, compute rates using cached well indices
         water_formation_volume_factor_grid = (
             fluid_properties.water_formation_volume_factor_grid
         )
@@ -1017,7 +1020,6 @@ def add_well_contributions(
         for (i, j, k, cell_1D_index), well_index in well_index_cache:
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
             cell_oil_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
-
             allocation_fraction = (
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
@@ -1057,14 +1059,12 @@ def add_well_contributions(
                         float, oil_formation_volume_factor_grid[i, j, k]
                     )
 
-                # Skip if no mobility
                 if phase_mobility <= 0.0:
                     continue
 
                 use_pseudo_pressure = (
                     config.use_pseudo_pressure and produced_phase == FluidPhase.GAS
                 )
-
                 effective_bhp = well.get_bottom_hole_pressure(
                     pressure=cell_oil_pressure,
                     temperature=cell_temperature,

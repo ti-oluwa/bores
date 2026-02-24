@@ -1,17 +1,16 @@
-from concurrent.futures import ThreadPoolExecutor
 import logging
 import threading
 import typing
+from concurrent.futures import ThreadPoolExecutor
 
-from cachetools import LFUCache
 import numpy as np
+from cachetools import LFUCache
 from scipy.integrate import cumulative_trapezoid, quad  # type: ignore[import-untyped]
 
 from bores._precision import get_dtype
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import FloatOrArray
-
 
 logger = logging.getLogger(__name__)
 

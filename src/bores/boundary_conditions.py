@@ -1,11 +1,11 @@
 """Boundary condition implementations for 2D/3D grids."""
 
-from collections import defaultdict
 import copy
 import enum
 import functools
 import threading
 import typing
+from collections import defaultdict
 
 import attrs
 import numpy as np
@@ -16,27 +16,26 @@ from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
 from bores.types import NDimension, NDimensionalGrid
 
-
 __all__ = [
-    "boundary_function",
-    "ParameterizedBoundaryFunction",
     "Boundary",
-    "BoundaryMetadata",
     "BoundaryCondition",
-    "NoFlowBoundary",
+    "BoundaryConditions",
+    "BoundaryMetadata",
+    "CarterTracyAquifer",
     "ConstantBoundary",
-    "VariableBoundary",
     "DirichletBoundary",
+    "FluxBoundary",
+    "GridBoundaryCondition",
+    "LinearGradientBoundary",
     "NeumannBoundary",
+    "NoFlowBoundary",
+    "ParameterizedBoundaryFunction",
+    "PeriodicBoundary",
+    "RobinBoundary",
     "SpatialBoundary",
     "TimeDependentBoundary",
-    "LinearGradientBoundary",
-    "FluxBoundary",
-    "RobinBoundary",
-    "PeriodicBoundary",
-    "CarterTracyAquifer",
-    "GridBoundaryCondition",
-    "BoundaryConditions",
+    "VariableBoundary",
+    "boundary_function",
 ]
 
 
@@ -400,7 +399,7 @@ class BoundaryMetadata:
     xx, yy = np.meshgrid(x_coords, y_coords, indexing='ij')
     coordinates = np.stack([xx, yy], axis=-1)
 
-    metadata_explicit = BoundaryMetadata(
+    metadata = BoundaryMetadata(
         cell_dimension=(20.0, 20.0),
         coordinates=coordinates,              # Explicit coordinates override auto-generation
         thickness_grid=np.full((50, 25), 10.0),  # No ghost cells
@@ -413,7 +412,6 @@ class BoundaryMetadata:
     spatial_bc = SpatialBoundary(
         func=lambda x, y: 2000 + 0.1 * x - 0.05 * y
     )
-
     grid = np.zeros((52, 27))  # Grid with ghost cells
     boundary_indices = (slice(0, 1), slice(None))  # Left boundary
 
@@ -464,7 +462,7 @@ class BoundaryMetadata:
                 coordinates = np.stack([xx, yy], axis=-1)
 
             elif len(self.grid_shape) == 3:
-                # 3D grid - need thickness information for z-coordinates
+                # 3D grids need thickness information for z-coordinates
                 nx, ny, nz = self.grid_shape
 
                 # Create x and y coordinate arrays using linspace for consistent lengths
@@ -534,8 +532,8 @@ class BoundaryMetadata:
 
 
 class BoundaryCondition(
-    typing.Generic[NDimension],
     StoreSerializable,
+    typing.Generic[NDimension],
     # Register serialization handlers for boundary functions
     serializers={"func": serialize_boundary_function},
     deserializers={"func": deserialize_boundary_function},
@@ -598,7 +596,7 @@ class NoFlowBoundary(BoundaryCondition[NDimension]):
     sealed_boundary = NoFlowBoundary()
 
     # Use in a grid boundary condition for pressure
-    pressure_boundary_config = GridBoundaryCondition(
+    pressure_boundary = GridBoundaryCondition(
         left=NoFlowBoundary(),  # Left side sealed
         right=NoFlowBoundary(),   # Right side sealed
         front=NoFlowBoundary(),  # Front sealed
@@ -607,7 +605,7 @@ class NoFlowBoundary(BoundaryCondition[NDimension]):
 
     # Apply to a 2D pressure grid with ghost cells
     pressure_grid = np.full((52, 52), 1500.0)  # 50x50 + 2 ghost cells
-    pressure_boundary_config.apply(pressure_grid)
+    pressure_boundary.apply(pressure_grid)
 
     # Result: Ghost cells copy values from neighboring interior cells
     # This is implemented using the get_neighbor_indices() utility function
@@ -657,10 +655,10 @@ class ConstantBoundary(BoundaryCondition[NDimension]):
     pressure_inlet = ConstantBoundary(constant=2000.0)
 
     # Create constant temperature boundary at 150°F
-    temp_boundary = ConstantBoundary(constant=150.0)
+    temperature_boundary = ConstantBoundary(constant=150.0)
 
     # Use in reservoir simulation (pressure property only)
-    pressure_boundary_config = GridBoundaryCondition(
+    pressure_boundary = GridBoundaryCondition(
         left=ConstantBoundary(constant=2500.0),  # High pressure injection
         right=ConstantBoundary(constant=1000.0),   # Low pressure production
         front=NoFlowBoundary(),                   # Sealed sides
@@ -668,7 +666,7 @@ class ConstantBoundary(BoundaryCondition[NDimension]):
     )
 
     pressure_grid = np.full((52, 52), 1500.0)
-    pressure_boundary_config.apply(pressure_grid)
+    pressure_boundary.apply(pressure_grid)
 
     # Result: Boundary cells set to constant values
     assert np.all(pressure_grid[0, :] == 2500.0)   # Left = 2500 psi
@@ -725,7 +723,7 @@ class VariableBoundary(BoundaryCondition[NDimension]):
     var_boundary = VariableBoundary(func=pressure_gradient_func)
 
     # Use in simulation (pressure property)
-    pressure_boundary_config = GridBoundaryCondition(
+    pressure_boundary = GridBoundaryCondition(
         left=var_boundary,
         right=var_boundary,
         front=var_boundary,
@@ -733,7 +731,7 @@ class VariableBoundary(BoundaryCondition[NDimension]):
     )
 
     pressure_grid = np.full((52, 52), 2000.0)
-    pressure_boundary_config.apply(pressure_grid)
+    pressure_boundary.apply(pressure_grid)
 
     # Result: Top = 1000 psi, Bottom = 3000 psi, sides copy neighbors (no-flow)
     ```
@@ -815,14 +813,14 @@ class SpatialBoundary(BoundaryCondition[NDimension]):
     )
 
     # Apply to boundaries (pressure property only)
-    pressure_boundary_config = GridBoundaryCondition(
+    pressure_boundary = GridBoundaryCondition(
         left=pressure_gradient,  # West boundary with linear gradient
         front=depth_pressure,     # South boundary with depth-based pressure
         right=radial_pressure,     # East boundary with radial pattern
     )
 
     pressure_grid = np.full((53, 28), 1800.0)  # Grid with ghost cells
-    pressure_boundary_config.apply(pressure_grid, metadata=metadata)
+    pressure_boundary.apply(pressure_grid, metadata=metadata)
 
     # Result: Boundaries follow spatial functions based on coordinates
     ```
@@ -917,8 +915,7 @@ class TimeDependentBoundary(BoundaryCondition[NDimension]):
 
     # Use in simulation at t = 12 hours (pressure property)
     metadata = BoundaryMetadata(time=43200.0)  # 12 hours in seconds
-
-    pressure_boundary_config = GridBoundaryCondition(
+    pressure_boundary = GridBoundaryCondition(
         left=daily_cycle,     # Cyclic injection
         right=pressure_ramp,    # Gradual pressure increase
         front=pressure_decay,  # Exponential decay
@@ -926,7 +923,7 @@ class TimeDependentBoundary(BoundaryCondition[NDimension]):
     )
 
     pressure_grid = np.full((52, 52), 1800.0)
-    pressure_boundary_config.apply(pressure_grid, metadata=metadata)
+    pressure_boundary.apply(pressure_grid, metadata=metadata)
 
     # Result: Each boundary reflects time-dependent function at t=43200s
     print(f"Daily cycle value: {2000 + 200 * np.sin(2 * np.pi * 43200 / 86400):.1f}")
@@ -1004,14 +1001,14 @@ class LinearGradientBoundary(BoundaryCondition[NDimension]):
     )
 
     # Apply to 3D grid boundaries (pressure property only)
-    pressure_boundary_config = GridBoundaryCondition(
+    pressure_boundary = GridBoundaryCondition(
         left=pressure_drop,     # West boundary: pressure drop west-east
         front=depth_pressure,    # South boundary: pressure with depth
         top=pressure_ns_gradient, # Top boundary: pressure north-south
     )
 
     pressure_grid = np.full((53, 28, 13), 2000.0)  # 3D grid with ghost cells
-    pressure_boundary_config.apply(pressure_grid, metadata=metadata)
+    pressure_boundary.apply(pressure_grid, metadata=metadata)
 
     # Result: Linear gradients applied to pressure boundaries
     # West boundary varies from 2500 to 1500 psi along x-direction
@@ -1111,7 +1108,7 @@ class FluxBoundary(BoundaryCondition[NDimension]):
     gas_vent = FluxBoundary(flux=-500.0)       # 500 Mscf/day/ft²
 
     # Set up reservoir with injection/production boundaries (pressure property)
-    pressure_boundary_config = GridBoundaryCondition(
+    pressure_boundary = GridBoundaryCondition(
         left=water_injector,  # West: water injection
         right=oil_producer,     # East: oil production
         front=FluxBoundary(flux=0.0),    # South: no flux
@@ -1120,7 +1117,7 @@ class FluxBoundary(BoundaryCondition[NDimension]):
 
     # Apply to pressure grid (psi)
     pressure_grid = np.full((52, 52), 2000.0)  # Initial 2000 psi
-    pressure_boundary_config.apply(pressure_grid, metadata=metadata)
+    pressure_boundary.apply(pressure_grid, metadata=metadata)
 
     # Result: Boundary values calculated from flux and cell spacing
     # West boundary: φ_boundary = φ_neighbor + flux * dx
@@ -1275,7 +1272,6 @@ class RobinBoundary(BoundaryCondition[NDimension]):
         cell_dimension=(20.0, 20.0),
         grid_shape=(50, 25)
     )
-
     temperature_bc = GridBoundaryCondition(
         left=convective_bc,
         right=semi_permeable,
@@ -1498,7 +1494,7 @@ NeumannBoundary = FluxBoundary
 @attrs.define
 class CarterTracyAquifer(BoundaryCondition[NDimension]):
     """
-    Carter-Tracy finite aquifer model that uses physical aquifer properties for accurate simulation.
+    Carter-Tracy finite aquifer model.
 
     The Carter-Tracy model (1960) provides a semi-analytical solution for finite aquifer
     behavior, accounting for transient pressure response and material balance between
@@ -1945,7 +1941,7 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
                 "_computed_dimensionless_radius_ratio",
                 self.dimensionless_radius_ratio,
             )
-            # No hydraulic diffusivity in calibrated mode - will use simplified t_D
+            # No hydraulic diffusivity in calibrated mode. We'll use simplified `t_D`
             object.__setattr__(self, "_hydraulic_diffusivity", None)
 
     def apply(
@@ -2229,7 +2225,6 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
 
         # Save either physical properties or calibrated constant
         if self._hydraulic_diffusivity is not None:
-            # Physical properties mode
             data.update(
                 {
                     "aquifer_permeability": self.aquifer_permeability,
@@ -2242,7 +2237,6 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
                 }
             )
         else:
-            # Calibrated constant mode
             data.update(
                 {
                     "aquifer_constant": self.aquifer_constant,
@@ -2253,7 +2247,6 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
 
     @classmethod
     def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        # Check which mode was used
         if "aquifer_permeability" in data:
             # Physical properties mode
             instance = cls(
@@ -2283,7 +2276,7 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
 
 @typing.final
 @attrs.frozen
-class GridBoundaryCondition(typing.Generic[NDimension], Serializable):
+class GridBoundaryCondition(Serializable, typing.Generic[NDimension]):
     """
     Container for defining boundary conditions for a grid.
     Each face in a 3D or 2D grid (x-, x+, y-, y+, z-, z+) can have its own boundary condition.

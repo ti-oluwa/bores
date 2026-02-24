@@ -22,24 +22,23 @@ from bores.wells.core import (
     compute_required_bhp_for_oil_rate,
 )
 
-
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "WellControl",
-    "RateClamp",
-    "ProductionClamp",
-    "InjectionClamp",
+    "AdaptiveBHPRateControl",
     "BHPControl",
     "ConstantRateControl",
-    "AdaptiveBHPRateControl",
+    "InjectionClamp",
     "MultiPhaseRateControl",
-    "well_control",
+    "ProductionClamp",
+    "RateClamp",
+    "WellControl",
     "rate_clamp",
+    "well_control",
 ]
 
 
-WellFluidT_con = typing.TypeVar("WellFluidT_con", bound=WellFluid, contravariant=True)
+WellFluidTcon = typing.TypeVar("WellFluidTcon", bound=WellFluid, contravariant=True)
 
 
 def _should_return_zero(
@@ -289,7 +288,7 @@ class InjectionClamp(RateClamp):
         return None
 
 
-class WellControl(typing.Generic[WellFluidT_con], StoreSerializable):
+class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
     """
     Base class for well control implementations.
 
@@ -305,7 +304,7 @@ class WellControl(typing.Generic[WellFluidT_con], StoreSerializable):
         temperature: float,
         phase_mobility: float,
         well_index: float,
-        fluid: WellFluidT_con,
+        fluid: WellFluidTcon,
         formation_volume_factor: float,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -391,7 +390,7 @@ well_control = make_serializable_type_registrar(
 
 @well_control
 @attrs.frozen
-class BHPControl(WellControl[WellFluidT_con]):
+class BHPControl(WellControl[WellFluidTcon]):
     """
     Bottom Hole Pressure (BHP) control.
 
@@ -412,7 +411,7 @@ class BHPControl(WellControl[WellFluidT_con]):
         temperature: float,
         phase_mobility: float,
         well_index: float,
-        fluid: WellFluidT_con,
+        fluid: WellFluidTcon,
         formation_volume_factor: float,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -545,9 +544,12 @@ class BHPControl(WellControl[WellFluidT_con]):
         return f"BHP Control (BHP={self.bhp:.6f} psi)"
 
 
+ConstantBHPControl = BHPControl  # Alias
+
+
 @well_control
 @attrs.frozen
-class ConstantRateControl(WellControl[WellFluidT_con]):
+class ConstantRateControl(WellControl[WellFluidTcon]):
     """
     Constant rate control.
 
@@ -585,7 +587,7 @@ class ConstantRateControl(WellControl[WellFluidT_con]):
         temperature: float,
         phase_mobility: float,
         well_index: float,
-        fluid: WellFluidT_con,
+        fluid: WellFluidTcon,
         formation_volume_factor: float,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -782,7 +784,7 @@ class ConstantRateControl(WellControl[WellFluidT_con]):
         target_rate: typing.Optional[float] = None,
         bhp_limit: typing.Optional[float] = None,
         clamp: typing.Optional[RateClamp] = None,
-    ) -> "ConstantRateControl[WellFluidT_con]":
+    ) -> "ConstantRateControl[WellFluidTcon]":
         """
         Create a new `ConstantRateControl` with updated parameters.
 
@@ -805,7 +807,7 @@ class ConstantRateControl(WellControl[WellFluidT_con]):
 
 @well_control
 @attrs.frozen
-class AdaptiveBHPRateControl(WellControl[WellFluidT_con]):
+class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
     """
     Adaptive control that switches between rate and BHP control.
 
@@ -846,7 +848,7 @@ class AdaptiveBHPRateControl(WellControl[WellFluidT_con]):
         temperature: float,
         phase_mobility: float,
         well_index: float,
-        fluid: WellFluidT_con,
+        fluid: WellFluidTcon,
         formation_volume_factor: float,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -1082,7 +1084,7 @@ class AdaptiveBHPRateControl(WellControl[WellFluidT_con]):
         target_rate: typing.Optional[float] = None,
         bhp_limit: typing.Optional[float] = None,
         clamp: typing.Optional[RateClamp] = None,
-    ) -> "AdaptiveBHPRateControl[WellFluidT_con]":
+    ) -> "AdaptiveBHPRateControl[WellFluidTcon]":
         """
         Create a new `AdaptiveBHPRateControl` with updated parameters.
 
@@ -1284,4 +1286,5 @@ class MultiPhaseRateControl(WellControl):
             Oil Control: {self.oil_control!s},
             Gas Control: {self.gas_control!s},
             Water Control: {self.water_control!s}
-        )"""
+        )
+        """

@@ -3,10 +3,33 @@ name = "bores-framework"
 version = "0.0.1"
 description = "3D 3-Phase Black-Oil Reservoir Modelling and Simulation Framework (BORES)."
 authors = [
-    { name = "ti-oluwa", email = "tioluwa.dev@gmail.com" },
+    { name = "tioluwa", email = "tioluwa.dev@gmail.com" }
+]
+maintainers = [
+    { name = "tioluwa", email = "tioluwa.dev@gmail.com" }
 ]
 license = { file = "LICENSE" }
 readme = "README.md"
+keywords = [
+    "reservoir-simulation", "black-oil", "petroleum-engineering", "reservoir-modeling",
+    "oil-gas", "eor", "reservoir-engineering", "numerical-simulation", "flow-simulation",
+    "multiphase-flow", "impes", "finite-volume", "reservoir-physics", "pvt",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
 requires-python = ">=3.10"
 dependencies = [
     "attrs>=25.3.0",
@@ -22,7 +45,8 @@ dependencies = [
     "thermo>=0.4.2",
     "trame>=3.12.0",
     "typing-extensions>=4.15.0",
-    # Install MKL versions only on x86_64 Windows/Linux
+    # Install MKL versions only on x86_64 Windows/Linux (via uv with numpy-mkl index)
+    # For pip users, these resolve to standard PyPI numpy/scipy
     "numpy>=2.0.0; sys_platform != 'darwin' and platform_machine == 'x86_64'",
     "scipy>=1.13.0; sys_platform != 'darwin' and platform_machine == 'x86_64'",
     # Fallback to standard PyPI for macOS or non-x86 architectures
@@ -38,10 +62,29 @@ dependencies = [
     "scipy-stubs>=1.15.3.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "marimo>=0.19.11",
+    "auto-mix-prep>=0.2.0",
+    "mypy>=1.16.1",
+    "rich>=14.0.0",
+    "ruff>=0.12.1",
+    "ty>=0.0.1a26",
+    "watchdog>=6.0.0",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocs-minify-plugin>=0.8.0",
+    "pymdown-extensions>=10.11.0",
+]
+
 [tool.marimo.runtime]
 pythonpath=["src"]
 output_max_bytes = 10_000_000
 
+# uv-specific: MKL-optimized numpy/scipy for x86_64 Linux/Windows
+# pip users will get standard PyPI versions automatically
 [[tool.uv.index]]
 name = "numpy-mkl"
 url = "https://urob.github.io/numpy-mkl"
@@ -60,14 +103,5 @@ numpy = [
 scipy = [
   { index = "numpy-mkl", marker = "sys_platform != 'darwin' and platform_machine == 'x86_64'" },
 ]
+bores-framework = { workspace = true }
 
-[dependency-groups]
-dev = [
-    "marimo>=0.19.11",
-    "auto-mix-prep>=0.2.0",
-    "mypy>=1.16.1",
-    "rich>=14.0.0",
-    "ruff>=0.12.1",
-    "ty>=0.0.1a26",
-    "watchdog>=6.0.0",
-]

@@ -5,29 +5,29 @@ import logging
 import typing
 import warnings
 
-from CoolProp.CoolProp import PropsSI  # type: ignore[import, import-untyped]
 import numba  # type: ignore[import-untyped]
 import numpy as np
+from CoolProp.CoolProp import PropsSI  # type: ignore[import, import-untyped]
 from scipy.optimize import brentq, root_scalar  # type: ignore[import-untyped]
 
 from bores.constants import c
-from bores.errors import ValidationError, ComputationError
+from bores.errors import ComputationError, ValidationError
 from bores.types import FloatOrArray, GasZFactorMethod
 from bores.utils import clip
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "validate_input_temperature",
-    "validate_input_pressure",
-    "is_CoolProp_supported_fluid",
     "clip_pressure",
     "clip_temperature",
-    "kelvin_to_fahrenheit",
-    "fahrenheit_to_kelvin",
-    "fahrenheit_to_celsius",
-    "fahrenheit_to_rankine",
     "compute_harmonic_mean",
+    "fahrenheit_to_celsius",
+    "fahrenheit_to_kelvin",
+    "fahrenheit_to_rankine",
+    "is_CoolProp_supported_fluid",
+    "kelvin_to_fahrenheit",
+    "validate_input_pressure",
+    "validate_input_temperature",
 ]
 
 
@@ -3202,7 +3202,7 @@ def compute_hydrocarbon_in_place(
     if formation_volume_factor <= 0:
         raise ValidationError("Formation volume factor must be a positive value.")
 
-    if hydrocarbon_type == "oil" or hydrocarbon_type == "water":
+    if hydrocarbon_type in {"oil", "water"}:
         # Oil in Place (OIP) calculation (May include dissolved gas in undersaturated reservoirs)
         oip = (
             acre_ft_to_bbl
@@ -3272,29 +3272,31 @@ def compute_miscibility_transition_factor(
         1 = fully miscible behavior
 
     Example:
-        >>> # CO2 injection with MMP = 2000 psi, base omega = 0.67
-        >>> omega_base = 0.67
-        >>> mmp = 2000.0
-        >>>
-        >>> # Well below MMP - immiscible
-        >>> factor = compute_miscibility_transition_factor(1000, mmp, 500)
-        >>> omega_eff = omega_base * factor  # ~0.08 (nearly immiscible)
-        >>>
-        >>> # At MMP - transitional
-        >>> factor = compute_miscibility_transition_factor(2000, mmp, 500)
-        >>> omega_eff = omega_base * factor  # ~0.34 (partial miscibility)
-        >>>
-        >>> # Above MMP - miscible
-        >>> factor = compute_miscibility_transition_factor(3000, mmp, 500)
-        >>> omega_eff = omega_base * factor  # ~0.59 (near full miscibility)
+    ```python
+    # CO2 injection with MMP = 2000 psi, base omega = 0.67
+    omega_base = 0.67
+    mmp = 2000.0
 
+    # Well below MMP - immiscible
+    factor = compute_miscibility_transition_factor(1000, mmp, 500)
+    omega_eff = omega_base * factor  # ~0.08 (nearly immiscible)
+
+    # At MMP - transitional
+    factor = compute_miscibility_transition_factor(2000, mmp, 500)
+    omega_eff = omega_base * factor  # ~0.34 (partial miscibility)
+
+    # Above MMP - miscible
+    factor = compute_miscibility_transition_factor(3000, mmp, 500)
+    omega_eff = omega_base * factor  # ~0.59 (near full miscibility)
+    ```
+    
     References:
-        Todd, M.R. and Longstaff, W.J. (1972). "The Development, Testing and
-        Application of a Numerical Simulator for Predicting Miscible Flood Performance."
-        JPT, July 1972, pp. 874-882.
+    Todd, M.R. and Longstaff, W.J. (1972). "The Development, Testing and
+    Application of a Numerical Simulator for Predicting Miscible Flood Performance."
+    JPT, July 1972, pp. 874-882.
 
-        Note: The original Todd-Longstaff paper defines omega as a mixing parameter.
-        This function computes how that mixing parameter varies with pressure near MMP.
+    Note: The original Todd-Longstaff paper defines omega as a mixing parameter.
+    This function computes how that mixing parameter varies with pressure near MMP.
     """
     # Fast path for extreme cases (>2 standard deviations from MMP)
     if pressure >= minimum_miscibility_pressure + 2.0 * transition_width:

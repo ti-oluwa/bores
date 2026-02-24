@@ -263,11 +263,11 @@ __all__ = [
     "FractureGeometry",
     "apply_fracture",
     "apply_fractures",
+    "conductive_fracture_network",
+    "damage_zone_fault",
+    "inclined_sealing_fault",
     "validate_fracture",
     "vertical_sealing_fault",
-    "inclined_sealing_fault",
-    "damage_zone_fault",
-    "conductive_fracture_network",
 ]
 
 logger = logging.getLogger(__name__)
@@ -462,23 +462,28 @@ class FractureGeometry(Serializable):
     Examples:
 
     1. Simple vertical fault at x=25:
-    ```
-       FractureGeometry(orientation="x", x_range=(25, 25))
+    ```python
+    FractureGeometry(orientation="x", x_range=(25, 25))
     ```
 
     2. Wide damage zone from x=20 to x=30, only in upper reservoir:
-    ```
-       FractureGeometry(orientation="x", x_range=(20, 30), z_range=(0, 15))
+    ```python
+    FractureGeometry(orientation="x", x_range=(20, 30), z_range=(0, 15))
     ```
 
     3. Horizontal bedding plane slip at z=10:
-    ```
-       FractureGeometry(orientation="z", z_range=(10, 10))
+    ```python
+    FractureGeometry(orientation="z", z_range=(10, 10))
     ```
 
     4. Y-oriented fault with limited lateral extent:
-    ```
-       FractureGeometry(orientation="y", y_range=(15, 15), x_range=(10, 40), z_range=(5, 25))
+    ```python
+    FractureGeometry(
+        orientation="y",
+        y_range=(15, 15),
+        x_range=(10, 40),
+        z_range=(5, 25)
+    )
     ```
 
     """
@@ -637,7 +642,7 @@ class Fracture(StoreSerializable):
 
     - Values < 1.0 create sealing barriers (typical: 1e-3 to 1e-6)
     - Values > 1.0 create conductive zones (for enhanced fractures)
-    - Must be > `MINIMUM_TRANSMISSIBILITY_FACTOR` for numerical stability
+    - Must be > `c.MINIMUM_TRANSMISSIBILITY_FACTOR` for numerical stability
     - If None and permeability is also None, defaults to 1e-3 for sealing behavior
     
     This scales the permeability values at the fracture interface, directly
@@ -680,14 +685,12 @@ class Fracture(StoreSerializable):
 
     def __attrs_post_init__(self) -> None:
         """Validate fracture configuration parameters."""
-        # Mutual exclusivity check
         if self.permeability_multiplier is not None and self.permeability is not None:
             raise ValidationError(
                 f"Fracture {self.id!r}: `permeability_multiplier` and `permeability` are mutually exclusive. "
                 "Use `permeability_multiplier` to scale existing permeabilities, or `permeability` to set absolute values."
             )
 
-        # Validate permeability_multiplier if set
         if self.permeability_multiplier is not None:
             if self.permeability_multiplier < c.MINIMUM_TRANSMISSIBILITY_FACTOR:
                 object.__setattr__(
@@ -813,24 +816,23 @@ def make_fracture_mask(
     """
     nx, ny, nz = grid_shape
     mask = np.zeros((nx, ny, nz), dtype=np.bool_)
-
-    geom = fracture.geometry
+    geometry = fracture.geometry
 
     # Determine the cell range to apply
-    cell_min, cell_max = geom.get_fracture_plane_range()
+    cell_min, cell_max = geometry.get_fracture_plane_range()
 
     # Determine vertical extent (z_range)
-    if geom.z_range is not None:
-        z_min, z_max = geom.z_range
+    if geometry.z_range is not None:
+        z_min, z_max = geometry.z_range
         z_min = max(0, min(z_min, nz - 1))  # Clamp to valid range
         z_max = max(0, min(z_max, nz - 1))
     else:
         z_min, z_max = 0, nz - 1  # Full vertical extent
 
-    if geom.orientation == "x":
+    if geometry.orientation == "x":
         # For x-oriented fractures, determine y lateral extent
-        if geom.y_range is not None:
-            y_min, y_max = geom.y_range
+        if geometry.y_range is not None:
+            y_min, y_max = geometry.y_range
             y_min = max(0, min(y_min, ny - 1))
             y_max = max(0, min(y_max, ny - 1))
         else:
@@ -840,18 +842,18 @@ def make_fracture_mask(
             mask=mask,
             cell_min=cell_min,
             cell_max=cell_max,
-            slope=float(geom.slope),
-            intercept=float(geom.intercept),
+            slope=float(geometry.slope),
+            intercept=float(geometry.intercept),
             z_min=z_min,
             z_max=z_max,
             y_min=y_min,
             y_max=y_max,
         )
 
-    elif geom.orientation == "y":
+    elif geometry.orientation == "y":
         # For y-oriented fractures, determine x lateral extent
-        if geom.x_range is not None:
-            x_min, x_max = geom.x_range
+        if geometry.x_range is not None:
+            x_min, x_max = geometry.x_range
             x_min = max(0, min(x_min, nx - 1))
             x_max = max(0, min(x_max, nx - 1))
         else:
@@ -861,26 +863,26 @@ def make_fracture_mask(
             mask=mask,
             cell_min=cell_min,
             cell_max=cell_max,
-            slope=float(geom.slope),
-            intercept=float(geom.intercept),
+            slope=float(geometry.slope),
+            intercept=float(geometry.intercept),
             z_min=z_min,
             z_max=z_max,
             x_min=x_min,
             x_max=x_max,
         )
 
-    elif geom.orientation == "z":
+    elif geometry.orientation == "z":
         # Horizontal fracture - fracture plane in x-y plane
         # Determine x and y extents
-        if geom.x_range is not None:
-            x_min, x_max = geom.x_range
+        if geometry.x_range is not None:
+            x_min, x_max = geometry.x_range
             x_min = max(0, min(x_min, nx - 1))
             x_max = max(0, min(x_max, nx - 1))
         else:
             x_min, x_max = 0, nx - 1
 
-        if geom.y_range is not None:
-            y_min, y_max = geom.y_range
+        if geometry.y_range is not None:
+            y_min, y_max = geometry.y_range
             y_min = max(0, min(y_min, ny - 1))
             y_max = max(0, min(y_max, ny - 1))
         else:
@@ -890,8 +892,8 @@ def make_fracture_mask(
             mask=mask,
             cell_min=cell_min,
             cell_max=cell_max,
-            slope=float(geom.slope),
-            intercept=float(geom.intercept),
+            slope=float(geometry.slope),
+            intercept=float(geometry.intercept),
             x_min=x_min,
             x_max=x_max,
             y_min=y_min,
@@ -918,25 +920,24 @@ def _scale_permeability(
     :return: Modified reservoir model
     """
     logger.debug(f"Scaling transmissibilities for fracture '{fracture.id}'")
-
-    geom = fracture.geometry
+    orientation = fracture.geometry.orientation
     if fracture.permeability_multiplier is None:
         return model
 
     # Scale connections based on fracture orientation
-    if geom.orientation == "x":
+    if orientation == "x":
         _scale_permeability_x_boundary(
             perm_x=model.rock_properties.absolute_permeability.x,
             mask=fracture_mask,
             scale=float(fracture.permeability_multiplier),
         )
-    elif geom.orientation == "y":
+    elif orientation == "y":
         _scale_permeability_y_boundary(
             perm_y=model.rock_properties.absolute_permeability.y,
             mask=fracture_mask,
             scale=float(fracture.permeability_multiplier),
         )
-    elif geom.orientation == "z":
+    elif orientation == "z":
         _scale_permeability_z_boundary(
             perm_z=model.rock_properties.absolute_permeability.z,
             mask=fracture_mask,
@@ -944,7 +945,7 @@ def _scale_permeability(
         )
 
     # Always scale z-direction for inclined x/y fractures
-    if geom.orientation in ("x", "y"):
+    if orientation in ("x", "y"):
         _scale_permeability_z_boundary(
             perm_z=model.rock_properties.absolute_permeability.z,
             mask=fracture_mask,
@@ -1295,12 +1296,12 @@ def validate_fracture(
         return errors
 
     nx, ny, nz = grid_shape
-    geom = fracture.geometry
+    geometry = fracture.geometry
 
     # Validate primary range based on orientation
-    if geom.orientation == "x":
-        if geom.x_range is not None:
-            x_min, x_max = geom.x_range
+    if geometry.orientation == "x":
+        if geometry.x_range is not None:
+            x_min, x_max = geometry.x_range
             if x_min > x_max:
                 errors.append(
                     f"Fracture {fracture.id!r}: x_range min > max ({x_min} > {x_max})"
@@ -1310,9 +1311,9 @@ def validate_fracture(
                     f"Fracture {fracture.id!r}: x_range ({x_min}, {x_max}) out of bounds [0, {nx - 1}]"
                 )
 
-    elif geom.orientation == "y":
-        if geom.y_range is not None:
-            y_min, y_max = geom.y_range
+    elif geometry.orientation == "y":
+        if geometry.y_range is not None:
+            y_min, y_max = geometry.y_range
             if y_min > y_max:
                 errors.append(
                     f"Fracture {fracture.id!r}: y_range min > max ({y_min} > {y_max})"
@@ -1322,9 +1323,9 @@ def validate_fracture(
                     f"Fracture {fracture.id!r}: y_range ({y_min}, {y_max}) out of bounds [0, {ny - 1}]"
                 )
 
-    elif geom.orientation == "z":
-        if geom.z_range is not None:
-            z_min, z_max = geom.z_range
+    else:
+        if geometry.z_range is not None:
+            z_min, z_max = geometry.z_range
             if z_min > z_max:
                 errors.append(
                     f"Fracture {fracture.id!r}: z_range min > max ({z_min} > {z_max})"
@@ -1335,8 +1336,8 @@ def validate_fracture(
                 )
 
     # Validate z_range if specified (for x/y oriented fractures)
-    if geom.orientation in ("x", "y") and geom.z_range is not None:
-        z_min, z_max = geom.z_range
+    if geometry.orientation in ("x", "y") and geometry.z_range is not None:
+        z_min, z_max = geometry.z_range
         if z_min > z_max:
             errors.append(
                 f"Fracture {fracture.id!r}: z_range min > max ({z_min} > {z_max})"
@@ -1347,9 +1348,9 @@ def validate_fracture(
             )
 
     # Validate intercept if applicable
-    if geom.intercept != 0.0 and not (0 <= geom.intercept < nz):
+    if geometry.intercept != 0.0 and not (0 <= geometry.intercept < nz):
         errors.append(
-            f"Fracture {fracture.id!r}: intercept {geom.intercept} out of z-range [0, {nz - 1}]"
+            f"Fracture {fracture.id!r}: intercept {geometry.intercept} out of z-range [0, {nz - 1}]"
         )
 
     # Validate mask shape if provided
@@ -1357,5 +1358,4 @@ def validate_fracture(
         errors.append(
             f"Fracture {fracture.id!r}: mask shape {fracture.mask.shape} != grid shape {grid_shape}"
         )
-
     return errors

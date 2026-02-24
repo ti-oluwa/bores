@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.20.1"
 app = marimo.App(width="full", app_title="bores")
 
 
@@ -17,6 +17,13 @@ def setup_run():
     np.set_printoptions(threshold=np.inf)  # type: ignore
     bores.use_32bit_precision()
 
+    ilu_preconditioner = bores.CachedPreconditionerFactory(
+        factory="ilu",
+        name="cached_ilu",
+        update_frequency=10,
+        recompute_threshold=0.3,
+    )
+    ilu_preconditioner.register(override=True)
     # Load the new run with the resulting model state from the primary depletion run
     run = bores.Run.from_files(
         model_path=Path("./scenarios/runs/primary_depletion/results/model.h5"),
@@ -121,7 +128,7 @@ def setup_run():
     wells = bores.wells_(injectors=injectors, producers=producers)
     timer = bores.Timer(
         initial_step_size=bores.Time(hours=30.0),
-        max_step_size=bores.Time(days=2.0),
+        max_step_size=bores.Time(days=10.0),
         min_step_size=bores.Time(hours=6.0),
         simulation_time=bores.Time(days=(bores.c.DAYS_PER_YEAR * 5) + 100),
         max_cfl_number=0.9,
@@ -158,7 +165,7 @@ def execute_run(bores, run, store):
         run(),
         store=store,
         batch_size=30,
-        async_io=True,
+        background_io=True,
     )
     with stream:
         stream.consume()

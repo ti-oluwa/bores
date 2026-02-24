@@ -2,6 +2,8 @@
 Stream model state with optional persistence for memory-efficient simulation workflows.
 """
 
+from bores import StorageError
+
 import logging
 import queue
 import threading
@@ -14,7 +16,6 @@ from bores.errors import StreamError
 from bores.states import ModelState, validate_state
 from bores.stores import DataStore, EntryMeta
 from bores.types import NDimension
-
 
 __all__ = ["StateStream", "StreamProgress"]
 
@@ -55,8 +56,8 @@ class StateStream(typing.Generic[NDimension]):
     - Checkpointing for crash recovery
     - Memory monitoring with automatic flushing
 
-    **Async I/O**
-    When `async_io=True` disk writes happen in a background thread.  The
+    **Async/Background I/O**
+    When `background_io=True` disk writes happen in a background thread.  The
     simulation fills a queue; the I/O worker drains it.  `max_queue_size`
     applies back-pressure so memory stays bounded when the simulation is faster
     than disk.
@@ -80,8 +81,8 @@ class StateStream(typing.Generic[NDimension]):
     Example Usage:
     ```python
     store = ZarrStore("run01.zarr")
-    with StateStream(states=simulate(), store=store, async_io=True) as stream:
-        for state in stream:
+    with StateStream(states=simulate(), store=store, background_io=True) as stream:
+        for state in stream.until(some_condition):
             analyse(state)          # background thread writes while we analyse
 
     # Replay the whole run later
@@ -112,7 +113,7 @@ class StateStream(typing.Generic[NDimension]):
         checkpoint_store: typing.Optional[DataStore[ModelState[NDimension]]] = None,
         checkpoint_interval: typing.Optional[int] = None,
         max_batch_memory_usage: typing.Optional[float] = None,
-        async_io: bool = False,
+        background_io: bool = False,
         max_queue_size: int = 50,
         io_thread_name: str = "stream-io-worker",
         queue_timeout: float = 1.0,
@@ -139,7 +140,7 @@ class StateStream(typing.Generic[NDimension]):
         :param max_batch_memory_usage: Maximum batch memory in MB before forcing flush.
             Estimated by sampling first state's memory footprint. Batch flushes when either
             `batch_size` or `max_batch_memory_usage` threshold is reached. Example: 50.0 MB
-        :param async_io: Enable asynchronous I/O for non-blocking disk writes (default: False).
+        :param background_io: Enable asynchronous I/O for non-blocking disk writes (default: False).
             When enabled, disk writes happen in a background thread, allowing simulation to continue.
             Provides 2-3x speedup when I/O is slower than simulation timesteps.
         :param max_queue_size: Maximum states/batches in I/O queue before blocking (default: 50).
@@ -160,7 +161,7 @@ class StateStream(typing.Generic[NDimension]):
         self.checkpoint_interval = checkpoint_interval
         self.max_batch_memory_usage = max_batch_memory_usage
 
-        self.async_io = async_io
+        self.background_io = background_io
         self.max_queue_size = max_queue_size
         self.io_thread_name = io_thread_name
         self.queue_timeout = queue_timeout
@@ -185,11 +186,11 @@ class StateStream(typing.Generic[NDimension]):
                     "`max_batch_memory_usage` provided but no store configured. Memory-based flushing "
                     "will not occur without persistence."
                 )
-            if self.async_io:
+            if self.background_io:
                 logger.warning(
-                    "`async_io=True` but no store provided. Async I/O disabled."
+                    "`background_io=True` but no store provided. Async I/O disabled."
                 )
-                self.async_io = False
+                self.background_io = False
 
         if store is not None and not store.supports_append:
             raise StreamError(
@@ -237,7 +238,7 @@ class StateStream(typing.Generic[NDimension]):
             # Mark as already consumed since there's no states to iterate
             self._consumed = True
 
-        if self.async_io:
+        if self.background_io:
             self._start_io_worker()
 
     def _start_io_worker(self) -> None:
@@ -322,7 +323,7 @@ class StateStream(typing.Generic[NDimension]):
 
     def _wait_for_queue(self) -> None:
         """Wait for all pending I/O operations to complete."""
-        if not self.async_io or self._io_queue is None:
+        if not self.background_io or self._io_queue is None:
             return
 
         logger.debug("Waiting for I/O queue to drain...")
@@ -334,7 +335,7 @@ class StateStream(typing.Generic[NDimension]):
 
     def _stop_io_thread(self) -> None:
         """Stop the I/O worker thread gracefully."""
-        if not self.async_io or self._io_thread is None:
+        if not self.background_io or self._io_thread is None:
             return
 
         logger.debug("Stopping I/O worker thread...")
@@ -418,16 +419,15 @@ class StateStream(typing.Generic[NDimension]):
             self._consumed = True
             return
 
-        io_mode = "async" if self.async_io else "sync"
+        io_mode = "async" if self.background_io else "sync"
         logger.debug(
             f"Streaming -> {self.store} ({io_mode}, batch_size={self.batch_size})"
         )
-
         for state in self.states:
             self._yield_count += 1
 
             # Surface any background I/O errors before continuing/yielding
-            if self.async_io:
+            if self.background_io:
                 self._check_io_error()
 
             yield state
@@ -487,16 +487,16 @@ class StateStream(typing.Generic[NDimension]):
             try:
                 self.flush(block=False)  # Enqueue for I/O worker
             except Exception as exc:
-                logger.error(f"Failed to flush states on exit: {exc}")
+                logger.error(f"Failed to flush states on exit: {exc}", exc_info=True)
 
         # Wait for background I/O to complete
-        if self.async_io:
+        if self.background_io:
             try:
                 logger.info("Waiting for background I/O to complete...")
                 self._wait_for_queue()
                 self._stop_io_thread()
             except Exception as exc:
-                logger.error(f"Error during I/O worker shutdown: {exc}")
+                logger.error(f"Error during I/O worker shutdown: {exc}", exc_info=True)
                 if exc_type is None:
                     raise
 
@@ -515,7 +515,7 @@ class StateStream(typing.Generic[NDimension]):
         Get the last state from the stream.
 
         Iterates through the entire stream and returns the final state.
-        Useful for quickly accessing the end result of a simulation.
+        Useful for quickly accessing only the end result of a simulation.
 
         :return: The last `ModelState` instance, or None if the stream is empty
         """
@@ -615,7 +615,7 @@ class StateStream(typing.Generic[NDimension]):
         :return: Iterator over `ModelState` instances matching the filter criteria,
             in insertion order.
         :raises StreamError: If no store was provided at construction time.
-        :raises StorageError: If the store file is missing or corrupted.
+            Or if any storage-related error occurs.
         """
         if self.store is None:
             raise StreamError("Cannot replay: no store provided")
@@ -629,8 +629,8 @@ class StateStream(typing.Generic[NDimension]):
                 def _predicate(entry: EntryMeta) -> bool:
                     step = int(entry.meta.get("step", -1))
                     if predicate is not None:
-                        return steps(step) and predicate(entry)
-                    return steps(step)
+                        return steps(step) and predicate(entry)  # type: ignore
+                    return steps(step)  # type: ignore
             else:
                 steps_set = set(steps)
 
@@ -643,16 +643,59 @@ class StateStream(typing.Generic[NDimension]):
 
             pred = _predicate
 
-        for state in self.store.load(
-            ModelState,
-            indices=indices,
-            predicate=pred,
-            validator=validator or (validate_state if self.validate else None),
-        ):
-            self._yield_count += 1
-            yield state
+        try:
+            for state in self.store.load(
+                ModelState,
+                indices=indices,
+                predicate=pred,
+                validator=validator or (validate_state if self.validate else None),
+            ):
+                self._yield_count += 1
+                yield state
+        except StorageError as exc:
+            raise StreamError(
+                f"An error occured while replaying stream: {exc}"
+            ) from exc
 
         logger.debug(f"Replay complete: {self._yield_count} total yielded")
+
+    def until(
+        self, condition: typing.Callable[[ModelState[NDimension]], bool]
+    ) -> typing.Iterator[ModelState[NDimension]]:
+        """
+        Iterate over states, optionally persisting as we go, until `condition` evaluates to True.
+
+        This is a wrapper around `__iter__`, allowing you to stream states until a stop criteria is met
+
+        :param condition: Iteration stop condition/criteria.
+        :return: Iterator over `ModelState` instances
+        :raises `StreamError`: If trying to iterate again after exhaustion (when auto_replay=False or no store)
+        """
+        for state in self:
+            if condition(state):
+                yield state
+                break
+            yield state
+
+    def while_(
+        self, condition: typing.Callable[[ModelState[NDimension]], bool]
+    ) -> typing.Iterator[ModelState[NDimension]]:
+        """
+        Iterate over states, optionally persisting as we go, as long `condition` evaluates to True.
+        Stop when `condition` evaluates to False.
+
+        This is a wrapper around `__iter__`, allowing you to stream states
+        based on a criteria until it can no longer be met
+
+        :param condition: Iteration continuation condition/criteria.
+        :return: Iterator over `ModelState` instances
+        :raises `StreamError`: If trying to iterate again after exhaustion (when auto_replay=False or no store)
+        """
+        for state in self:
+            if not condition(state):
+                yield state
+                break
+            yield state
 
     def flush(self, block: bool = False) -> None:
         """
@@ -669,14 +712,14 @@ class StateStream(typing.Generic[NDimension]):
 
         :param block: If True, wait for I/O thread to complete all pending writes.
             If False (default), just enqueue and return immediately (async behavior).
-            Only relevant when `async_io=True`.
+            Only relevant when `background_io=True`.
         :raises StreamError: If no store provided or I/O error occurred
         """
         if self.store is None:
             raise StreamError("Cannot flush: no store provided")
 
         if not self._batch:
-            if block and self.async_io:
+            if block and self.background_io:
                 # Even with empty batch, block might want to wait for queue
                 logger.debug("Flush called with empty batch, waiting for queue...")
                 self._wait_for_queue()
@@ -686,7 +729,7 @@ class StateStream(typing.Generic[NDimension]):
 
         batch_size = len(self._batch)
 
-        if self.async_io:
+        if self.background_io:
             logger.debug(
                 f"Enqueuing batch of {batch_size} states to I/O thread (block={block})"
             )
@@ -707,7 +750,6 @@ class StateStream(typing.Generic[NDimension]):
 
                 # Clear batch and reassign to new list to free memory immediately
                 self._batch = []
-
                 # If blocking requested, wait for queue to drain
                 if block:
                     self._wait_for_queue()
@@ -746,9 +788,9 @@ class StateStream(typing.Generic[NDimension]):
         Get a copy of states in the current batch (not yet flushed to store).
 
         Useful for:
-            - Inspecting what will be saved on next flush
-            - Recovering states if an error occurs before flush
-            - Debugging batch accumulation behavior
+        - Inspecting what will be saved on next flush
+        - Recovering states if an error occurs before flush
+        - Debugging batch accumulation behavior
 
         :return: Copy of the current batch buffer (safe to modify without affecting stream)
         """
@@ -781,7 +823,11 @@ class StateStream(typing.Generic[NDimension]):
                         nested_attr = getattr(attr, nested_attr_name, None)
                         if isinstance(nested_attr, np.ndarray):
                             size_bytes += nested_attr.nbytes
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to estimate memory size for {attr_name!r}: {exc}",
+                    exc_info=True,
+                )
                 continue
 
         self._state_size_mb = size_bytes / 1024 / 1024
@@ -856,7 +902,9 @@ class StateStream(typing.Generic[NDimension]):
             self._checkpoints_count += 1
             logger.info(f"Checkpoint saved at step {state.step}")
         except Exception as exc:
-            logger.error(f"Failed to save checkpoint at step {state.step}: {exc}")
+            logger.error(
+                f"Failed to save checkpoint at step {state.step}: {exc}", exc_info=True
+            )
 
     def checkpoint(self, step: int) -> ModelState[NDimension]:
         """
@@ -875,7 +923,7 @@ class StateStream(typing.Generic[NDimension]):
         results = list(
             self.checkpoint_store.load(
                 ModelState,
-                predicate=lambda e: e.meta.get("step") == step,
+                predicate=lambda e: int(e.meta["step"]) == step,
             )
         )
         if not results:
@@ -890,7 +938,7 @@ class StateStream(typing.Generic[NDimension]):
         :raises `StreamError`: If checkpointing not configured
         """
         if self.checkpoint_store is None:
-            raise StreamError("No checkpoint_store configured.")
+            raise StreamError("No `checkpoint_store` configured.")
         yield from self.checkpoint_store.load(ModelState)
 
     def list_checkpoints(self) -> typing.List[int]:
@@ -911,7 +959,6 @@ class StateStream(typing.Generic[NDimension]):
             if "step" in e.meta
         )
 
-    @property
     def progress(self) -> StreamProgress:
         """
         Get streaming progress statistics.
@@ -923,8 +970,8 @@ class StateStream(typing.Generic[NDimension]):
             - batch_pending: States in current batch (not yet saved)
             - store_backend: Type of store being used (or None)
             - memory_usage: Estimated batch memory in MB
-            - io_queue_size: Size of async I/O queue (if async_io enabled)
-            - io_thread_alive: Whether I/O thread is running (if async_io enabled)
+            - io_queue_size: Size of async I/O queue (if background_io enabled)
+            - io_thread_alive: Whether I/O thread is running (if background_io enabled)
         """
         if self._batch and self._state_size_mb is not None:
             batch_memory_usage = self._state_size_mb * len(self._batch)
@@ -939,9 +986,7 @@ class StateStream(typing.Generic[NDimension]):
             store_backend=type(self.store).__name__ if self.store else None,
             memory_usage=batch_memory_usage,
         )
-
-        # Add async I/O specific stats
-        if self.async_io and self._io_queue is not None:
+        if self.background_io and self._io_queue is not None:
             progress["io_queue_size"] = self._io_queue.qsize()  # type: ignore[typeddict-unknown-key]
             progress["io_thread_alive"] = (  # type: ignore[typeddict-unknown-key]
                 self._io_thread.is_alive() if self._io_thread else False
@@ -990,7 +1035,7 @@ class StateStream(typing.Generic[NDimension]):
 
     def __repr__(self) -> str:
         store_info = f"store={self.store}" if self.store else "no store"
-        io_mode = "async" if self.async_io else "sync"
+        io_mode = "async" if self.background_io else "sync"
         return (
             f"{self.__class__.__name__}({store_info}, {io_mode}, "
             f"batch_size={self.batch_size}, yielded={self._yield_count}, "

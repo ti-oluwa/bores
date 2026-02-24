@@ -1,39 +1,307 @@
+import typing
 from dataclasses import dataclass
 from enum import Enum
-import typing
 
 import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
-from plotly.subplots import make_subplots  # type: ignore[import-untyped]
 import plotly.io as pio  # type: ignore[import-untyped]
+from plotly.subplots import make_subplots  # type: ignore[import-untyped]
 
+from bores.visualization.config import (
+    COLORBAR_BOUNDARY_PADDING as _COLORBAR_BOUNDARY_PADDING,
+)
+from bores.visualization.config import (
+    COLORBAR_HEIGHT_FACTOR as _COLORBAR_HEIGHT_FACTOR,
+)
+from bores.visualization.config import (
+    COLORBAR_MIN_LENGTH as _COLORBAR_MIN_LENGTH,
+)
+from bores.visualization.config import (
+    COLORBAR_VERTICAL_PADDING as _COLORBAR_VERTICAL_PADDING,
+)
+from bores.visualization.config import (
+    COLORBAR_XPAD as _COLORBAR_XPAD,
+)
+from bores.visualization.config import (
+    DEFAULT_COLORBAR_MIN_THICKNESS as _COLORBAR_MIN_THICKNESS,
+)
+from bores.visualization.config import (
+    DEFAULT_COLORBAR_THICKNESS as _COLORBAR_BASE_THICKNESS,
+)
 
 __all__ = [
-    "property_registry",
-    "PropertyRegistry",
     "ColorScheme",
-    "merge_plots",
+    "ColorbarConfig",
+    "ColorbarPresets",
+    "PropertyMeta",
+    "PropertyRegistry",
     "image_config",
+    "merge_plots",
+    "property_registry",
 ]
 
 
 class ColorScheme(str, Enum):
-    """Color schemes for reservoir visualization."""
+    """
+    Color schemes for reservoir visualization.
+
+    **Colorblind-Friendly Schemes (Recommended):**
+
+    These color schemes are designed to be accessible to users with color vision deficiencies
+    and are recommended for scientific visualization:
+
+    - `VIRIDIS`: Perceptually uniform, colorblind-friendly (blue → green → yellow)
+    - `CIVIDIS`: Optimized for colorblind accessibility, similar to viridis
+    - `PLASMA`: Colorblind-friendly (purple → pink → yellow)
+    - `INFERNO`: Colorblind-friendly (black → purple → yellow → white)
+    - `MAGMA`: Colorblind-friendly (black → purple → pink → yellow)
+
+    **Diverging Schemes:**
+
+    Use these for data that diverges around a central value (e.g., pressure changes):
+
+    - `RdBu`: Red-Blue diverging (warning: not ideal for red-green colorblindness)
+    - `RdYlBu`: Red-Yellow-Blue diverging
+    - `SPECTRAL`: Spectral diverging (warning: poor for colorblindness)
+    - `BALANCE`: Balanced diverging, better accessibility
+
+    **Other Schemes:**
+
+    - `TURBO`: High-contrast rainbow (warning: not colorblind-friendly)
+    - `EARTH`: Earth tones for geological visualization
+
+    For maximum accessibility, prefer `VIRIDIS`, `CIVIDIS`, `PLASMA`, `INFERNO`, or `MAGMA`.
+    """
 
     VIRIDIS = "viridis"
+    """Perceptually uniform, colorblind-friendly (recommended)"""
+
     PLASMA = "plasma"
+    """Colorblind-friendly sequential (recommended)"""
+
     INFERNO = "inferno"
+    """Colorblind-friendly sequential (recommended)"""
+
     MAGMA = "magma"
+    """Colorblind-friendly sequential (recommended)"""
+
     CIVIDIS = "cividis"
+    """Optimized for colorblindness (recommended)"""
+
     TURBO = "turbo"
+    """High-contrast rainbow (not colorblind-friendly)"""
+
     RdYlBu = "rdylbu"
+    """Red-Yellow-Blue diverging"""
+
     RdBu = "rdbu"
+    """Red-Blue diverging (caution: red-green colorblindness)"""
+
     SPECTRAL = "spectral"
+    """Spectral diverging (not colorblind-friendly)"""
+
     BALANCE = "balance"
+    """Balanced diverging with better accessibility"""
+
     EARTH = "earth"
+    """Earth tones for geological visualization"""
 
     def __str__(self) -> str:
         return self.value
+
+
+@dataclass(frozen=True)
+class ColorbarConfig:
+    """Configuration for a colorbar preset."""
+
+    colorscale: str
+    """Plotly colorscale name"""
+
+    reversescale: bool = False
+    """Whether to reverse the colorscale direction"""
+
+    cmin: typing.Optional[float] = None
+    """Minimum value for color mapping (None = auto from data)"""
+
+    cmax: typing.Optional[float] = None
+    """Maximum value for color mapping (None = auto from data)"""
+
+    title: typing.Optional[str] = None
+    """Title text for the colorbar"""
+
+    tickformat: typing.Optional[str] = None
+    """Format string for colorbar tick labels (e.g., '.2f', '.2e')"""
+
+    def to_plotly_dict(self) -> typing.Dict[str, typing.Any]:
+        """
+        Convert to Plotly colorbar dictionary format.
+
+        :return: Dictionary suitable for plotly colorbar parameter
+        """
+        result: typing.Dict[str, typing.Any] = {
+            "colorscale": self.colorscale,
+        }
+        if self.reversescale:
+            result["reversescale"] = True
+        if self.cmin is not None:
+            result["cmin"] = self.cmin
+        if self.cmax is not None:
+            result["cmax"] = self.cmax
+        if self.title:
+            result["title"] = self.title
+        if self.tickformat:
+            result["tickformat"] = self.tickformat
+        return result
+
+
+class ColorbarPresets:
+    """
+    Predefined colorbar configurations for common reservoir properties.
+
+    Each preset is optimized for the typical value ranges and physical
+    meaning of different reservoir properties.
+    """
+
+    # Saturation properties (0-1 range)
+    SATURATION = ColorbarConfig(
+        colorscale="RdYlBu_r",
+        cmin=0.0,
+        cmax=1.0,
+        tickformat=".2f",
+    )
+    """Oil/water/gas saturation - blue (low) to red (high)"""
+
+    OIL_SATURATION = ColorbarConfig(
+        colorscale="Cividis",
+        cmin=0.0,
+        cmax=1.0,
+        tickformat=".2f",
+    )
+    """Oil saturation - perceptually uniform, colorblind-friendly"""
+
+    WATER_SATURATION = ColorbarConfig(
+        colorscale="RdBu",
+        reversescale=True,
+        cmin=0.0,
+        cmax=1.0,
+        tickformat=".2f",
+    )
+    """Water saturation - blue (wet) to red (dry)"""
+
+    GAS_SATURATION = ColorbarConfig(
+        colorscale="Magma",
+        cmin=0.0,
+        cmax=1.0,
+        tickformat=".2f",
+    )
+    """Gas saturation - dark (low) to bright (high)"""
+
+    # Pressure (typically 1000-5000 psi for reservoirs)
+    PRESSURE = ColorbarConfig(
+        colorscale="Viridis",
+        tickformat=".0f",
+    )
+    """Reservoir pressure - sequential colorscale"""
+
+    PRESSURE_DEPLETION = ColorbarConfig(
+        colorscale="RdYlGn",
+        reversescale=True,
+        tickformat=".0f",
+    )
+    """Pressure depletion - green (high) to red (depleted)"""
+
+    # Temperature (typically 100-300°F)
+    TEMPERATURE = ColorbarConfig(
+        colorscale="Inferno",
+        tickformat=".1f",
+    )
+    """Temperature - heat-like colorscale (dark to bright yellow/white)"""
+
+    # Viscosity (log scale, 0.1 to 10,000+ cP)
+    VISCOSITY = ColorbarConfig(
+        colorscale="Inferno",
+        tickformat=".2e",
+    )
+    """Viscosity - use with log-scale data"""
+
+    # Density
+    DENSITY = ColorbarConfig(
+        colorscale="Plasma",
+        tickformat=".1f",
+    )
+    """Density - sequential colorscale"""
+
+    # Permeability (log scale, 0.001 to 10,000+ mD)
+    PERMEABILITY = ColorbarConfig(
+        colorscale="Viridis",
+        tickformat=".2e",
+    )
+    """Permeability - use with log-scale data"""
+
+    # Porosity (0-0.4 typical)
+    POROSITY = ColorbarConfig(
+        colorscale="Cividis",
+        cmin=0.0,
+        cmax=0.4,
+        tickformat=".3f",
+    )
+    """Porosity - perceptually uniform"""
+
+    # Generic diverging (for anomalies, differences)
+    DIVERGING = ColorbarConfig(
+        colorscale="RdBu",
+        tickformat=".2f",
+    )
+    """Diverging colorscale - red (negative) to blue (positive)"""
+
+    DIVERGING_BALANCED = ColorbarConfig(
+        colorscale="Balance",
+        tickformat=".2f",
+    )
+    """Balanced diverging - symmetric around zero"""
+
+    # Earth/geological
+    DEPTH = ColorbarConfig(
+        colorscale="Earth",
+        reversescale=True,
+        tickformat=".0f",
+    )
+    """Depth - earth tones, reversed (shallow=light, deep=dark)"""
+
+    @classmethod
+    def get_for_property(cls, property_name: str) -> typing.Optional[ColorbarConfig]:
+        """
+        Get the recommended colorbar preset for a property name.
+
+        :param property_name: Name of the property (e.g., 'pressure', 'oil_saturation')
+        :return: ColorbarConfig if found, None otherwise
+
+        Example:
+        ```python
+        preset = ColorbarPresets.get_for_property("oil_saturation")
+        colorbar_dict = preset.to_plotly_dict()
+        ```
+        """
+        property_map = {
+            "oil_saturation": cls.OIL_SATURATION,
+            "water_saturation": cls.WATER_SATURATION,
+            "gas_saturation": cls.GAS_SATURATION,
+            "pressure": cls.PRESSURE,
+            "oil_pressure": cls.PRESSURE,
+            "temperature": cls.TEMPERATURE,
+            "oil_viscosity": cls.VISCOSITY,
+            "water_viscosity": cls.VISCOSITY,
+            "gas_viscosity": cls.VISCOSITY,
+            "oil_density": cls.DENSITY,
+            "water_density": cls.DENSITY,
+            "gas_density": cls.DENSITY,
+            "permeability_x": cls.PERMEABILITY,
+            "permeability_y": cls.PERMEABILITY,
+            "permeability_z": cls.PERMEABILITY,
+            "porosity": cls.POROSITY,
+            "thickness": cls.DEPTH,
+        }
+        return property_map.get(property_name.lower())
 
 
 @dataclass(frozen=True)
@@ -831,6 +1099,55 @@ def _copy_2d_axis_properties(
         target_axis.anchor = source_axis.anchor
 
 
+def _calculate_colorbar_position(
+    row: int,
+    col: int,
+    rows: int,
+    cols: int,
+) -> typing.Dict[str, typing.Any]:
+    """
+    Calculate smart colorbar positioning for subplot grids.
+
+    This helper function computes the optimal position and size for colorbars
+    in multi-subplot layouts to prevent overlap and maintain visual clarity.
+
+    :param row: Current subplot row (1-indexed)
+    :param col: Current subplot column (1-indexed)
+    :param rows: Total number of rows in the grid
+    :param cols: Total number of columns in the grid
+    :return: Dictionary with colorbar position and size parameters
+    """
+    # Calculate horizontal position based on column
+    col_end = col / cols
+    colorbar_x_position = col_end - _COLORBAR_BOUNDARY_PADDING
+
+    # Calculate vertical position based on row (inverted because plotly counts from bottom)
+    row_fraction = (rows - row + 1) / rows
+    subplot_height = 1.0 / rows
+    colorbar_y_position = row_fraction - subplot_height / 2
+
+    # Calculate colorbar length with vertical padding for gaps
+    colorbar_length = max(
+        _COLORBAR_MIN_LENGTH,
+        (subplot_height * _COLORBAR_HEIGHT_FACTOR) - (2 * _COLORBAR_VERTICAL_PADDING),
+    )
+
+    # Scale thickness based on number of columns to prevent overlap
+    colorbar_thickness = min(
+        _COLORBAR_MIN_THICKNESS, int(_COLORBAR_BASE_THICKNESS / cols)
+    )
+
+    return {
+        "x": colorbar_x_position,
+        "y": colorbar_y_position,
+        "len": colorbar_length,
+        "thickness": colorbar_thickness,
+        "xanchor": "left",
+        "yanchor": "middle",
+        "xpad": _COLORBAR_XPAD,
+    }
+
+
 def merge_plots(
     *figures: go.Figure,
     rows: typing.Optional[int] = None,
@@ -1157,48 +1474,13 @@ def merge_plots(
                             else {}
                         )
 
-                        # Position colorbar to the right of its specific subplot with gaps
-                        # Calculate horizontal position based on column
-                        # Place colorbar outside the subplot area with proper spacing
-                        col_end = col / cols
-
-                        # Position colorbar at the right edge of subplot with padding
-                        colorbar_x_position = (
-                            col_end - 0.01
-                        )  # Just inside the subplot boundary
-
-                        # Calculate vertical position based on row (for multi-row layouts)
-                        row_fraction = (
-                            rows - row + 1
-                        ) / rows  # Inverted because plotly counts from bottom
-                        subplot_height = 1.0 / rows
-                        colorbar_y_position = row_fraction - subplot_height / 2
-
-                        # Add vertical padding to create gaps between colorbars
-                        vertical_padding = (
-                            0.08  # Increased padding for better separation
+                        # Calculate smart colorbar positioning for this subplot
+                        colorbar_position = _calculate_colorbar_position(
+                            row=row, col=col, rows=rows, cols=cols
                         )
-                        colorbar_length = max(
-                            0.25, (subplot_height * 0.85) - (2 * vertical_padding)
-                        )
-
-                        # Reduce thickness to prevent overlap
-                        colorbar_thickness = min(
-                            12, int(15 / cols)
-                        )  # Scale with number of columns
 
                         # Set colorbar position and size to fit within subplot bounds with gaps
-                        colorbar_dict.update(
-                            {
-                                "x": colorbar_x_position,
-                                "y": colorbar_y_position,
-                                "len": colorbar_length,  # Reduced length to create vertical gaps
-                                "thickness": colorbar_thickness,  # Thinner for multiple columns
-                                "xanchor": "left",
-                                "yanchor": "middle",
-                                "xpad": 10,  # Add padding from plot
-                            }
-                        )
+                        colorbar_dict.update(colorbar_position)
                         combined_fig.data[combined_trace_idx].colorbar = colorbar_dict
 
     # Apply subplot-specific background colors using shapes

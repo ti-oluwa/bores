@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.11"
+__generated_with = "0.20.2"
 app = marimo.App(width="full")
 
 
@@ -19,7 +19,7 @@ def _():
     )
     stream = bores.StateStream(store=store, auto_replay=True)
 
-    states = list(stream.replay(steps=lambda step: step == 0 or step % 2 == 0))
+    states = list(stream.replay(steps=None))
     return bores, itertools, np, states
 
 
@@ -664,14 +664,14 @@ def _(bores, states, viz):
         show_perforations=True,
         # x_slice=(10, 20),
         # z_slice=(0, 8),
-        # isomin=1800,
-        # cmin=1,
-        # cmax=2.0,
+        isomin=0.6,
+        cmin=0,
+        cmax=1,
     )
 
-    property = "oil-effective-density"
+    property = "oil-sat"
     figures = []
-    timesteps = [0, 14]
+    timesteps = [0, 974]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

@@ -2,11 +2,11 @@
 Plotly-based 3D Visualization Suite for Reservoir Simulation Data and Results.
 """
 
-from abc import ABC, abstractmethod
-from enum import Enum
 import itertools
 import logging
 import typing
+from abc import ABC, abstractmethod
+from enum import Enum
 
 import attrs
 import numpy as np
@@ -30,6 +30,10 @@ from bores.visualization.base import (
     PropertyMeta,
     PropertyRegistry,
     property_registry,
+)
+from bores.visualization.config import (
+    MAX_VOLUME_CELLS_3D,
+    RECOMMENDED_VOLUME_CELLS_3D,
 )
 from bores.wells import Wells
 
@@ -850,7 +854,7 @@ class BaseRenderer(ABC):
 
         Subclasses should override this with their specific keyword arguments.
         """
-        pass
+        ...
 
     def get_colorscale(self, color_scheme: typing.Union[ColorScheme, str]) -> str:
         """
@@ -1983,10 +1987,27 @@ class VolumeRenderer(BaseRenderer):
         aspect_mode: typing.Optional[str] = "auto",
         z_scale: float = 1.0,
         labels: typing.Optional["Labels"] = None,
+        auto_coarsen: bool = True,
         **kwargs,
     ) -> go.Figure:
         """
         Render a volume rendering plot.
+
+        **Performance Considerations:**
+
+        Volume rendering is computationally intensive. For optimal performance:
+
+        - **Recommended grid size**: 80x80x80 cells (512K cells) or smaller
+        - **Maximum grid size**: 100x100x100 cells (1M cells)
+        - **Beyond 1M cells**: Automatic coarsening is applied (can be disabled with auto_coarsen=False)
+        - **Memory usage**: ~4 MB per 1M cells (float32)
+
+        For large grids (>1M cells), consider using:
+
+        1. Manual coarsening with `bores.grids.base.coarsen_grid()` before rendering
+        2. Slicing to visualize specific regions: `data[::2, ::2, ::2]` (every other cell)
+        3. Using `IsosurfaceRenderer` instead (supports up to 2M cells)
+        4. Using `CellBlockRenderer` for selective cell visualization
 
         :param figure: Plotly figure to add the volume rendering to
         :param data: 3D data array to render
@@ -2011,10 +2032,52 @@ class VolumeRenderer(BaseRenderer):
         :param z_scale: Scale factor for Z-axis (thickness) to make layers appear thicker.
             Values > 1.0 exaggerate vertical thickness, < 1.0 compress it. Default is 1.0 (true scale).
         :param labels: Optional collection of labels to add to the plot
+        :param auto_coarsen: Whether to automatically coarsen grids larger than 1M cells for performance (default: True)
         :return: Plotly figure object with volume rendering
         """
         if data.ndim != 3:
             raise ValidationError("Volume rendering requires 3D data")
+
+        # Automatic coarsening for large grids
+        coordinate_offsets = kwargs.get("coordinate_offsets", None)
+        original_shape = data.shape
+        total_cells = np.prod(data.shape)
+
+        if auto_coarsen and total_cells > MAX_VOLUME_CELLS_3D:
+            # Calculate optimal coarsening factor
+            target_cells = RECOMMENDED_VOLUME_CELLS_3D
+            ratio = total_cells / target_cells
+            coarsen_factor = int(np.ceil(ratio ** (1.0 / 3.0)))
+
+            logger.warning(
+                f"Grid size {data.shape} ({total_cells:,} cells) exceeds recommended limit of 1M cells. "
+                f"Automatically coarsening by factor {coarsen_factor} for performance. "
+                f"To disable, set auto_coarsen=False."
+            )
+
+            # Coarsen the data
+            data = coarsen_grid(
+                data, batch_size=(coarsen_factor, coarsen_factor, coarsen_factor)
+            )
+
+            # Coarsen depth_grid if provided
+            if depth_grid is not None:
+                depth_grid = coarsen_grid(
+                    depth_grid,
+                    batch_size=(coarsen_factor, coarsen_factor, coarsen_factor),
+                )
+
+            # Update cell dimensions if provided (cells are now larger)
+            if cell_dimension is not None:
+                cell_dimension = (
+                    cell_dimension[0] * coarsen_factor,
+                    cell_dimension[1] * coarsen_factor,
+                )
+
+            logger.info(
+                f"Coarsened grid from {original_shape} to {data.shape} "
+                f"({np.prod(data.shape):,} cells, {np.prod(data.shape) / total_cells * 100:.1f}% of original)"
+            )
 
         use_opacity_scaling = (
             use_opacity_scaling
@@ -2218,7 +2281,6 @@ class VolumeRenderer(BaseRenderer):
             y_range=y_range,
             z_range=z_range,
         )
-
         if labels is not None:
             self.apply_labels(
                 figure,
@@ -2529,7 +2591,6 @@ class IsosurfaceRenderer(BaseRenderer):
             y_range=y_range,
             z_range=z_range,
         )
-
         if labels is not None:
             self.apply_labels(
                 figure,
@@ -2571,7 +2632,6 @@ class IsosurfaceRenderer(BaseRenderer):
         :param z_range: Tuple of (min, max) for z-axis data range
         """
         aspect_mode = aspect_mode or self.config.aspect_mode or "auto"
-
         scene_config = self.get_scene_config(
             x_title=x_title,
             y_title=y_title,
@@ -3065,7 +3125,6 @@ class CellBlockRenderer(BaseRenderer):
             y_range=y_range,
             z_range=z_range,
         )
-
         if labels is not None:
             self.apply_labels(
                 figure,
@@ -3106,10 +3165,8 @@ class CellBlockRenderer(BaseRenderer):
         :param y_range: Tuple of (min, max) for y-axis data range
         :param z_range: Tuple of (min, max) for z-axis data range
         """
-        aspect_mode = (
-            aspect_mode or "data"
-        )  # CellBlock defaults to "data" to preserve physical dimensions
-
+        # CellBlock defaults to "data" to preserve physical dimensions
+        aspect_mode = aspect_mode or "data"
         scene_config = self.get_scene_config(
             x_title=x_title,
             y_title=y_title,
@@ -3389,7 +3446,6 @@ class Scatter3DRenderer(BaseRenderer):
             y_range=y_range,
             z_range=z_range,
         )
-
         if labels is not None:
             self.apply_labels(
                 figure,
@@ -3431,7 +3487,6 @@ class Scatter3DRenderer(BaseRenderer):
         :param z_range: Tuple of (min, max) for z-axis data range
         """
         aspect_mode = aspect_mode or self.config.aspect_mode or "auto"
-
         scene_config = self.get_scene_config(
             x_title=x_title,
             y_title=y_title,

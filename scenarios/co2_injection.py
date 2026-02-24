@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.11"
+__generated_with = "0.20.2"
 app = marimo.App(width="full", app_title="bores")
 
 
@@ -16,13 +16,14 @@ def setup_run():
     np.set_printoptions(threshold=np.inf)  # type: ignore
     bores.use_32bit_precision()
 
-    ilu_preconditioner = bores.CachedPreconditionerFactory(
+    preconditioner_factory = bores.CachedPreconditionerFactory(
         factory="ilu",
         name="cached_ilu",
         update_frequency=10,
         recompute_threshold=0.3,
     )
-    ilu_preconditioner.register(override=True)
+    preconditioner_factory.register(override=True)
+
     # Load the new run with the resulting model state from the primary depletion run
     run = bores.Run.from_files(
         model_path=Path("./scenarios/runs/primary_depletion/results/model.h5"),
@@ -49,7 +50,7 @@ def setup_run():
             specific_gravity=0.818,
             molecular_weight=44.0,
             viscosity=0.05,  # cP at reservoir conditions
-            density=35.0,  # lbm/ft³ at reservoir P&T (NOT 3-7!)
+            density=35.0,  # lbm/ft³ at reservoir P&T
             minimum_miscibility_pressure=2200.0,
             todd_longstaff_omega=0.67,
             is_miscible=True,
@@ -69,27 +70,30 @@ def setup_run():
     production_clamp = bores.ProductionClamp()
     control = bores.MultiPhaseRateControl(
         oil_control=bores.AdaptiveBHPRateControl(
-            target_rate=-150,
+            target_rate=-5000,
             target_phase="oil",
-            bhp_limit=1200,
+            bhp_limit=300,
             clamp=production_clamp,
         ),
         gas_control=bores.AdaptiveBHPRateControl(
             target_rate=-500,
             target_phase="gas",
-            bhp_limit=1200,
+            bhp_limit=800,
             clamp=production_clamp,
         ),
         water_control=bores.AdaptiveBHPRateControl(
-            target_rate=-10,
+            target_rate=-20,
             target_phase="water",
-            bhp_limit=1200,
+            bhp_limit=800,
             clamp=production_clamp,
         ),
     )
     producer = bores.production_well(
         well_name="P-1",
-        perforating_intervals=[((14, 10, 3), (14, 10, 4))],
+        perforating_intervals=[
+            ((14, 10, 3), (14, 10, 4)),
+            ((14, 10, 6), (14, 10, 7)),
+        ],
         radius=0.3542,
         control=control,
         produced_fluids=(
@@ -112,8 +116,8 @@ def setup_run():
                 molecular_weight=18.015,
             ),
         ),
-        skin_factor=2.5,
-        is_active=False,  # Start inactive, schedule will activate at 100 days
+        skin_factor=-2.5,
+        is_active=False,  # Start inactive, schedule will activate well after 100 days
     )
     # We use a well schedule to activate the producer after some time
     well_schedule = bores.WellSchedule()
@@ -132,9 +136,9 @@ def setup_run():
     wells = bores.wells_(injectors=injectors, producers=producers)
     timer = bores.Timer(
         initial_step_size=bores.Time(hours=30.0),
-        max_step_size=bores.Time(days=5.0),
-        min_step_size=bores.Time(minutes=10),
-        simulation_time=bores.Time(days=(bores.c.DAYS_PER_YEAR * 2) + 100),
+        max_step_size=bores.Time(days=7.0),
+        min_step_size=bores.Time(hours=1),
+        simulation_time=bores.Time(days=(bores.c.DAYS_PER_YEAR * 10) + 100),
         max_cfl_number=0.9,
         ramp_up_factor=1.2,
         backoff_factor=0.5,
@@ -146,7 +150,6 @@ def setup_run():
         well_schedules=well_schedules,
         timer=timer,
         miscibility_model="todd_longstaff",
-        constants=bores.Constants(),
     )
     run.config.to_file(Path("./scenarios/runs/co2_injection/config.yaml"))
     return Path, bores, run
@@ -172,7 +175,7 @@ def execute_run(bores, run, store):
         run(),
         store=store,
         batch_size=30,
-        async_io=True,
+        background_io=True,
     )
     with stream:
         stream.consume()

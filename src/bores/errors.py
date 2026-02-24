@@ -2,18 +2,18 @@
 
 __all__ = [
     "BORESError",
-    "ValidationError",
-    "PreconditionerError",
-    "SolverError",
     "ComputationError",
+    "DeserializationError",
+    "PreconditionerError",
+    "SerializableError",
+    "SerializationError",
     "SimulationError",
-    "TimingError",
+    "SolverError",
     "StopSimulation",
     "StorageError",
     "StreamError",
-    "SerializableError",
-    "SerializationError",
-    "DeserializationError",
+    "TimingError",
+    "ValidationError",
 ]
 
 

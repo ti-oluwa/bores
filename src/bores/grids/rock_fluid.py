@@ -190,9 +190,9 @@ def build_effective_residual_saturation_grids(
     residual_oil_saturation_water_grid: NDimensionalGrid[ThreeDimensions],
     residual_oil_saturation_gas_grid: NDimensionalGrid[ThreeDimensions],
     residual_gas_saturation_grid: NDimensionalGrid[ThreeDimensions],
-    residual_oil_drainage_ratio_water_flood: float = 0.6,  # Sorw_drainage = 0.6 × Sorw_imbibition
-    residual_oil_drainage_ratio_gas_flood: float = 0.6,  # Sorg_drainage = 0.6 × Sorg_imbibition
-    residual_gas_drainage_ratio: float = 0.5,  # Sgr_drainage = 0.5 × Sgr_imbibition
+    residual_oil_drainage_ratio_water_flood: float = 0.6,  # Sorw_drainage = 0.6 x Sorw_imbibition
+    residual_oil_drainage_ratio_gas_flood: float = 0.6,  # Sorg_drainage = 0.6 x Sorg_imbibition
+    residual_gas_drainage_ratio: float = 0.5,  # Sgr_drainage = 0.5 x Sgr_imbibition
     tolerance: float = 1e-6,
 ) -> typing.Tuple[
     NDimensionalGrid[ThreeDimensions],

@@ -19,7 +19,7 @@ def _():
     )
     stream = bores.StateStream(store=store, auto_replay=True)
 
-    states = list(stream.replay(steps=None))
+    states = list(stream.replay())
     return bores, itertools, np, states
 
 

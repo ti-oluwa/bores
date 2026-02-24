@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.11"
+__generated_with = "0.20.2"
 app = marimo.App(width="full", app_title="bores")
 
 
@@ -17,13 +17,14 @@ def setup_run():
     bores.use_32bit_precision()
 
 
-    ilu_preconditioner = bores.CachedPreconditionerFactory(
+    preconditioner_factory = bores.CachedPreconditionerFactory(
         factory="ilu",
         name="cached_ilu",
         update_frequency=10,
         recompute_threshold=0.3,
     )
-    ilu_preconditioner.register(override=True)
+    preconditioner_factory.register(override=True)
+
     # Load the new run with the resulting model state from the stabilization run
     run = bores.Run.from_files(
         model_path=Path("./scenarios/runs/stabilization/results/model.h5"),
@@ -35,13 +36,13 @@ def setup_run():
     clamp = bores.ProductionClamp()
     control = bores.MultiPhaseRateControl(
         oil_control=bores.AdaptiveBHPRateControl(
-            target_rate=-100,
+            target_rate=-5000,
             target_phase="oil",
-            bhp_limit=800,
+            bhp_limit=500,
             clamp=clamp,
         ),
         gas_control=bores.AdaptiveBHPRateControl(
-            target_rate=-100,
+            target_rate=-500,
             target_phase="gas",
             bhp_limit=800,
             clamp=clamp,
@@ -55,7 +56,10 @@ def setup_run():
     )
     producer = bores.production_well(
         well_name="P-1",
-        perforating_intervals=[((14, 10, 3), (14, 10, 4))],
+        perforating_intervals=[
+            ((14, 10, 3), (14, 10, 4)),
+            ((14, 10, 6), (14, 10, 7)),
+        ],
         radius=0.3542,
         control=control,
         produced_fluids=(
@@ -78,16 +82,16 @@ def setup_run():
                 molecular_weight=18.015,
             ),
         ),
-        skin_factor=2.5,
+        skin_factor=-2.5,
         is_active=True,
     )
 
     wells = bores.wells_(injectors=None, producers=[producer])
     timer = bores.Timer(
         initial_step_size=bores.Time(hours=20),
-        max_step_size=bores.Time(days=5),
+        max_step_size=bores.Time(days=7),
         min_step_size=bores.Time(minutes=10.0),
-        simulation_time=bores.Time(days=2 * bores.c.DAYS_PER_YEAR),  # 5 years
+        simulation_time=bores.Time(days=15 * bores.c.DAYS_PER_YEAR),  # 15 years
         max_cfl_number=0.9,
         ramp_up_factor=1.2,
         backoff_factor=0.5,
@@ -118,7 +122,7 @@ def execute_run(bores, run, store):
         run(),
         store=store,
         batch_size=30,
-        async_io=True,
+        background_io=True,
     )
     with stream:
         last_state = stream.last()

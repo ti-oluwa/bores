@@ -506,7 +506,7 @@ store = bores.ZarrStore(store=Path("./results/simulation.zarr"))
 stream = bores.StateStream(
     bores.run(model, config=config),
     store=store,
-    async_io=True, # Prevent state persistence I/O operations from blocking stream
+    background_io=True, # Prevent state persistence I/O operations from blocking stream
     batch_size=50,  # Persist every 50 states
     checkpoint_interval=200,  # Checkpoint every 200 steps
     checkpoint_dir=Path("./results/checkpoints/"),
@@ -1016,8 +1016,8 @@ The challenge in three-phase flow is computing oil relative permeability when bo
 # Conservative rules (lower kro estimates)
 bores.min_rule              # kro = min(kro_w, kro_g) - most conservative
 bores.harmonic_mean_rule    # 2/(1/kro_w + 1/kro_g) - series flow
-bores.geometric_mean_rule   # sqrt(kro_w × kro_g)
-bores.hustad_hansen_rule    # (kro_w × kro_g) / max(kro_w, kro_g)
+bores.geometric_mean_rule   # sqrt(kro_w x kro_g)
+bores.hustad_hansen_rule    # (kro_w x kro_g) / max(kro_w, kro_g)
 bores.blunt_rule            # For strongly water-wet systems
 
 # Industry standard rules
@@ -1033,7 +1033,7 @@ bores.linear_interpolation_rule  # Simple linear interpolation
 bores.max_rule              # max(kro_w, kro_g) - most optimistic
 
 # Parameterized rule
-bores.aziz_settari_rule(a=0.5, b=0.5)  # kro = kro_w^a × kro_g^b
+bores.aziz_settari_rule(a=0.5, b=0.5)  # kro = kro_w^a x kro_g^b
 ```
 
 **Comparison Table**:
@@ -1812,7 +1812,7 @@ Reservoir simulation is inherently computationally intensive. Several factors af
 
 | Factor                 | Impact on Performance                                                      |
 | ---------------------- | -------------------------------------------------------------------------- |
-| **Grid Size**          | Scales roughly as O(n³) for 3D grids. A 100×100×50 grid has 500,000 cells. |
+| **Grid Size**          | Scales roughly as O(n³) for 3D grids. A 100x100x50 grid has 500,000 cells. |
 | **Number of Wells**    | Each well adds coupling terms and flow calculations per time step.         |
 | **Fractures & Faults** | Increase matrix complexity and may reduce sparsity.                        |
 | **Time Step Size**     | Smaller steps = more iterations; larger steps may hit CFL limits.          |
@@ -1824,7 +1824,7 @@ Reservoir simulation is inherently computationally intensive. Several factors af
 The Courant-Friedrichs-Lewy (CFL) condition limits the maximum stable time step for explicit schemes:
 
 ```math
-CFL = (velocity × Δt) / Δx ≤ CFL_max
+CFL = (velocity x Δt) / Δx ≤ CFL_max
 ```
 
 **Implications:**
@@ -1851,9 +1851,9 @@ Large grids consume significant memory especially when running analysis with mul
 
 | Grid Size   | Cells | ~Memory per Property Grid |
 | ----------- | ----- | ------------------------- |
-| 50×50×20    | 50K   | ~400 KB (float64)         |
-| 100×100×50  | 500K  | ~4 MB (float64)           |
-| 200×200×100 | 4M    | ~32 MB (float64)          |
+| 50x50x20    | 50K   | ~400 KB (float64)         |
+| 100x100x50  | 500K  | ~4 MB (float64)           |
+| 200x200x100 | 4M    | ~32 MB (float64)          |
 
 With 20+ property grids, state history storage, and solver matrices, memory can grow quickly.
 

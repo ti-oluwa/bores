@@ -4,6 +4,12 @@ import warnings
 import numpy as np
 
 from bores.constants import c
+from bores.correlations.arrays import estimate_solution_gor
+from bores.correlations.core import (
+    compute_gas_gravity,
+    validate_input_pressure,
+    validate_input_temperature,
+)
 from bores.errors import ValidationError
 from bores.fractures import Fracture, apply_fractures
 from bores.grids.base import build_uniform_grid
@@ -34,12 +40,6 @@ from bores.models import (
     RockProperties,
     SaturationHistory,
 )
-from bores.correlations.arrays import estimate_solution_gor
-from bores.correlations.core import (
-    compute_gas_gravity,
-    validate_input_pressure,
-    validate_input_temperature,
-)
 from bores.tables.pvt import PVTTables
 from bores.types import Coordinates, NDimension, NDimensionalGrid
 from bores.wells import (
@@ -51,7 +51,7 @@ from bores.wells import (
     Wells,
 )
 
-__all__ = ["reservoir_model", "injection_well", "production_well", "wells_"]
+__all__ = ["injection_well", "production_well", "reservoir_model", "wells_"]
 
 
 def validate_saturation_grids(

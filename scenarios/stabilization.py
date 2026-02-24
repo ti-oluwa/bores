@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.11"
+__generated_with = "0.20.2"
 app = marimo.App(width="full", app_title="bores")
 
 
@@ -16,13 +16,13 @@ def build_run_from_base_setup():
     np.set_printoptions(threshold=np.inf)  # type: ignore
     bores.use_32bit_precision()
 
-    ilu_preconditioner = bores.CachedPreconditionerFactory(
+    preconditioner_factory = bores.CachedPreconditionerFactory(
         factory="ilu",
         name="cached_ilu",
         update_frequency=10,
         recompute_threshold=0.3,
     )
-    ilu_preconditioner.register(override=True)
+    preconditioner_factory.register(override=True)
 
     run = bores.Run.from_files(
         model_path=Path("./scenarios/runs/setup/model.h5"),
@@ -51,7 +51,7 @@ def execute_run(bores, run, store):
     stream = bores.StateStream(
         run(),
         store=store,
-        async_io=True,
+        background_io=True,
     )
     with stream:
         last_state = stream.last()
