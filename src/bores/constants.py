@@ -259,6 +259,11 @@ DEFAULT_CONSTANTS: typing.Dict[str, typing.Union[typing.Any, Constant]] = {
         description="Conversion factor from stock tank barrels to cubic meters",
         unit="m³/STB",
     ),
+    "CUBIC_METER_TO_STB": Constant(
+        value=1 / 0.158987,
+        description="Conversion factor from cubic meters to stock tank barrels",
+        unit="STB/m³",
+    ),
     "BARRELS_TO_CUBIC_METER": Constant(
         value=0.158987,
         description="Conversion factor from barrels to cubic meters",

@@ -90,7 +90,9 @@ def setup_grid():
     # Saturation endpoints
     # Initially fully oil-saturated — no connate water per problem statement
     # -------------------------------------------------------------------------
-    connate_water_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.0)
+    connate_water_saturation_grid = bores.uniform_grid(
+        grid_shape=grid_shape, value=0.0
+    )
     irreducible_water_saturation_grid = bores.uniform_grid(
         grid_shape=grid_shape, value=0.0
     )
@@ -100,7 +102,9 @@ def setup_grid():
     residual_oil_saturation_gas_grid = bores.uniform_grid(
         grid_shape=grid_shape, value=0.15
     )
-    residual_gas_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.0)
+    residual_gas_saturation_grid = bores.uniform_grid(
+        grid_shape=grid_shape, value=0.0
+    )
 
     oil_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.999998)
     water_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.0)
@@ -120,7 +124,9 @@ def setup_grid():
     )
     oil_compressibility_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.0)
 
-    gas_viscosity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.01)  # cP
+    gas_viscosity_grid = bores.uniform_grid(
+        grid_shape=grid_shape, value=0.01
+    )  # cP
     gas_density_lbft3 = 0.0624
     gas_gravity = gas_density_lbft3 / bores.c.STANDARD_AIR_DENSITY_IMPERIAL
     gas_gravity_grid = bores.uniform_grid(grid_shape=grid_shape, value=gas_gravity)
@@ -162,6 +168,9 @@ def setup_grid():
     # Constant gas viscosity: 0.01 cP — flat (n_p × n_t) table
     gas_visc_table = np.full((n_pvt_p, n_pvt_t), 0.01, dtype=np.float32)
 
+    # Zero oil compressibility
+    oil_compressibility_table = np.full((n_pvt_p, n_pvt_t), 0.0, dtype=np.float32)
+
     pvt_table_data = bores.build_pvt_table_data(
         pressures=pvt_pressures,
         temperatures=pvt_temperatures,
@@ -173,8 +182,11 @@ def setup_grid():
         # Constant viscosities override correlation-computed values
         oil_viscosity_table=oil_visc_table,
         gas_viscosity_table=gas_visc_table,
+        oil_compressibility_table=oil_compressibility_table,
     )
-    pvt_tables = bores.PVTTables(data=pvt_table_data, interpolation_method="linear")
+    pvt_tables = bores.PVTTables(
+        data=pvt_table_data, interpolation_method="linear"
+    )
 
     # -------------------------------------------------------------------------
     # Build reservoir model
@@ -258,7 +270,9 @@ def setup_config(Path, bores, np, pvt_tables):
         non_wetting_phase=bores.FluidPhase.OIL,
         wetting_phase_saturation=bores.array([0.0, 1.0]),
         wetting_phase_relative_permeability=bores.array([0.0, 0.0]),  # krw = 0
-        non_wetting_phase_relative_permeability=bores.array([1.0, 0.0]),  # kro at Sw
+        non_wetting_phase_relative_permeability=bores.array(
+            [1.0, 0.0]
+        ),  # kro at Sw
     )
     relative_permeability_table = bores.ThreePhaseRelPermTable(
         oil_water_table=oil_water_table,
@@ -297,22 +311,20 @@ def setup_config(Path, bores, np, pvt_tables):
     # Producer — right face (i=100), completed through all 20 layers
     # Constant BHP limit = 95 psia (reference depth = 0.0m = top of model)
     # -------------------------------------------------------------------------
-    injection_rate_stbd = 6.97 * bores.c.CUBIC_METER_TO_BARRELS  # ~43.84 STB/d
+    injection_rate_stbd = 6.97 * bores.c.CUBIC_METER_TO_STB  # ~43.84 STB/d
 
     injector = bores.injection_well(
         well_name="INJ-1",
-        perforating_intervals=[((1, 1, 1), (1, 1, 20))],
+        perforating_intervals=[((0, 0, 0), (0, 0, 19))],
         radius=0.5,  # 1.0 ft diameter well
-        control=bores.AdaptiveBHPRateControl(
+        control=bores.ConstantRateControl(
             target_rate=injection_rate_stbd,
-            target_phase="gas",
-            bhp_limit=500.0,  # high limit — effectively rate-controlled
             clamp=bores.InjectionClamp(),
         ),
         injected_fluid=bores.InjectedFluid(
             name="Methane",
             phase=bores.FluidPhase.GAS,
-            specific_gravity=0.0624 / bores.c.STANDARD_AIR_DENSITY_IMPERIAL,
+            specific_gravity=0.65,
             molecular_weight=bores.c.MOLECULAR_WEIGHT_CH4,
             is_miscible=False,
         ),
@@ -322,27 +334,12 @@ def setup_config(Path, bores, np, pvt_tables):
 
     producer = bores.production_well(
         well_name="PROD-1",
-        perforating_intervals=[((100, 1, 1), (100, 1, 20))],
+        perforating_intervals=[((99, 0, 0), (99, 0, 19))],
         radius=0.5,
-        control=bores.MultiPhaseRateControl(
-            oil_control=bores.AdaptiveBHPRateControl(
-                target_rate=-10000,
-                target_phase="oil",
-                bhp_limit=95.0,  # 95 psia BHP limit
-                clamp=bores.ProductionClamp(),
-            ),
-            gas_control=bores.AdaptiveBHPRateControl(
-                target_rate=-100000,
-                target_phase="gas",
-                bhp_limit=95.0,
-                clamp=bores.ProductionClamp(),
-            ),
-            water_control=bores.AdaptiveBHPRateControl(
-                target_rate=-1000,
-                target_phase="water",
-                bhp_limit=95.0,
-                clamp=bores.ProductionClamp(),
-            ),
+        control=bores.BHPControl(
+            bhp=95.0,  # 95 psia BHP limit
+            target_phase="gas",
+            clamp=bores.ProductionClamp(),
         ),
         produced_fluids=(
             bores.ProducedFluid(
@@ -366,13 +363,13 @@ def setup_config(Path, bores, np, pvt_tables):
     # -------------------------------------------------------------------------
     # Timer
     # PV ≈ 762m * 7.62m * 15.24m * 0.2 = 1764 m³
-    # 1 PVI at 6.97 m³/d ≈ 253 days.  Run 5 years to capture post-breakthrough.
+    # 1 PVI at 6.97 m³/d ≈ 253 days.  Run 1 year to capture post-breakthrough.
     # -------------------------------------------------------------------------
     timer = bores.Timer(
         initial_step_size=bores.Time(hours=6.0),
         max_step_size=bores.Time(days=5.0),
-        min_step_size=bores.Time(hours=1.0),
-        simulation_time=bores.Time(days=5 * bores.c.DAYS_PER_YEAR),
+        min_step_size=bores.Time(minutes=10.0),
+        simulation_time=bores.Time(days=bores.c.DAYS_PER_YEAR),
         max_cfl_number=0.9,
         ramp_up_factor=1.2,
         backoff_factor=0.5,
@@ -401,13 +398,10 @@ def setup_config(Path, bores, np, pvt_tables):
         boundary_conditions=None,
         disable_capillary_effects=True,
         miscibility_model="immiscible",
-        max_gas_saturation_change=0.05,
-        max_oil_saturation_change=0.05,
-        max_pressure_change=10.0,
+        max_gas_saturation_change=0.1,
+        max_oil_saturation_change=0.15,
+        max_pressure_change=30.0,
     )
-
-    import rich
-    rich.print(config.dump())
 
     config.to_file(Path("./benchmarks/runs/spe1/setup/config.yaml"))
     return

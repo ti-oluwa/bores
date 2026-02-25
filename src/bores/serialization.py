@@ -1,3 +1,4 @@
+import base64
 import sys
 import threading
 import typing
@@ -8,6 +9,8 @@ from typing import TypeGuard
 
 import attrs
 import cattrs
+import numpy as np
+import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.errors import DeserializationError, SerializationError, ValidationError
@@ -120,6 +123,10 @@ def _is_namedtuple_type(typ: typing.Any) -> bool:
 
 def _is_enum_type(typ: typing.Any) -> TypeGuard[typing.Type[Enum]]:
     return isinstance(typ, type) and issubclass(typ, Enum)
+
+
+def _is_ndarray_type(typ: typing.Any) -> TypeGuard[typing.Type[npt.NDArray]]:
+    return isinstance(typ, type) and issubclass(typ, np.ndarray)
 
 
 def _unwrap_type(typ: typing.Any) -> typing.List[typing.Type[typing.Any]]:
@@ -404,6 +411,10 @@ def _serialize(
                 for k, v in value.items()
             }
 
+        return _serialize(
+            value, recurse, serializers, origin, check_serializers=check_serializers
+        )
+
     if _is_typed_dict_type(typ) and isinstance(value, Mapping):
         annotations = typing.get_type_hints(typ, include_extras=False)
         return {
@@ -505,6 +516,11 @@ def _deserialize(
             return {
                 k: _deserialize(v, args[1], deserializers) for k, v in value.items()
             }
+
+        if origin is not None:
+            return _deserialize(
+                value, origin, deserializers, check_deserializers=check_deserializers
+            )
 
     if _is_typed_dict_type(typ):
         annotations = typing.get_type_hints(typ, include_extras=False)
@@ -907,18 +923,22 @@ class Serializable(metaclass=SerializableMeta):
 
 
 # Register `Serializable` with cattrs converter
-def structure_serializable(
+def _structure_serializable(
     data: typing.Mapping[str, typing.Any], cls: typing.Type[Serializable]
 ) -> Serializable:
     return cls.load(data)
 
 
-def unstructure_serializable(obj: Serializable) -> typing.Mapping[str, typing.Any]:
+def _unstructure_serializable(obj: Serializable) -> typing.Mapping[str, typing.Any]:
     return obj.dump(recurse=True)
 
 
-converter.register_structure_hook(Serializable, structure_serializable)
-converter.register_unstructure_hook(Serializable, unstructure_serializable)
+converter.register_structure_hook_func(
+    lambda typ: _is_serializable_type(typ), _structure_serializable
+)
+converter.register_unstructure_hook_func(
+    lambda typ: _is_serializable_type(typ), _unstructure_serializable
+)
 
 
 SerializableT = typing.TypeVar("SerializableT", bound=Serializable)
@@ -1088,3 +1108,190 @@ def register_type_deserializer(
     """Register a global type deserializer for a specific type."""
     with _type_deserializers_lock:
         _TYPE_DESERIALIZERS[typ] = deserializer
+
+
+def serialize_ndarray(arr: npt.ArrayLike) -> typing.Dict[str, typing.Any]:
+    """
+    Encode a numpy array to a JSON-safe dictionary.
+
+    Preserves dtype (including endianness), shape, and exact byte content.
+    Works for any numeric dtype: float16/32/64, int8-64, uint8-64, bool,
+    complex64/128.
+
+    :param arr: Array-like to encode. Non-ndarray inputs are first converted
+        with `np.asarray`.
+    :returns: Dict with keys `__ndarray__`, `dtype`, `shape`, `data`.
+
+    Example:
+    ```python
+    wire = serialize_ndarray(np.array([1.0, 2.0], dtype=np.float32))
+    # {'__ndarray__': True, 'dtype': '<f4', 'shape': [2], 'data': 'AACAQAAA...'}
+    ```
+    """
+    a = np.asarray(arr)
+    return {
+        "__ndarray__": True,
+        "dtype": a.dtype.str,  # e.g. "<f4", ">f8", "|b1"
+        "shape": list(a.shape),
+        "data": base64.b64encode(
+            np.ascontiguousarray(a).tobytes()  # C-order bytes
+        ).decode("ascii"),
+    }
+
+
+def deserialize_ndarray(
+    data: typing.Union[
+        typing.Mapping[str, typing.Any], typing.Sequence[typing.Any], npt.NDArray
+    ],
+    *,
+    dtype: typing.Optional[typing.Union[str, npt.DTypeLike]] = None,
+) -> npt.NDArray:
+    """
+    Decode a numpy array from its wire-format dict (produced by
+    ``serialize_ndarray``).
+
+    Also handles two convenience cases so callers never need to pre-check
+    the input type:
+
+    - **Plain list / nested list**: converted with ``np.asarray`` (dtype
+      inferred; pass ``dtype=`` to override).
+    - **Existing ndarray passthrough**: returned as-is, or cast if ``dtype=``
+      is given.
+
+    :param data:  Wire-format dict, plain Python list, or existing ndarray.
+    :param dtype: Optional dtype override.  Ignored when ``data`` is a
+                  wire-format dict (the stored dtype is always authoritative).
+    :returns: Reconstructed ``np.ndarray``.
+    :raises TypeError:  If ``data`` is an unrecognised type.
+    :raises ValueError: If the wire dict is malformed or has a byte-length
+                        mismatch.
+
+    Example:
+    ```python
+    arr = deserialize_ndarray(
+        {'__ndarray__': True, 'dtype': '<f4', 'shape': [2], 'data': 'AACAPwAAAEA='}
+    )
+    # array([1., 2.], dtype=float32)
+    ```
+    """
+    if isinstance(data, np.ndarray):
+        return data.astype(dtype, copy=False) if dtype is not None else data  # type: ignore[return-value]
+
+    if isinstance(data, Sequence) and not isinstance(data, (str, bytes, Mapping)):
+        return np.asarray(data, dtype=dtype)
+
+    if not isinstance(data, Mapping):
+        raise TypeError(
+            f"`deserialize_ndarray`: expected dict, list, or ndarray; "
+            f"got {type(data).__name__!r}"
+        )
+
+    data = dict(data)
+    if not data.get("__ndarray__"):
+        raise ValueError(
+            "`deserialize_ndarray`: dict is missing the '__ndarray__' sentinel. "
+            "Did you pass a plain dict by mistake?"
+        )
+
+    missing = {"dtype", "shape", "data"} - data.keys()
+    if missing:
+        raise ValueError(
+            f"`deserialize_ndarray`: wire dict is missing required keys: {missing}"
+        )
+
+    stored_dtype = np.dtype(data["dtype"])
+    shape = tuple(int(s) for s in data["shape"])
+    raw_bytes = base64.b64decode(data["data"])
+
+    n_elements = int(np.prod(shape)) if shape else 1
+    expected_bytes = stored_dtype.itemsize * n_elements
+    if len(raw_bytes) != expected_bytes:
+        raise ValueError(
+            f"`deserialize_ndarray`: byte-length mismatch — "
+            f"expected {expected_bytes} bytes "
+            f"(dtype={stored_dtype}, shape={shape}), "
+            f"got {len(raw_bytes)}"
+        )
+
+    # .copy() detaches from the read-only buffer returned by frombuffer
+    return np.frombuffer(raw_bytes, dtype=stored_dtype).reshape(shape).copy()
+
+
+def _structure_ndarray(data: typing.Any, cls: typing.Type[npt.NDArray]) -> npt.NDArray:
+    return deserialize_ndarray(data)
+
+
+def _unstructure_ndarray(obj: npt.NDArray) -> typing.Mapping[str, typing.Any]:
+    return serialize_ndarray(obj)
+
+
+def register_ndarray_serializers() -> None:
+    """
+    Register global ndarray serializer / deserializer with the bores
+    serialization system.
+
+    Call this **once** at application startup — ideally in the first marimo
+    cell, before any `Serializable` objects are dumped or loaded. After
+    registration, `np.ndarray` fields on *any* `Serializable` subclass
+    are handled automatically without per-field `serializers=` arguments.
+
+    Safe to call multiple times (subsequent calls silently overwrite with the
+    same functions).
+
+    Example:
+
+    ```python
+    import bores
+    from ndarray_serialization import register_ndarray_serializers
+    register_ndarray_serializers()
+    ```
+    """
+    register_type_serializer(
+        typ=np.ndarray,
+        serializer=lambda arr, recurse: serialize_ndarray(arr),
+    )
+    register_type_deserializer(
+        typ=np.ndarray,
+        deserializer=deserialize_ndarray,
+    )
+
+    # Register `np.ndarray` with cattrs converter
+    converter.register_structure_hook_func(
+        lambda typ: _is_ndarray_type(typ), _structure_ndarray
+    )
+    converter.register_unstructure_hook_func(
+        lambda typ: _is_ndarray_type(typ), _unstructure_ndarray
+    )
+
+
+def ndarray_serializer(
+    arr: npt.NDArray, recurse: bool = True
+) -> typing.Dict[str, typing.Any]:
+    """
+    Adapter matching the bores ``serializers=`` dict signature.
+
+    Use this when you want to opt-in on a specific field rather than
+    registering globally:
+
+    ```python
+
+    @attrs.frozen
+    class MyGrid(
+        Serializable,
+        serializers={"kx": ndarray_serializer, "ky": ndarray_serializer},
+        deserializers={"kx": ndarray_deserializer, "ky": ndarray_deserializer}
+    ):
+        kx: np.ndarray
+        ky: np.ndarray
+    ```
+    """
+    return serialize_ndarray(arr)
+
+
+def ndarray_deserializer(data: typing.Any) -> np.ndarray:
+    """
+    Adapter matching the bores ``deserializers=`` dict signature.
+
+    Pair with ``ndarray_serializer`` for explicit per-field registration.
+    """
+    return deserialize_ndarray(data)

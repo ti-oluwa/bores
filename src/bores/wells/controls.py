@@ -94,7 +94,7 @@ def _compute_avg_z_factor(
         pressure=avg_pressure,
         temperature=temperature,
         gas_gravity=gas_gravity,
-        method="dak"
+        method="dak",
     )
 
 
@@ -403,8 +403,18 @@ class BHPControl(WellControl[WellFluidTcon]):
 
     bhp: float = attrs.field(validator=attrs.validators.gt(0))
     """Well bottom-hole flowing pressure in psi."""
+    target_phase: typing.Optional[typing.Union[str, FluidPhase]] = None
+    """Target fluid phase for the control."""
     clamp: typing.Optional[RateClamp] = None
     """Condition for clamping flow rates to zero. None means no clamping."""
+
+    def __attrs_post_init__(self) -> None:
+        """Validate control parameters."""
+        if self.bhp <= 0.0:
+            raise ValidationError("Well bottom hole pressure must be positive.")
+
+        if self.target_phase is not None:
+            object.__setattr__(self, "target_phase", FluidPhase(self.target_phase))
 
     def get_flow_rate(
         self,
@@ -441,7 +451,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         # Early return checks
         if _should_return_zero(
             fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
-        ):
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return 0.0
 
         bhp = self.bhp
@@ -483,7 +493,6 @@ class BHPControl(WellControl[WellFluidTcon]):
                 fluid_compressibility=fluid_compressibility,
             )
 
-        logger.info(f"BHP Control: {rate:.6f} (BHP={bhp:.6f}, Pr={pressure:.6f})")
         # Apply clamp condition if any
         clamped = _apply_clamp(
             rate=rate,
@@ -525,7 +534,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         """
         if _should_return_zero(
             fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
-        ):
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             # Return reservoir pressure (no driving force)
             return pressure
 
@@ -542,7 +551,7 @@ class BHPControl(WellControl[WellFluidTcon]):
 
     def __str__(self) -> str:
         """String representation."""
-        return f"BHP Control (BHP={self.bhp:.6f} psi)"
+        return f"BHP Control: BHP={self.bhp:.6f} psi"
 
 
 ConstantBHPControl = BHPControl  # Alias
@@ -562,14 +571,14 @@ class ConstantRateControl(WellControl[WellFluidTcon]):
 
     target_rate: float
     """Target flow rate (STB/day or SCF/day). Positive for injection, negative for production."""
-    target_phase: typing.Union[str, FluidPhase] = attrs.field(converter=FluidPhase)
-    """Target fluid phase for the control."""
     bhp_limit: typing.Optional[float] = None
     """
     Minimum allowable BHP for production wells, and maximum allowable BHP for injection wells.
 
     If specified, rate is limited to prevent BHP from dropping below this value.
     """
+    target_phase: typing.Optional[typing.Union[str, FluidPhase]] = None
+    """Target fluid phase for the control."""
     clamp: typing.Optional[RateClamp] = None
     """Condition for clamping flow rates to zero. None means no clamping."""
 
@@ -581,6 +590,9 @@ class ConstantRateControl(WellControl[WellFluidTcon]):
             )
         if self.bhp_limit is not None and self.bhp_limit <= 0.0:
             raise ValidationError("Minimum bottom hole pressure must be positive.")
+
+        if self.target_phase is not None:
+            object.__setattr__(self, "target_phase", FluidPhase(self.target_phase))
 
     def get_flow_rate(
         self,
@@ -615,12 +627,9 @@ class ConstantRateControl(WellControl[WellFluidTcon]):
         :return: Target flow rate if the required bottom hole pressure to produce/inject
             is above or equal to the minimum bottom hole pressure constraint (if any). Otherwise returns 0.0.
         """
-        if (
-            _should_return_zero(
-                fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
-            )
-            or fluid.phase != self.target_phase
-        ):
+        if _should_return_zero(
+            fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return 0.0
 
         # Apply allocation to target rate
@@ -706,12 +715,9 @@ class ConstantRateControl(WellControl[WellFluidTcon]):
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :return: Effective bottom-hole pressure (psi)
         """
-        if (
-            _should_return_zero(
-                fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
-            )
-            or fluid.phase != self.target_phase
-        ):
+        if _should_return_zero(
+            fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return pressure
 
         # Apply allocation to target rate
@@ -803,7 +809,7 @@ class ConstantRateControl(WellControl[WellFluidTcon]):
 
     def __str__(self) -> str:
         """String representation."""
-        return f"Constant Rate Control (Rate={self.target_rate:.6f})"
+        return f"Constant Rate Control: Rate={self.target_rate:.6f}"
 
 
 @well_control
@@ -823,14 +829,14 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
     """
     Target flow rate (STB/day or SCF/day). Positive for injection, negative for production.
     """
-    target_phase: typing.Union[str, FluidPhase] = attrs.field(converter=FluidPhase)
-    """Target fluid phase for the control."""
     bhp_limit: float
     """
     Minimum allowable BHP for production wells, and maximum allowable BHP for injection wells.
 
     Control switches from rate to BHP control when this limit is reached.
     """
+    target_phase: typing.Optional[typing.Union[str, FluidPhase]] = None
+    """Target fluid phase for the control."""
     clamp: typing.Optional[RateClamp] = None
     """Condition for clamping flow rates to zero. None means no clamping."""
 
@@ -842,6 +848,9 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
             )
         if self.bhp_limit <= 0.0:
             raise ValidationError("Minimum bottom hole pressure must be positive.")
+
+        if self.target_phase is not None:
+            object.__setattr__(self, "target_phase", FluidPhase(self.target_phase))
 
     def get_flow_rate(
         self,
@@ -877,12 +886,9 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
         :return: Flow rate in (bbl/day or ft³/day).
         """
         # Early return checks
-        if (
-            _should_return_zero(
-                fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
-            )
-            or fluid.phase != self.target_phase
-        ):
+        if _should_return_zero(
+            fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return 0.0
 
         # Apply allocation to target rate (for rate mode)
@@ -1017,12 +1023,9 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :return: Effective bottom-hole pressure (psi)
         """
-        if (
-            _should_return_zero(
-                fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
-            )
-            or fluid.phase != self.target_phase
-        ):
+        if _should_return_zero(
+            fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return pressure
 
         # Apply allocation to target rate (for rate mode)
@@ -1102,7 +1105,11 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
         )
 
     def __str__(self) -> str:
-        return f"Adaptive BHP/Rate Control (Rate={self.target_rate:.6f}, Min BHP={self.bhp_limit:.6f} psi)"
+        return f"""
+        Adaptive BHP/Rate Control:
+        Rate={self.target_rate:.6f}, 
+        Min BHP={self.bhp_limit:.6f} psi)
+        """
 
 
 @well_control
@@ -1116,11 +1123,11 @@ class MultiPhaseRateControl(WellControl):
 
     __type__ = "multi_phase_rate_control"
 
-    oil_control: WellControl
+    oil_control: typing.Optional[WellControl] = None
     """Oil phase well control. Ensure that this is intended for oil phase."""
-    gas_control: WellControl
+    gas_control: typing.Optional[WellControl] = None
     """Gas phase well control. Ensure that this is intended for gas phase."""
-    water_control: WellControl
+    water_control: typing.Optional[WellControl] = None
     """Water phase well control. Ensure that this is intended for water phase."""
 
     def get_flow_rate(
@@ -1157,7 +1164,7 @@ class MultiPhaseRateControl(WellControl):
         ):
             return 0.0
 
-        if fluid.phase == FluidPhase.OIL:
+        if fluid.phase == FluidPhase.OIL and self.oil_control is not None:
             return self.oil_control.get_flow_rate(
                 pressure=pressure,
                 temperature=temperature,
@@ -1171,7 +1178,7 @@ class MultiPhaseRateControl(WellControl):
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
             )
-        elif fluid.phase == FluidPhase.GAS:
+        elif fluid.phase == FluidPhase.GAS and self.gas_control is not None:
             return self.gas_control.get_flow_rate(
                 pressure=pressure,
                 temperature=temperature,
@@ -1185,7 +1192,7 @@ class MultiPhaseRateControl(WellControl):
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
             )
-        elif fluid.phase == FluidPhase.WATER:
+        elif fluid.phase == FluidPhase.WATER and self.water_control is not None:
             return self.water_control.get_flow_rate(
                 pressure=pressure,
                 temperature=temperature,
@@ -1199,8 +1206,7 @@ class MultiPhaseRateControl(WellControl):
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
             )
-        else:
-            raise ValidationError(f"Unsupported fluid phase: {fluid.phase!r}")
+        return 0.0
 
     def get_bottom_hole_pressure(
         self,
@@ -1217,7 +1223,7 @@ class MultiPhaseRateControl(WellControl):
         pvt_tables: typing.Optional[PVTTables] = None,
     ) -> float:
         """Delegate to appropriate phase control."""
-        if fluid.phase == FluidPhase.OIL:
+        if fluid.phase == FluidPhase.OIL and self.oil_control is not None:
             return self.oil_control.get_bottom_hole_pressure(
                 pressure=pressure,
                 temperature=temperature,
@@ -1231,7 +1237,7 @@ class MultiPhaseRateControl(WellControl):
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
             )
-        elif fluid.phase == FluidPhase.GAS:
+        elif fluid.phase == FluidPhase.GAS and self.gas_control is not None:
             return self.gas_control.get_bottom_hole_pressure(
                 pressure=pressure,
                 temperature=temperature,
@@ -1245,7 +1251,7 @@ class MultiPhaseRateControl(WellControl):
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
             )
-        elif fluid.phase == FluidPhase.WATER:
+        elif fluid.phase == FluidPhase.WATER and self.water_control is not None:
             return self.water_control.get_bottom_hole_pressure(
                 pressure=pressure,
                 temperature=temperature,
@@ -1283,9 +1289,8 @@ class MultiPhaseRateControl(WellControl):
 
     def __str__(self) -> str:
         return f"""
-        Multi-Phase Rate Control (
-            Oil Control: {self.oil_control!s},
-            Gas Control: {self.gas_control!s},
-            Water Control: {self.water_control!s}
-        )
+        Multi-Phase Rate Control:
+        Oil Control: {self.oil_control!s},
+        Gas Control: {self.gas_control!s},
+        Water Control: {self.water_control!s}
         """

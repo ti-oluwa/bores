@@ -9,7 +9,12 @@ import numpy as np
 import numpy.typing as npt
 
 from bores.errors import ValidationError
-from bores.serialization import Serializable, make_serializable_type_registrar
+from bores.serialization import (
+    Serializable,
+    make_serializable_type_registrar,
+    ndarray_deserializer,
+    ndarray_serializer,
+)
 from bores.stores import StoreSerializable
 from bores.types import (
     FloatOrArray,
@@ -775,7 +780,19 @@ def get_relperm_table(name: str) -> typing.Type[RelativePermeabilityTable]:
 
 
 @attrs.frozen
-class TwoPhaseRelPermTable(Serializable):
+class TwoPhaseRelPermTable(
+    Serializable,
+    serializers={
+        "wetting_phase_saturation": ndarray_serializer,
+        "wetting_phase_relative_permeability": ndarray_serializer,
+        "non_wetting_phase_relative_permeability": ndarray_serializer,
+    },
+    deserializers={
+        "wetting_phase_saturation": ndarray_deserializer,
+        "wetting_phase_relative_permeability": ndarray_deserializer,
+        "non_wetting_phase_relative_permeability": ndarray_deserializer,
+    },
+):
     """
     Two-phase relative permeability lookup table.
 

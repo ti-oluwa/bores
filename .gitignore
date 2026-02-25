@@ -20,3 +20,4 @@ scenarios/**/
 CLAUDE.md
 .claude/
 site/
+benchmarks/runs/
