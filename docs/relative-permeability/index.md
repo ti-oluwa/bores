@@ -63,7 +63,7 @@ relative_permeability_table = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_gas=0.15,
     residual_oil_saturation_water=0.25,
     residual_gas_saturation=0.045,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     water_exponent=2.0,
     oil_exponent=2.0,
     gas_exponent=2.0,
@@ -135,7 +135,7 @@ relperm_model = bores.BrooksCoreyThreePhaseRelPermModel(
     water_exponent=2.0,
     oil_exponent=2.0,
     gas_exponent=2.0,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     mixing_rule=bores.eclipse_rule,  # Recommended
 )
 
@@ -224,7 +224,7 @@ relperm_table = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_gas=0.15,
     residual_oil_saturation_water=0.25,
     residual_gas_saturation=0.045,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     water_exponent=2.0,
     oil_exponent=2.0,
     gas_exponent=2.0,

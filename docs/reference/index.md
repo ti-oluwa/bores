@@ -131,12 +131,12 @@ bores.Orientation.Y  # Layer along y-axis
 bores.Orientation.Z  # Layer along z-axis (most common)
 ```
 
-### WettabilityType / Wettability
+### Wettability / Wettability
 
 ```python
-bores.WettabilityType.WATER_WET  # For rel perm
+bores.Wettability.WATER_WET  # For rel perm
 bores.Wettability.WATER_WET      # For cap pressure
-bores.WettabilityType.OIL_WET
+bores.Wettability.OIL_WET
 bores.Wettability.OIL_WET
 ```
 

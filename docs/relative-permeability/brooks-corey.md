@@ -87,7 +87,7 @@ class BrooksCoreyThreePhaseRelPermModel:
     gas_exponent: float = 2.0
     """Corey exponent for gas relative permeability."""
 
-    wettability: WettabilityType = WettabilityType.WATER_WET
+    wettability: Wettability = Wettability.WATER_WET
     """Wettability type (WATER_WET or OIL_WET)."""
 
     mixing_rule: MixingRule = eclipse_rule
@@ -161,10 +161,10 @@ class BrooksCoreyThreePhaseRelPermModel:
 
 #### System Properties
 
-**wettability** (`WettabilityType`)
+**wettability** (`Wettability`)
 
-- Options: `WettabilityType.WATER_WET`, `WettabilityType.OIL_WET`
-- Default: `WettabilityType.WATER_WET`
+- Options: `Wettability.WATER_WET`, `Wettability.OIL_WET`
+- Default: `Wettability.WATER_WET`
 - Description: Controls which phase is treated as the wetting phase
 - Notes: Affects curve shapes and endpoint behavior
 
@@ -235,7 +235,7 @@ relative_permeability_table = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_gas=0.15,
     residual_oil_saturation_water=0.25,
     residual_gas_saturation=0.045,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     water_exponent=2.0,
     oil_exponent=2.0,
     gas_exponent=2.0,
@@ -375,7 +375,7 @@ model = bores.BrooksCoreyThreePhaseRelPermModel(
     water_exponent=2.5,                       # Moderate curve
     oil_exponent=2.0,                         # Standard
     gas_exponent=2.0,                         # Standard
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     mixing_rule=bores.eclipse_rule,
 )
 ```
@@ -391,7 +391,7 @@ model = bores.BrooksCoreyThreePhaseRelPermModel(
     water_exponent=3.5,                       # Steep curve
     oil_exponent=2.5,                         # Reduced mobility
     gas_exponent=3.0,                         # Reduced gas mobility
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     mixing_rule=bores.eclipse_rule,
 )
 ```
@@ -407,7 +407,7 @@ model = bores.BrooksCoreyThreePhaseRelPermModel(
     water_exponent=2.0,                       # Flatter curve
     oil_exponent=2.0,                         # Standard
     gas_exponent=2.0,                         # Standard
-    wettability=bores.WettabilityType.OIL_WET,
+    wettability=bores.Wettability.OIL_WET,
     mixing_rule=bores.eclipse_rule,
 )
 ```

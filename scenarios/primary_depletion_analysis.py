@@ -470,29 +470,6 @@ def _(bores, gor_history, np, water_cut_history):
 
 @app.cell
 def _(analyst, bores, np):
-    cumulative_gas_injection_history = analyst.gas_injection_history(
-        interval=1, cumulative=True, from_step=1
-    )
-
-    cumulative_gas_injection_fig = bores.make_series_plot(
-        data={
-            "Cumulative Gas Injection": np.array(
-                list(cumulative_gas_injection_history)
-            ),
-        },
-        title="Cumulative Gas Injection Analysis (CASE 2)",
-        x_label="Time Step",
-        y_label="Injection (SCF)",
-        marker_sizes=6,
-        width=720,
-        height=460,
-    )
-    cumulative_gas_injection_fig.show()
-    return
-
-
-@app.cell
-def _(analyst, bores, np):
     # Reserves
     oil_in_place_history = analyst.oil_in_place_history(interval=1, from_step=1)
     gas_in_place_history = analyst.gas_in_place_history(interval=1, from_step=1)
@@ -664,12 +641,12 @@ def _(bores, states, viz):
         show_perforations=True,
         # x_slice=(10, 20),
         # z_slice=(0, 8),
-        isomin=0.6,
-        cmin=0,
-        cmax=1,
+        # isomin=0.6,
+        # cmin=0,
+        # cmax=1,
     )
 
-    property = "oil-sat"
+    property = "z"
     figures = []
     timesteps = [0, 974]
     for timestep in timesteps:

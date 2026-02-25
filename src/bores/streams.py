@@ -2,8 +2,6 @@
 Stream model state with optional persistence for memory-efficient simulation workflows.
 """
 
-from bores import StorageError
-
 import logging
 import queue
 import threading
@@ -12,7 +10,7 @@ import typing
 import numpy as np
 from typing_extensions import Self
 
-from bores.errors import StreamError
+from bores.errors import StorageError, StreamError
 from bores.states import ModelState, validate_state
 from bores.stores import DataStore, EntryMeta
 from bores.types import NDimension

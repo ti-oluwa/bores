@@ -1,4 +1,5 @@
 import typing
+from collections.abc import Mapping
 
 import attrs
 import numpy as np
@@ -27,11 +28,7 @@ def _make_hashable(obj: typing.Any) -> typing.Any:
     if isinstance(obj, (int, float, str, bool, type(None), slice)):
         return obj
 
-    # Handle Well objects - use name and perforating intervals as hash basis
-    from bores.wells.base import Well, Wells
-
     if isinstance(obj, Well):
-        # This is a Well object
         return (
             "__well__",
             obj.name,
@@ -40,20 +37,16 @@ def _make_hashable(obj: typing.Any) -> typing.Any:
         )
 
     if isinstance(obj, Wells):
-        # This is a `Wells` object
         inj_names = tuple(sorted(w.name for w in obj.injection_wells))
         prod_names = tuple(sorted(w.name for w in obj.production_wells))
         return ("__wells__", inj_names, prod_names)
 
-    # Convert numpy arrays to tuples
     if isinstance(obj, np.ndarray):
         return tuple(_make_hashable(item) for item in obj.tolist())
 
-    # Convert lists to tuples recursively
     if isinstance(obj, list):
         return tuple(_make_hashable(item) for item in obj)
 
-    # Convert sets to frozensets
     if isinstance(obj, set):
         return frozenset(_make_hashable(item) for item in obj)
 
@@ -61,8 +54,7 @@ def _make_hashable(obj: typing.Any) -> typing.Any:
     if isinstance(obj, tuple):
         return tuple(_make_hashable(item) for item in obj)
 
-    # For dictionaries, convert to tuple of items
-    if isinstance(obj, dict):
+    if isinstance(obj, Mapping):
         return tuple(
             sorted((_make_hashable(k), _make_hashable(v)) for k, v in obj.items())
         )

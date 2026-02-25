@@ -97,6 +97,7 @@ def setup_run():
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,
         max_rejects=20,
+        growth_cooldown_steps=10,
     )
     run.config = run.config.with_updates(wells=wells, timer=timer)
     return Path, bores, run

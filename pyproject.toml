@@ -1,3 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [project]
 name = "bores-framework"
 version = "0.0.1"
@@ -62,22 +72,6 @@ dependencies = [
     "scipy-stubs>=1.15.3.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "marimo>=0.19.11",
-    "auto-mix-prep>=0.2.0",
-    "mypy>=1.16.1",
-    "rich>=14.0.0",
-    "ruff>=0.12.1",
-    "ty>=0.0.1a26",
-    "watchdog>=6.0.0",
-]
-docs = [
-    "mkdocs>=1.6.0",
-    "mkdocs-material>=9.5.0",
-    "mkdocs-minify-plugin>=0.8.0",
-    "pymdown-extensions>=10.11.0",
-]
 
 [tool.marimo.runtime]
 pythonpath=["src"]
@@ -103,5 +97,20 @@ numpy = [
 scipy = [
   { index = "numpy-mkl", marker = "sys_platform != 'darwin' and platform_machine == 'x86_64'" },
 ]
-bores-framework = { workspace = true }
 
+[dependency-groups]
+dev = [
+    "marimo>=0.19.11",
+    "auto-mix-prep>=0.2.0",
+    "mypy>=1.16.1",
+    "rich>=14.0.0",
+    "ruff>=0.12.1",
+    "ty>=0.0.1a26",
+    "watchdog>=6.0.0",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocs-minify-plugin>=0.8.0",
+    "pymdown-extensions>=10.11.0",
+]

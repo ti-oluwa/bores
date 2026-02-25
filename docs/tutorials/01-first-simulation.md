@@ -196,7 +196,7 @@ rel_perm = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_gas=0.15,
     residual_oil_saturation_water=0.25,
     residual_gas_saturation=0.05,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     water_exponent=2.0,
     oil_exponent=2.0,
     gas_exponent=2.0,
@@ -367,7 +367,7 @@ wells = bores.wells_(injectors=None, producers=[producer])
 rel_perm = bores.BrooksCoreyThreePhaseRelPermModel(
     irreducible_water_saturation=0.15, residual_oil_saturation_gas=0.15,
     residual_oil_saturation_water=0.25, residual_gas_saturation=0.05,
-    wettability=bores.WettabilityType.WATER_WET, water_exponent=2.0,
+    wettability=bores.Wettability.WATER_WET, water_exponent=2.0,
     oil_exponent=2.0, gas_exponent=2.0, mixing_rule=bores.eclipse_rule,
 )
 cap_pressure = bores.BrooksCoreyCapillaryPressureModel(

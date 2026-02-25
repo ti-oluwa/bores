@@ -94,6 +94,7 @@ def _compute_avg_z_factor(
         pressure=avg_pressure,
         temperature=temperature,
         gas_gravity=gas_gravity,
+        method="dak"
     )
 
 

@@ -864,12 +864,14 @@ class InjectedFluid(WellFluid):
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
                     gas_gravity=np.full_like(pressure, self.specific_gravity),
+                    method="dak"
                 )
             else:
                 gas_z_factor = compute_gas_compressibility_factor(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
                     gas_gravity=self.specific_gravity,
+                    method="dak"
                 )
         if use_vectorization:
             return compute_gas_density_vectorized(
@@ -931,12 +933,14 @@ class InjectedFluid(WellFluid):
                         pressure=pressure,  # type: ignore
                         temperature=temperature,  # type: ignore
                         gas_gravity=np.full_like(pressure, self.specific_gravity),
+                        method="dak"
                     )
                 else:
                     gas_z_factor = compute_gas_compressibility_factor(
                         pressure=pressure,  # type: ignore
                         temperature=temperature,  # type: ignore
                         gas_gravity=self.specific_gravity,
+                        method="dak"
                     )
 
             if use_vectorization:
@@ -1099,12 +1103,14 @@ class InjectedFluid(WellFluid):
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
                     gas_gravity=np.full_like(pressure, self.specific_gravity),
+                    method="dak"
                 )
             else:
                 gas_z_factor = compute_gas_compressibility_factor(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
                     gas_gravity=self.specific_gravity,
+                    method="dak"
                 )
 
         if use_vectorization:

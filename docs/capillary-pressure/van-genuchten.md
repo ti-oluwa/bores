@@ -108,7 +108,7 @@ class VanGenuchtenCapillaryPressureModel:
     gas_oil_n: float = 2.0
     """van Genuchten n parameter for gas-oil."""
 
-    wettability: WettabilityType = WettabilityType.WATER_WET
+    wettability: Wettability = Wettability.WATER_WET
     """Wettability type (WATER_WET, OIL_WET, or MIXED_WET)."""
 
     mixed_wet_water_fraction: float = 0.5
@@ -173,7 +173,7 @@ $$n \approx \lambda + 1$$
 
 #### System Properties
 
-**wettability** (`WettabilityType`)
+**wettability** (`Wettability`)
 - Options: `WATER_WET`, `OIL_WET`, `MIXED_WET`
 - Default: `WATER_WET`
 
@@ -199,7 +199,7 @@ capillary_pressure_table = bores.VanGenuchtenCapillaryPressureModel(
     oil_water_n_water_wet=2.5,
     gas_oil_alpha=0.03,  # 1/psi
     gas_oil_n=2.0,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 
 # Compute capillary pressures
@@ -242,7 +242,7 @@ capillary_pressure_table = bores.VanGenuchtenCapillaryPressureModel(
     oil_water_n_water_wet=n_ow,
     gas_oil_alpha=alpha_go,
     gas_oil_n=n_go,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 ```
 
@@ -299,7 +299,7 @@ model = bores.VanGenuchtenCapillaryPressureModel(
     oil_water_n_water_wet=2.5,
     gas_oil_alpha=0.03,
     gas_oil_n=2.0,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 
 # Create saturation grids

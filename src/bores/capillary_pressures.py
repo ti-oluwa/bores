@@ -10,7 +10,7 @@ import numpy.typing as npt
 from bores.errors import ValidationError
 from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
-from bores.types import CapillaryPressures, FloatOrArray, FluidPhase, WettabilityType
+from bores.types import CapillaryPressures, FloatOrArray, FluidPhase, Wettability
 
 __all__ = [
     "BrooksCoreyCapillaryPressureModel",
@@ -294,7 +294,7 @@ def compute_brooks_corey_capillary_pressures(
     residual_oil_saturation_water: FloatOrArray,
     residual_oil_saturation_gas: FloatOrArray,
     residual_gas_saturation: FloatOrArray,
-    wettability: WettabilityType,
+    wettability: Wettability,
     oil_water_entry_pressure_water_wet: float,
     oil_water_entry_pressure_oil_wet: float,
     oil_water_pore_size_distribution_index_water_wet: float,
@@ -384,7 +384,7 @@ def compute_brooks_corey_capillary_pressures(
         undersaturated = valid_water & (effective_water_saturation < 1.0 - 1e-6)
 
         if np.any(undersaturated):
-            if wettability == WettabilityType.WATER_WET:
+            if wettability == Wettability.WATER_WET:
                 # Pure water-wet: Pcow > 0
                 pcow = oil_water_entry_pressure_water_wet * (
                     effective_water_saturation
@@ -392,7 +392,7 @@ def compute_brooks_corey_capillary_pressures(
                 )
                 oil_water_capillary_pressure = np.where(undersaturated, pcow, 0.0)
 
-            elif wettability == WettabilityType.OIL_WET:
+            elif wettability == Wettability.OIL_WET:
                 # Pure oil-wet: Pcow < 0
                 pcow = -(
                     oil_water_entry_pressure_oil_wet
@@ -401,7 +401,7 @@ def compute_brooks_corey_capillary_pressures(
                 )
                 oil_water_capillary_pressure = np.where(undersaturated, pcow, 0.0)
 
-            elif wettability == WettabilityType.MIXED_WET:
+            elif wettability == Wettability.MIXED_WET:
                 # Mixed-wet: Weighted average
                 pcow_water_wet = oil_water_entry_pressure_water_wet * (
                     effective_water_saturation
@@ -481,7 +481,7 @@ class BrooksCoreyCapillaryPressureModel(
     """Entry pressure for gas-oil (psi)."""
     gas_oil_pore_size_distribution_index: float = 2.0
     """Pore size distribution index (λ) for gas-oil."""
-    wettability: WettabilityType = WettabilityType.WATER_WET
+    wettability: Wettability = Wettability.WATER_WET
     """Wettability type (WATER_WET, OIL_WET, or MIXED_WET)."""
     mixed_wet_water_fraction: float = 0.5
     """Fraction of pore space that is water-wet in mixed-wet systems (0-1)."""
@@ -607,7 +607,7 @@ def compute_van_genuchten_capillary_pressures(
     residual_oil_saturation_water: FloatOrArray,
     residual_oil_saturation_gas: FloatOrArray,
     residual_gas_saturation: FloatOrArray,
-    wettability: WettabilityType,
+    wettability: Wettability,
     oil_water_alpha_water_wet: float,
     oil_water_alpha_oil_wet: float,
     oil_water_n_water_wet: float,
@@ -697,7 +697,7 @@ def compute_van_genuchten_capillary_pressures(
             effective_water_saturation, 1e-6, 1.0 - 1e-6
         )
 
-        if wettability == WettabilityType.WATER_WET:
+        if wettability == Wettability.WATER_WET:
             m_ww = 1.0 - 1.0 / oil_water_n_water_wet
             term = (effective_water_saturation ** (-1.0 / m_ww) - 1.0) ** (
                 1.0 / oil_water_n_water_wet
@@ -705,7 +705,7 @@ def compute_van_genuchten_capillary_pressures(
             pcow = (1.0 / oil_water_alpha_water_wet) * term
             oil_water_capillary_pressure = np.where(valid_water, pcow, 0.0)
 
-        elif wettability == WettabilityType.OIL_WET:
+        elif wettability == Wettability.OIL_WET:
             m_ow = 1.0 - 1.0 / oil_water_n_oil_wet
             term = (effective_water_saturation ** (-1.0 / m_ow) - 1.0) ** (
                 1.0 / oil_water_n_oil_wet
@@ -713,7 +713,7 @@ def compute_van_genuchten_capillary_pressures(
             pcow = -(1.0 / oil_water_alpha_oil_wet) * term
             oil_water_capillary_pressure = np.where(valid_water, pcow, 0.0)
 
-        elif wettability == WettabilityType.MIXED_WET:
+        elif wettability == Wettability.MIXED_WET:
             # Water-wet contribution
             m_ww = 1.0 - 1.0 / oil_water_n_water_wet
             term_ww = (effective_water_saturation ** (-1.0 / m_ww) - 1.0) ** (
@@ -793,7 +793,7 @@ class VanGenuchtenCapillaryPressureModel(
     """van Genuchten α parameter for gas-oil [1/psi]."""
     gas_oil_n: float = 2.0
     """van Genuchten n parameter for gas-oil."""
-    wettability: WettabilityType = WettabilityType.WATER_WET
+    wettability: Wettability = Wettability.WATER_WET
     """Wettability type (WATER_WET, OIL_WET, or MIXED_WET)."""
     mixed_wet_water_fraction: float = 0.5
     """Fraction of pore space that is water-wet in mixed-wet systems (0-1)."""
@@ -927,7 +927,7 @@ def compute_leverett_j_capillary_pressures(
     j_function_coefficient: float = 0.5,
     j_function_exponent: float = 0.5,
     mixed_wet_water_fraction: float = 0.5,
-    wettability: WettabilityType = WettabilityType.WATER_WET,
+    wettability: Wettability = Wettability.WATER_WET,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray]:
     """
     Computes capillary pressures using Leverett J-function approach.
@@ -1044,9 +1044,9 @@ def compute_leverett_j_capillary_pressures(
         )
 
         # Apply wettability sign convention
-        if wettability == WettabilityType.WATER_WET:
+        if wettability == Wettability.WATER_WET:
             oil_water_capillary_pressure = np.where(valid_water, pc_ow, 0.0)
-        elif wettability == WettabilityType.OIL_WET:
+        elif wettability == Wettability.OIL_WET:
             oil_water_capillary_pressure = np.where(valid_water, -pc_ow, 0.0)
         else:  # MIXED_WET
             # Weighted average: positive (water-wet) and negative (oil-wet) contributions
@@ -1128,7 +1128,7 @@ class LeverettJCapillaryPressureModel(
     """Gas-oil contact angle in degrees (0° = oil-wet to gas)."""
     mixed_wet_water_fraction: float = 0.5
     """Fraction of pore space that is water-wet in mixed-wet systems (0-1)."""
-    wettability: WettabilityType = WettabilityType.WATER_WET
+    wettability: Wettability = Wettability.WATER_WET
     """Wettability type (affects sign convention)."""
     j_function_coefficient: float = 0.5
     """Empirical coefficient 'a' in J(Se) = a * Se^(-b). Fit to core data (can be tuned to match experimental data)."""

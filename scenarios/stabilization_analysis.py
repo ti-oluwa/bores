@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.11"
+__generated_with = "0.20.2"
 app = marimo.App(width="full")
 
 
@@ -357,7 +357,7 @@ def _(bores, states, viz):
         plot_type="isosurface",
         width=960,
         height=460,
-        opacity=0.67,
+        # opacity=0.67,
         labels=labels,
         aspect_mode="data",
         z_scale=3,
@@ -368,7 +368,7 @@ def _(bores, states, viz):
         # isomin=0.05
     )
 
-    property = "gas-compressibility-factor"
+    property = "oil-density"
     figures = []
     timesteps = [10]
     for timestep in timesteps:

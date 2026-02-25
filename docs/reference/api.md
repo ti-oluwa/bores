@@ -541,7 +541,7 @@ rel_perm = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_gas: float,
     residual_oil_saturation_water: float,
     residual_gas_saturation: float,
-    wettability: WettabilityType,
+    wettability: Wettability,
     water_exponent: float = 2.0,
     oil_exponent: float = 2.0,
     gas_exponent: float = 2.0,
@@ -639,11 +639,11 @@ bores.Orientation.Y
 bores.Orientation.Z
 ```
 
-### `bores.WettabilityType` / `bores.Wettability`
+### `bores.Wettability` / `bores.Wettability`
 
 ```python
-bores.WettabilityType.WATER_WET
-bores.WettabilityType.OIL_WET
+bores.Wettability.WATER_WET
+bores.Wettability.OIL_WET
 bores.Wettability.WATER_WET
 bores.Wettability.OIL_WET
 ```

@@ -781,8 +781,8 @@ def compute_gas_compressibility_factor_papay(
         - H₂S alone < 25 mol%
 
     :param gas_gravity: Gas specific gravity (dimensionless)
-    :param pressure: Pressure in Pascals (psi)
-    :param temperature: Temperature in Kelvin (°F)
+    :param pressure: Pressure array (psi)
+    :param temperature: Temperature array (°F)
     :param h2s_mole_fraction: Mole fraction of H2S in the gas (dimensionless, default is 0.0)
     :param co2_mole_fraction: Mole fraction of CO2 in the gas (dimensionless, default is 0.0)
     :param n2_mole_fraction: Mole fraction of N2 in the gas (dimensionless, default is 0.0)
@@ -792,9 +792,6 @@ def compute_gas_compressibility_factor_papay(
         raise ValidationError(
             "Pressure, temperature, and gas specific gravity must be positive."
         )
-    h2s_mole_fraction = clip(h2s_mole_fraction, 0.0, 1.0)
-    co2_mole_fraction = clip(co2_mole_fraction, 0.0, 1.0)
-    n2_mole_fraction = clip(n2_mole_fraction, 0.0, 1.0)
 
     pseudo_critical_pressure, pseudo_critical_temperature = (
         compute_gas_pseudocritical_properties(
@@ -806,11 +803,9 @@ def compute_gas_compressibility_factor_papay(
     )
 
     pseudo_reduced_pressure = pressure / pseudo_critical_pressure
-    pseudo_reduced_temperature = temperature / pseudo_critical_temperature
-
-    # Clamp pseudo-reduced values to avoid extreme/unphysical Z outputs
-    pseudo_reduced_pressure = clip(pseudo_reduced_pressure, 0.2, 15.0)
-    pseudo_reduced_temperature = clip(pseudo_reduced_temperature, 1.05, 3.0)
+    pseudo_reduced_temperature = (
+        fahrenheit_to_rankine(temperature) / pseudo_critical_temperature
+    )
     # Papay's correlation for gas compressibility factor
     compressibility_factor = (
         1
@@ -826,7 +821,7 @@ def compute_gas_compressibility_factor_papay(
     )
     dtype = pressure.dtype
     # Ensure Z is not negative or too low
-    return np.maximum(0.1, compressibility_factor).astype(dtype)
+    return np.maximum(0.1, compressibility_factor).astype(dtype)  # type: ignore[return-value]
 
 
 @numba.njit(cache=True)
@@ -880,11 +875,6 @@ def compute_gas_compressibility_factor_hall_yarborough(
             "Pressure, temperature, and gas gravity must be positive."
         )
 
-    # Clamp mole fractions to valid range
-    h2s_mole_fraction = clip(h2s_mole_fraction, 0.0, 1.0)
-    co2_mole_fraction = clip(co2_mole_fraction, 0.0, 1.0)
-    n2_mole_fraction = clip(n2_mole_fraction, 0.0, 1.0)
-
     # Get pseudocritical properties with Wichert-Aziz correction
     pseudo_critical_pressure, pseudo_critical_temperature = (
         compute_gas_pseudocritical_properties(
@@ -895,12 +885,8 @@ def compute_gas_compressibility_factor_hall_yarborough(
         )
     )
 
-    pseudo_reduced_pressure = pressure / pseudo_critical_pressure
-    pseudo_reduced_temperature = temperature / pseudo_critical_temperature
-
-    # Clamp to valid range
-    Pr = clip(pseudo_reduced_pressure, 0.2, 30.0)
-    Tr = clip(pseudo_reduced_temperature, 1.0, 3.0)
+    Pr = pressure / pseudo_critical_pressure
+    Tr = fahrenheit_to_rankine(temperature) / pseudo_critical_temperature
 
     # For very low pressure, use ideal gas approximation
     Z = np.where(Pr < 0.01, 1.0, 0.0)  # Will be overwritten where Pr >= 0.01
@@ -915,7 +901,7 @@ def compute_gas_compressibility_factor_hall_yarborough(
     D = 2.18 + 2.82 * t
 
     # Initial guess for reduced density (y) - broadcast to shape
-    y = np.full_like(Pr, 0.001)
+    y = clip(0.27 * Pr / Tr, 0.01, 0.9)
 
     # Create mask for points that need iteration
     active_mask = Pr >= 0.01
@@ -1022,11 +1008,6 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
             "Pressure, temperature, and gas gravity must be positive."
         )
 
-    # Clamp mole fractions to valid range
-    h2s_mole_fraction = clip(h2s_mole_fraction, 0.0, 1.0)
-    co2_mole_fraction = clip(co2_mole_fraction, 0.0, 1.0)
-    n2_mole_fraction = clip(n2_mole_fraction, 0.0, 1.0)
-
     # Get pseudocritical properties
     pseudo_critical_pressure, pseudo_critical_temperature = (
         compute_gas_pseudocritical_properties(
@@ -1038,11 +1019,7 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     )
 
     Pr = pressure / pseudo_critical_pressure
-    Tr = temperature / pseudo_critical_temperature
-
-    # Clamp to valid range
-    Pr = clip(Pr, 0.2, 30.0)
-    Tr = clip(Tr, 1.0, 3.0)
+    Tr = fahrenheit_to_rankine(temperature) / pseudo_critical_temperature
 
     # For very low pressure, use ideal gas
     Z = np.where(Pr < 0.01, 1.0, 1.0)  # Initial guess
@@ -1092,9 +1069,6 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
 
         Z_new = 1.0 + term1 + term2 + term3 + term4
 
-        # Clamp Z to physical range
-        Z_new = clip(Z_new, 0.2, 3.0)
-
         # Only update active points
         Z = np.where(active_mask, Z_new, Z)
 
@@ -1105,7 +1079,7 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
 
     # Return with same dtype as input pressure
     dtype = pressure.dtype
-    return Z.astype(dtype)  # type: ignore[return-value]
+    return clip(Z, 0.2, 3.0).astype(dtype)  # type: ignore[return-value]
 
 
 @numba.njit(cache=True)
@@ -1116,23 +1090,21 @@ def compute_gas_compressibility_factor(
     h2s_mole_fraction: FloatOrArray = 0.0,
     co2_mole_fraction: FloatOrArray = 0.0,
     n2_mole_fraction: FloatOrArray = 0.0,
-    method: GasZFactorMethod = "auto",
+    method: GasZFactorMethod = "dak",
 ) -> NDimensionalGrid[NDimension]:
     """
     Computes gas compressibility factor with automatic correlation selection.
 
-    Automatically selects and computes the best gas compressibility factor correlation
-    based on pressure conditions, with fallback to alternative methods.
-
-    Selection Strategy (applied element-wise):
+    Method Selection Strategy:
     1. **High Pressure (Pr > 15)**: Use DAK (most accurate for Pr up to 30)
     2. **Medium Pressure (1 < Pr ≤ 15)**: Use Hall-Yarborough (best balance)
     3. **Low Pressure (Pr ≤ 1)**: Use Papay (fast, accurate for low Pr)
     4. **Fallback**: If any method produces invalid results (Z < 0.2 or Z > 3.0),
         try alternative methods
 
+    However, DAK is usually more than enough for black-oil simulations.
+
     Available Methods:
-    - "auto": Automatic selection based on pressure (recommended)
     - "papay": Papay's correlation (fastest, valid Pr: 0.2-15)
     - "hall-yarborough": Hall-Yarborough (accurate, valid Pr: 0.2-30)
     - "dak": Dranchuk-Abou-Kassem (most accurate, valid Pr: 0.2-30)
@@ -1143,15 +1115,11 @@ def compute_gas_compressibility_factor(
     :param h2s_mole_fraction: H₂S mole fraction (0.0 to 1.0)
     :param co2_mole_fraction: CO₂ mole fraction (0.0 to 1.0)
     :param n2_mole_fraction: N₂ mole fraction (0.0 to 1.0)
-    :param method: Correlation to use ("auto", "papay", "hall-yarborough", "dak")
+    :param method: Correlation to use ("papay", "hall-yarborough", "dak"). Defaults to "dak".
     :return: Compressibility factor Z array (dimensionless)
 
     Example:
     ```python
-    # Auto-selection (recommended)
-    Z = compute_gas_compressibility_factor(P_grid, T_grid, gamma_g)
-
-    # Force specific method
     Z = compute_gas_compressibility_factor(P_grid, T_grid, gamma_g, method="dak")
     ```
 
@@ -1160,7 +1128,6 @@ def compute_gas_compressibility_factor(
     - Hall, K.R. and Yarborough, L. (1973). "A New Equation of State..."
     - Dranchuk, P.M. and Abou-Kassem, J.H. (1975). "Calculation of Z Factors..."
     """
-    # Manual method selection
     if method == "papay":
         return compute_gas_compressibility_factor_papay(
             pressure=pressure,
@@ -1179,101 +1146,14 @@ def compute_gas_compressibility_factor(
             co2_mole_fraction=co2_mole_fraction,
             n2_mole_fraction=n2_mole_fraction,
         )
-    elif method == "dak":
-        return compute_gas_compressibility_factor_dranchuk_abou_kassem(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-
-    # Auto-selection based on Pr (element-wise)
-    # Compute pseudo-reduced properties for selection
-    pseudo_critical_pressure, _ = compute_gas_pseudocritical_properties(
+    return compute_gas_compressibility_factor_dranchuk_abou_kassem(
+        pressure=pressure,
+        temperature=temperature,
         gas_gravity=gas_gravity,
         h2s_mole_fraction=h2s_mole_fraction,
         co2_mole_fraction=co2_mole_fraction,
         n2_mole_fraction=n2_mole_fraction,
     )
-    Pr = pressure / pseudo_critical_pressure
-
-    # Create masks for different pressure regimes
-    high_pressure_mask = Pr > 15.0
-    medium_pressure_mask = (Pr > 1.0) & (Pr <= 15.0)
-    low_pressure_mask = Pr <= 1.0
-
-    # Initialize result array
-    Z = np.zeros_like(pressure)
-
-    # High pressure: Use DAK
-    if np.any(high_pressure_mask):
-        Z_dak = compute_gas_compressibility_factor_dranchuk_abou_kassem(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-        Z = np.where(high_pressure_mask, Z_dak, Z)  # type: ignore[assignment]
-
-    # Medium pressure: Use Hall-Yarborough
-    if np.any(medium_pressure_mask):
-        Z_hy = compute_gas_compressibility_factor_hall_yarborough(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-        Z = np.where(medium_pressure_mask, Z_hy, Z)  # type: ignore[assignment]
-
-    # Low pressure: Use Papay
-    if np.any(low_pressure_mask):
-        Z_papay = compute_gas_compressibility_factor_papay(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-        Z = np.where(low_pressure_mask, Z_papay, Z)  # type: ignore[assignment]
-
-    # Validate and apply fallbacks where needed
-    invalid_mask = (Z < 0.2) | (Z > 3.0)
-    if np.any(invalid_mask):
-        # Try Hall-Yarborough as first fallback
-        Z_hy = compute_gas_compressibility_factor_hall_yarborough(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-        Z = np.where(invalid_mask & ((Z_hy >= 0.2) & (Z_hy <= 3.0)), Z_hy, Z)  # type: ignore[assignment]
-
-        # Update invalid mask
-        invalid_mask = (Z < 0.2) | (Z > 3.0)
-        if np.any(invalid_mask):
-            # Try Papay as final fallback
-            Z_papay = compute_gas_compressibility_factor_papay(
-                pressure=pressure,
-                temperature=temperature,
-                gas_gravity=gas_gravity,
-                h2s_mole_fraction=h2s_mole_fraction,
-                co2_mole_fraction=co2_mole_fraction,
-                n2_mole_fraction=n2_mole_fraction,
-            )
-            Z = np.where(invalid_mask, Z_papay, Z)  # type: ignore[assignment]
-
-    # Ensure consistent return type matching input pressure dtype
-    dtype = pressure.dtype
-    return Z.astype(dtype)  # type: ignore[return-value]
 
 
 @numba.njit(cache=True)
@@ -3643,16 +3523,20 @@ def compute_todd_longstaff_effective_viscosity(
     C_s = solvent_concentration
     C_o = 1.0 - C_s
 
+    # Clamp to avoid 0-division in harmonic mean (pure-phase cells handled by `np.where` below)
+    C_s_safe = clip(C_s, 1e-12, 1.0 - 1e-12)
+    C_o_safe = 1.0 - C_s_safe
+
     dtype = oil_viscosity.dtype
 
     # Fully mixed viscosity (arithmetic/linear mean)
     # Represents ideal miscibility - single homogeneous phase
-    mu_mix = C_s * solvent_viscosity + C_o * oil_viscosity
+    mu_mix = C_s_safe * solvent_viscosity + C_o * oil_viscosity
 
     # Fully segregated viscosity (harmonic mean)
     # Represents parallel flow of two immiscible phases
     # Equivalent to: μ_seg = μ_s * μ_o / (C_s * μ_o + C_o * μ_s)
-    mu_segregated = 1.0 / (C_s / solvent_viscosity + C_o / oil_viscosity)
+    mu_segregated = 1.0 / (C_s_safe / solvent_viscosity + C_o_safe / oil_viscosity)
 
     # Todd-Longstaff interpolation (weighted geometric mean)
     # Special cases:
@@ -3662,12 +3546,8 @@ def compute_todd_longstaff_effective_viscosity(
     mu_effective = (mu_mix**omega) * (mu_segregated ** (1.0 - omega))
 
     # Handle edge cases element-wise (pure solvent or pure oil cells)
-    # Use element-wise masking to avoid affecting all cells when any cell is pure
-    pure_solvent_mask = C_s >= 1.0 - 1e-12
-    pure_oil_mask = C_s <= 1e-12
-    mu_effective[pure_solvent_mask] = solvent_viscosity[pure_solvent_mask]
-    mu_effective[pure_oil_mask] = oil_viscosity[pure_oil_mask]
-
+    mu_effective = np.where(C_s >= 1.0 - 1e-12, solvent_viscosity, mu_effective)
+    mu_effective = np.where(C_s <= 1e-12, oil_viscosity, mu_effective)
     return mu_effective.astype(dtype)  # type: ignore[return-value]
 
 
@@ -3781,29 +3661,26 @@ def compute_todd_longstaff_effective_density(
     # This is the density if phases are perfectly mixed by volume
     rho_mix = (C_s * solvent_density) + (C_o * oil_density)
 
+    # Clamp concentrations to avoid 0-division in flow fraction computation
+    # (pure-phase cells are corrected by np.where at the end anyway)
+    C_s_safe = np.clip(C_s, 1e-12, 1.0 - 1e-12)
+    C_o_safe = 1.0 - C_s_safe
+
     # Compute phase flow fractions for segregated density
     # These represent how much each phase contributes to flow based on mobility
     # f_s = fraction of flow that is solvent
     # f_o = fraction of flow that is oil
     # Note: More mobile phase (lower viscosity) gets higher flow fraction
-    denominator = (C_s * oil_viscosity) + (C_o * solvent_viscosity)
-
-    # Initialize flow fractions
-    f_s = np.zeros_like(C_s, dtype=dtype)
-    f_o = np.zeros_like(C_o, dtype=dtype)
+    denominator = (C_s_safe * oil_viscosity) + (C_o_safe * solvent_viscosity)
 
     # Compute flow fractions element-wise, handling near-zero denominators
     # Avoid division by zero (though should never happen with positive viscosities)
-    zero_denom_mask = denominator < 1e-15
-    valid_mask = ~zero_denom_mask
-
-    # For valid cells, compute mobility-weighted flow fractions
-    f_s[valid_mask] = ((C_s * oil_viscosity) / denominator)[valid_mask]
-    f_o[valid_mask] = ((C_o * solvent_viscosity) / denominator)[valid_mask]
-
-    # For near-zero denominator cells, fall back to volume weighting
-    f_s[zero_denom_mask] = C_s[zero_denom_mask]
-    f_o[zero_denom_mask] = C_o[zero_denom_mask]
+    f_s = np.where(
+        denominator < 1e-15, C_s_safe, (C_s_safe * oil_viscosity) / denominator
+    )
+    f_o = np.where(
+        denominator < 1e-15, C_o_safe, (C_o_safe * solvent_viscosity) / denominator
+    )
 
     # Fully segregated density (flow-weighted)
     # This is the density if phases flow separately, weighted by their mobilities
@@ -3816,10 +3693,7 @@ def compute_todd_longstaff_effective_density(
     rho_effective = (rho_mix**omega) * (rho_segregated ** (1.0 - omega))
 
     # Handle edge cases element-wise (pure solvent or pure oil cells)
-    # Use element-wise masking to avoid affecting all cells when any cell is pure
-    pure_solvent_mask = C_s >= 1.0
-    pure_oil_mask = C_s <= 0.0
-    rho_effective[pure_solvent_mask] = solvent_density[pure_solvent_mask]
-    rho_effective[pure_oil_mask] = oil_density[pure_oil_mask]
-
+    # Use element-wise check to avoid affecting all cells when any cell is pure
+    rho_effective = np.where(C_s >= 1.0, solvent_density, rho_effective)
+    rho_effective = np.where(C_s <= 0.0, oil_density, rho_effective)
     return rho_effective.astype(dtype)  # type: ignore[return-value]

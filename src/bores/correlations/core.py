@@ -746,9 +746,9 @@ def compute_gas_compressibility_factor_papay(
     - P_r = P / P_pc
     - T_r = T / T_pc
     - P_pc is the pseudo-critical pressure (psi)
-    - T_pc is the pseudo-critical temperature (°F)
+    - T_pc is the pseudo-critical temperature (°R)
     - P is the pressure (psi)
-    - T is the temperature (°F)
+    - T is the temperature (°R)
     - P_pc and T_pc are calculated based on the gas specific gravity (gas_gravity).
 
     Valid Range:
@@ -759,8 +759,8 @@ def compute_gas_compressibility_factor_papay(
     - H₂S alone < 25 mol%
 
     :param gas_gravity: Gas specific gravity (dimensionless)
-    :param pressure: Pressure in Pascals (psi)
-    :param temperature: Temperature in Kelvin (°F)
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
     :param h2s_mole_fraction: Mole fraction of H2S in the gas (dimensionless, default is 0.0)
     :param co2_mole_fraction: Mole fraction of CO2 in the gas (dimensionless, default is 0.0)
     :param n2_mole_fraction: Mole fraction of N2 in the gas (dimensionless, default is 0.0)
@@ -785,13 +785,11 @@ def compute_gas_compressibility_factor_papay(
             n2_mole_fraction=n2_mole_fraction,
         )
     )
-
     pseudo_reduced_pressure = pressure / pseudo_critical_pressure
-    pseudo_reduced_temperature = temperature / pseudo_critical_temperature
+    pseudo_reduced_temperature = (
+        fahrenheit_to_rankine(temperature) / pseudo_critical_temperature
+    )
 
-    # Clamp pseudo-reduced values to avoid extreme/unphysical Z outputs
-    pseudo_reduced_pressure = clip(pseudo_reduced_pressure, 0.2, 15.0)
-    pseudo_reduced_temperature = clip(pseudo_reduced_temperature, 1.05, 3.0)
     # Papay's correlation for gas compressibility factor
     compressibility_factor = (
         1
@@ -805,9 +803,8 @@ def compute_gas_compressibility_factor_papay(
         )
         + ((0.274 * pseudo_reduced_pressure**2) / pseudo_reduced_temperature**2)
     )
-    return np.maximum(
-        0.1, compressibility_factor
-    )  # Ensure Z is not negative or too low
+    # Ensure Z is not negative
+    return np.maximum(0.1, compressibility_factor)  # type: ignore[return-value]
 
 
 @numba.njit(cache=True)
@@ -865,11 +862,6 @@ def compute_gas_compressibility_factor_hall_yarborough(
             "Pressure, temperature, and gas gravity must be positive."
         )
 
-    # Clamp mole fractions to valid range
-    h2s_mole_fraction = clip(h2s_mole_fraction, 0.0, 1.0)
-    co2_mole_fraction = clip(co2_mole_fraction, 0.0, 1.0)
-    n2_mole_fraction = clip(n2_mole_fraction, 0.0, 1.0)
-
     # Get pseudocritical properties with Wichert-Aziz correction
     pseudo_critical_pressure, pseudo_critical_temperature = (
         compute_gas_pseudocritical_properties(
@@ -880,15 +872,8 @@ def compute_gas_compressibility_factor_hall_yarborough(
         )
     )
 
-    pseudo_reduced_pressure = pressure / pseudo_critical_pressure
-    pseudo_reduced_temperature = temperature / pseudo_critical_temperature
-
-    # Clamp to valid range
-    pseudo_reduced_pressure = clip(pseudo_reduced_pressure, 0.2, 30.0)
-    pseudo_reduced_temperature = clip(pseudo_reduced_temperature, 1.0, 3.0)
-
-    Pr = pseudo_reduced_pressure
-    Tr = pseudo_reduced_temperature
+    Pr = pressure / pseudo_critical_pressure
+    Tr = fahrenheit_to_rankine(temperature) / pseudo_critical_temperature
 
     # For very low pressure, use ideal gas approximation
     if Pr < 0.01:
@@ -904,7 +889,8 @@ def compute_gas_compressibility_factor_hall_yarborough(
     D = 2.18 + 2.82 * t
 
     # Initial guess for reduced density (y)
-    y = 0.001  # Small positive value
+    y = 0.27 * Pr / Tr
+    y = min(0.9, max(0.01, y))
 
     # Newton-Raphson iteration
     for _ in range(max_iterations):
@@ -1015,11 +1001,6 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
             "Pressure, temperature, and gas gravity must be positive."
         )
 
-    # Clamp mole fractions to valid range
-    h2s_mole_fraction = clip(h2s_mole_fraction, 0.0, 1.0)
-    co2_mole_fraction = clip(co2_mole_fraction, 0.0, 1.0)
-    n2_mole_fraction = clip(n2_mole_fraction, 0.0, 1.0)
-
     # Get pseudocritical properties
     pseudo_critical_pressure, pseudo_critical_temperature = (
         compute_gas_pseudocritical_properties(
@@ -1029,13 +1010,8 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
             n2_mole_fraction=n2_mole_fraction,
         )
     )
-
     Pr = pressure / pseudo_critical_pressure
-    Tr = temperature / pseudo_critical_temperature
-
-    # Clamp to valid range
-    Pr = clip(Pr, 0.2, 30.0)
-    Tr = clip(Tr, 1.0, 3.0)
+    Tr = fahrenheit_to_rankine(temperature) / pseudo_critical_temperature
 
     # For very low pressure, use ideal gas
     if Pr < 0.01:
@@ -1084,14 +1060,12 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
 
         Z = 1.0 + term1 + term2 + term3 + term4
 
-        # Clamp Z to physical range
-        Z = clip(Z, 0.2, 3.0)
-
         # Check convergence
         if abs(Z - Z_old) < tolerance:
             break
 
-    return Z
+    # Clamp Z to physical range
+    return clip(Z, 0.2, 3.0)
 
 
 @numba.njit(cache=True)
@@ -1102,23 +1076,21 @@ def compute_gas_compressibility_factor(
     h2s_mole_fraction: float = 0.0,
     co2_mole_fraction: float = 0.0,
     n2_mole_fraction: float = 0.0,
-    method: GasZFactorMethod = "auto",
+    method: GasZFactorMethod = "dak",
 ) -> float:
     """
     Computes gas compressibility factor with automatic correlation selection.
 
-    Automatically selects and computes the best gas compressibility factor correlation
-    based on pressure conditions, with fallback to alternative methods.
-
-    Selection Strategy:
+    Method Selection Strategy:
     1. **High Pressure (Pr > 15)**: Use DAK (most accurate for Pr up to 30)
     2. **Medium Pressure (1 < Pr ≤ 15)**: Use Hall-Yarborough (best balance)
     3. **Low Pressure (Pr ≤ 1)**: Use Papay (fast, accurate for low Pr)
     4. **Fallback**: If any method fails validation, try others in order:
         DAK → Hall-Yarborough → Papay
 
+    However, DAK is usually more than enough for black-oil simulations.
+
     Available Methods:
-    - "auto": Automatic selection based on pressure (recommended)
     - "papay": Papay's correlation (fastest, valid Pr: 0.2-15)
     - "hall-yarborough": Hall-Yarborough (accurate, valid Pr: 0.2-30)
     - "dak": Dranchuk-Abou-Kassem (most accurate, valid Pr: 0.2-30)
@@ -1129,15 +1101,11 @@ def compute_gas_compressibility_factor(
     :param h2s_mole_fraction: H₂S mole fraction (0.0 to 1.0)
     :param co2_mole_fraction: CO₂ mole fraction (0.0 to 1.0)
     :param n2_mole_fraction: N₂ mole fraction (0.0 to 1.0)
-    :param method: Correlation to use ("auto", "papay", "hall-yarborough", "dak")
+    :param method: Correlation to use ("papay", "hall-yarborough", "dak"). Defaults to "dak"
     :return: Compressibility factor Z (dimensionless)
 
     Example:
     ```python
-    # Auto-selection (recommended)
-    Z = compute_gas_compressibility_factor(2000.0, 150.0, 0.65)
-
-    # Force specific method
     Z = compute_gas_compressibility_factor(2000.0, 150.0, 0.65, method="dak")
     ```
 
@@ -1165,98 +1133,7 @@ def compute_gas_compressibility_factor(
             co2_mole_fraction=co2_mole_fraction,
             n2_mole_fraction=n2_mole_fraction,
         )
-    elif method == "dak":
-        return compute_gas_compressibility_factor_dranchuk_abou_kassem(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-
-    # Compute pseudo-reduced properties for selection
-    pseudo_critical_pressure, _ = compute_gas_pseudocritical_properties(
-        gas_gravity=gas_gravity,
-        h2s_mole_fraction=h2s_mole_fraction,
-        co2_mole_fraction=co2_mole_fraction,
-        n2_mole_fraction=n2_mole_fraction,
-    )
-    Pr = pressure / pseudo_critical_pressure
-    # Auto-selection based on Pr
-    if Pr > 15.0:
-        # High pressure: DAK is most accurate
-        Z = compute_gas_compressibility_factor_dranchuk_abou_kassem(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-        # Validate result
-        if 0.2 <= Z <= 3.0:
-            return Z
-
-        # Fallback to Hall-Yarborough
-        Z = compute_gas_compressibility_factor_hall_yarborough(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-        if 0.2 <= Z <= 3.0:
-            return Z
-
-        # Final fallback to Papay
-        return compute_gas_compressibility_factor_papay(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-
-    elif Pr > 1.0:
-        # Medium pressure: Hall-Yarborough is best
-        Z = compute_gas_compressibility_factor_hall_yarborough(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-        if 0.2 <= Z <= 3.0:
-            return Z
-
-        # Fallback to DAK
-        Z = compute_gas_compressibility_factor_dranchuk_abou_kassem(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-        if 0.2 <= Z <= 3.0:
-            return Z
-
-        # Final fallback to Papay
-        return compute_gas_compressibility_factor_papay(
-            pressure=pressure,
-            temperature=temperature,
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-
-    # Low pressure: Papay is fast and accurate
-    return compute_gas_compressibility_factor_papay(
+    return compute_gas_compressibility_factor_dranchuk_abou_kassem(
         pressure=pressure,
         temperature=temperature,
         gas_gravity=gas_gravity,
@@ -1765,7 +1642,6 @@ def compute_gas_pseudocritical_properties(
                 + h2s_mole_fraction * (1 - h2s_mole_fraction) * epsilon
             )
         )
-
     return pseudocritical_pressure, pseudocritical_temperature_rankine
 
 
@@ -3289,7 +3165,7 @@ def compute_miscibility_transition_factor(
     factor = compute_miscibility_transition_factor(3000, mmp, 500)
     omega_eff = omega_base * factor  # ~0.59 (near full miscibility)
     ```
-    
+
     References:
     Todd, M.R. and Longstaff, W.J. (1972). "The Development, Testing and
     Application of a Numerical Simulator for Predicting Miscible Flood Performance."

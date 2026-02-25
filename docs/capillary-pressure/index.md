@@ -112,7 +112,7 @@ capillary_pressure_table = bores.VanGenuchtenCapillaryPressureModel(
     oil_water_n_water_wet=2.0,
     gas_oil_alpha=0.01,  # 1/psi
     gas_oil_n=2.0,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 ```
 
@@ -137,7 +137,7 @@ capillary_pressure_table = bores.LeverettJCapillaryPressureModel(
     gas_oil_interfacial_tension=20.0,  # dyne/cm
     j_function_coefficient=0.5,
     j_function_exponent=0.5,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 ```
 
@@ -166,7 +166,7 @@ capillary_pressure_model = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_pore_size_distribution_index_water_wet=2.0,
     gas_oil_entry_pressure=2.8,  # psi
     gas_oil_pore_size_distribution_index=2.0,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 
 # Compute capillary pressures at specific saturations
@@ -195,7 +195,7 @@ relperm_table = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_gas=0.15,
     residual_oil_saturation_water=0.25,
     residual_gas_saturation=0.045,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     water_exponent=2.0,
     oil_exponent=2.0,
     gas_exponent=2.0,
@@ -289,7 +289,7 @@ Higher capillary pressure (tighter rock) creates thicker transition zones.
 
 BORES supports three wettability types:
 
-### Water-Wet (`WettabilityType.WATER_WET`)
+### Water-Wet (`Wettability.WATER_WET`)
 
 **Characteristics**:
 
@@ -302,10 +302,10 @@ BORES supports three wettability types:
 
 ```python
 oil_water_entry_pressure_water_wet=2.0  # Positive entry pressure
-wettability=bores.WettabilityType.WATER_WET
+wettability=bores.Wettability.WATER_WET
 ```
 
-### Oil-Wet (`WettabilityType.OIL_WET`)
+### Oil-Wet (`Wettability.OIL_WET`)
 
 **Characteristics**:
 
@@ -318,10 +318,10 @@ wettability=bores.WettabilityType.WATER_WET
 
 ```python
 oil_water_entry_pressure_oil_wet=2.0  # Will be negated internally
-wettability=bores.WettabilityType.OIL_WET
+wettability=bores.Wettability.OIL_WET
 ```
 
-### Mixed-Wet (`WettabilityType.MIXED_WET`)
+### Mixed-Wet (`Wettability.MIXED_WET`)
 
 **Characteristics**:
 
@@ -336,7 +336,7 @@ wettability=bores.WettabilityType.OIL_WET
 oil_water_entry_pressure_water_wet=2.0
 oil_water_entry_pressure_oil_wet=2.0
 mixed_wet_water_fraction=0.5  # 50% water-wet, 50% oil-wet
-wettability=bores.WettabilityType.MIXED_WET
+wettability=bores.Wettability.MIXED_WET
 ```
 
 ## Model Selection Guide

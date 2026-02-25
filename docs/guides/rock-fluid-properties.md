@@ -27,7 +27,7 @@ rel_perm = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_gas: float,
     residual_oil_saturation_water: float,
     residual_gas_saturation: float,
-    wettability: bores.WettabilityType,
+    wettability: bores.Wettability,
     water_exponent: float = 2.0,
     oil_exponent: float = 2.0,
     gas_exponent: float = 2.0,
@@ -41,7 +41,7 @@ rel_perm = bores.BrooksCoreyThreePhaseRelPermModel(
 - `residual_oil_saturation_gas`: Sorg - oil saturation remaining after gas displacement
 - `residual_oil_saturation_water`: Sorw - oil saturation remaining after water displacement
 - `residual_gas_saturation`: Sgr - gas saturation that doesn't flow
-- `wettability`: `bores.WettabilityType.WATER_WET` or `.OIL_WET`
+- `wettability`: `bores.Wettability.WATER_WET` or `.OIL_WET`
 - `water_exponent`: Corey exponent for water phase (typical: 1.5-4.0)
 - `oil_exponent`: Corey exponent for oil phase (typical: 2.0-3.0)
 - `gas_exponent`: Corey exponent for gas phase (typical: 1.5-3.0)
@@ -71,7 +71,7 @@ rel_perm = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_water=0.25,   # Sorw
     residual_oil_saturation_gas=0.15,     # Sorg
     residual_gas_saturation=0.05,         # Sgr
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     water_exponent=2.0,   # More linear = easier water flow
     oil_exponent=2.0,     # Standard value
     gas_exponent=2.0,     # Standard value
@@ -124,10 +124,10 @@ Wettability determines which fluid preferentially wets the rock surface:
 
 ```python
 # Water-wet (most common)
-wettability = bores.WettabilityType.WATER_WET
+wettability = bores.Wettability.WATER_WET
 
 # Oil-wet (rare, affects displacement)
-wettability = bores.WettabilityType.OIL_WET
+wettability = bores.Wettability.OIL_WET
 ```
 
 **Water-wet systems** (most reservoirs):
@@ -271,7 +271,7 @@ rel_perm = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
     residual_gas_saturation=0.05,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     water_exponent=2.0,
     oil_exponent=2.0,
     gas_exponent=2.0,

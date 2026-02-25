@@ -7,7 +7,6 @@ Override these by setting environment variables before importing BORES.
 
 import os
 
-
 __all__ = [
     "COLORBAR_BOUNDARY_PADDING",
     "COLORBAR_HEIGHT_FACTOR",
@@ -91,10 +90,10 @@ def get_config_summary() -> str:
     (environment variable or default).
 
     Example:
-        ```python
-        from bores.visualization.config import get_config_summary
-        print(get_config_summary())
-        ```
+    ```python
+    from bores.visualization.config import get_config_summary
+    print(get_config_summary())
+    ```
     """
     lines = [
         "BORES Visualization Configuration",

@@ -988,7 +988,7 @@ relperm_model = bores.BrooksCoreyThreePhaseRelPermModel(
     gas_exponent=2.0,
     
     # Wettability
-    wettability=bores.WettabilityType.WATER_WET,  # WATER_WET, OIL_WET
+    wettability=bores.Wettability.WATER_WET,  # WATER_WET, OIL_WET
     
     # Three-phase oil mixing rule
     mixing_rule=bores.stone_II_rule,
@@ -1145,7 +1145,7 @@ capillary_model = bores.BrooksCoreyCapillaryPressureModel(
     gas_oil_pore_size_distribution_index=2.5,
     
     # Wettability
-    wettability=bores.WettabilityType.WATER_WET,  # WATER_WET, OIL_WET, MIXED_WET
+    wettability=bores.Wettability.WATER_WET,  # WATER_WET, OIL_WET, MIXED_WET
     mixed_wet_water_fraction=0.6,  # Fraction water-wet (for MIXED_WET only)
 )
 ```
@@ -1179,7 +1179,7 @@ capillary_model = bores.VanGenuchtenCapillaryPressureModel(
     gas_oil_n=2.2,
     
     # Wettability
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     mixed_wet_water_fraction=0.5,
 )
 ```
@@ -1208,7 +1208,7 @@ capillary_model = bores.LeverettJCapillaryPressureModel(
     contact_angle_oil_water=0.0,   # 0° = water-wet, 180° = oil-wet
     contact_angle_gas_oil=0.0,
     
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 ```
 
@@ -1277,13 +1277,13 @@ print(result["gas_oil"])    # Pcgo = Pg - Po (psi)
 ### Wettability Types
 
 ```python
-# Using WettabilityType enum
-bores.WettabilityType.WATER_WET   # Water preferentially wets rock
-bores.WettabilityType.OIL_WET     # Oil preferentially wets rock
-bores.WettabilityType.MIXED_WET   # Both water-wet and oil-wet regions
+# Using Wettability enum
+bores.Wettability.WATER_WET   # Water preferentially wets rock
+bores.Wettability.OIL_WET     # Oil preferentially wets rock
+bores.Wettability.MIXED_WET   # Both water-wet and oil-wet regions
 
 # Alias for convenience
-bores.Wettability.WATER_WET  # Same as WettabilityType.WATER_WET
+bores.Wettability.WATER_WET  # Same as Wettability.WATER_WET
 ```
 
 ---
@@ -2179,7 +2179,7 @@ relative_permeability_table = bores.BrooksCoreyThreePhaseRelPermModel(
     residual_oil_saturation_gas=0.15,
     residual_oil_saturation_water=0.25,
     residual_gas_saturation=0.045,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
     water_exponent=2.0,
     oil_exponent=2.0,
     gas_exponent=2.0,
@@ -2192,7 +2192,7 @@ capillary_pressure_table = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_pore_size_distribution_index_water_wet=2.0,
     gas_oil_entry_pressure=2.8,
     gas_oil_pore_size_distribution_index=2.0,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 # Bundle into rock-fluid tables
 rock_fluid_tables = bores.RockFluidTables(

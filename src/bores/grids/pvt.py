@@ -547,6 +547,7 @@ def build_gas_compressibility_factor_grid(
         h2s_mole_fraction=h2s_mole_fraction,
         co2_mole_fraction=co2_mole_fraction,
         n2_mole_fraction=n2_mole_fraction,
+        method="dak",
     )
     return result  # type: ignore[return-value]
 

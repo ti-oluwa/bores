@@ -151,7 +151,7 @@ class LeverettJCapillaryPressureModel:
     mixed_wet_water_fraction: float = 0.5
     """Fraction of pore space that is water-wet (0-1)."""
 
-    wettability: WettabilityType = WettabilityType.WATER_WET
+    wettability: Wettability = Wettability.WATER_WET
     """Wettability type (affects sign convention)."""
 
     j_function_coefficient: float = 0.5
@@ -248,7 +248,7 @@ capillary_pressure_table = bores.LeverettJCapillaryPressureModel(
     contact_angle_gas_oil=0.0,  # degrees (oil-wet to gas)
     j_function_coefficient=0.5,
     j_function_exponent=0.5,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 
 # Compute capillary pressures
@@ -279,7 +279,7 @@ base_params = {
     "contact_angle_gas_oil": 0.0,
     "j_function_coefficient": 0.5,
     "j_function_exponent": 0.5,
-    "wettability": bores.WettabilityType.WATER_WET,
+    "wettability": bores.Wettability.WATER_WET,
 }
 
 # High-permeability zone

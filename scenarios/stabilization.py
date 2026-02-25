@@ -41,7 +41,7 @@ def save_run(Path, run):
 @app.cell
 def create_store(Path, bores):
     store = bores.ZarrStore(
-        store=Path("./scenarios/runs/stabilization/results/stabilization.zarr"),
+        store=Path("./scenarios/runs/stabilization/results/stabilization.zarr")
     )
     return (store,)
 
@@ -60,7 +60,9 @@ def execute_run(bores, run, store):
 
 @app.cell
 def capture_last_model_state(Path, last_state):
-    last_state.model.to_file(Path("./scenarios/runs/stabilization/results/model.h5"))
+    last_state.model.to_file(
+        Path("./scenarios/runs/stabilization/results/model.h5")
+    )
     return
 
 

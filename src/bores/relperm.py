@@ -17,7 +17,7 @@ from bores.types import (
     MixingRule,
     RelativePermeabilities,
     T,
-    WettabilityType,
+    Wettability,
 )
 
 __all__ = [
@@ -1082,7 +1082,7 @@ def compute_corey_three_phase_relative_permeabilities(
     water_exponent: float,
     oil_exponent: float,
     gas_exponent: float,
-    wettability: WettabilityType = WettabilityType.WATER_WET,
+    wettability: Wettability = Wettability.WATER_WET,
     mixing_rule: MixingRule = stone_II_rule,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray]:
     """
@@ -1126,7 +1126,7 @@ def compute_corey_three_phase_relative_permeabilities(
         so = np.where(needs_norm, so / total_saturation, so)
         sg = np.where(needs_norm, sg / total_saturation, sg)
 
-    if wettability == WettabilityType.WATER_WET:
+    if wettability == Wettability.WATER_WET:
         # 1. Water relperm (wetting phase)
         movable_water_range = (
             1.0 - irreducible_water_saturation - residual_oil_saturation_water
@@ -1169,7 +1169,7 @@ def compute_corey_three_phase_relative_permeabilities(
             gas_saturation=sg,
         )
 
-    elif wettability == WettabilityType.OIL_WET:
+    elif wettability == Wettability.OIL_WET:
         # Oil is wetting, water becomes intermediate
         # 1. Oil relperm (wetting phase)
         movable_oil_range = (
@@ -1261,7 +1261,7 @@ class BrooksCoreyThreePhaseRelPermModel(
     
     Meaning slower krg increase with saturation.
     """
-    wettability: WettabilityType = WettabilityType.WATER_WET
+    wettability: Wettability = Wettability.WATER_WET
     """Wettability type (water-wet or oil-wet)."""
     mixing_rule: MixingRule = eclipse_rule
     """

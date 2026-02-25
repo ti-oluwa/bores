@@ -101,7 +101,7 @@ class BrooksCoreyCapillaryPressureModel:
     gas_oil_pore_size_distribution_index: float = 2.0
     """Pore size distribution index (λ) for gas-oil."""
 
-    wettability: WettabilityType = WettabilityType.WATER_WET
+    wettability: Wettability = Wettability.WATER_WET
     """Wettability type (WATER_WET, OIL_WET, or MIXED_WET)."""
 
     mixed_wet_water_fraction: float = 0.5
@@ -156,7 +156,7 @@ class BrooksCoreyCapillaryPressureModel:
 
 #### System Properties
 
-**wettability** (`WettabilityType`)
+**wettability** (`Wettability`)
 - Options: `WATER_WET`, `OIL_WET`, `MIXED_WET`
 - Default: `WATER_WET`
 - Description: Determines sign and behavior of oil-water capillary pressure
@@ -211,7 +211,7 @@ capillary_pressure_table = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_pore_size_distribution_index_oil_wet=1.5,  # Wider pore distribution
     gas_oil_entry_pressure=2.0,
     gas_oil_pore_size_distribution_index=2.0,
-    wettability=bores.WettabilityType.OIL_WET,
+    wettability=bores.Wettability.OIL_WET,
 )
 
 pc = capillary_pressure_table(
@@ -241,7 +241,7 @@ capillary_pressure_table = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_pore_size_distribution_index_oil_wet=1.8,
     gas_oil_entry_pressure=2.0,
     gas_oil_pore_size_distribution_index=2.0,
-    wettability=bores.WettabilityType.MIXED_WET,
+    wettability=bores.Wettability.MIXED_WET,
     mixed_wet_water_fraction=0.6,  # 60% water-wet
 )
 
@@ -270,7 +270,7 @@ model = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_pore_size_distribution_index_water_wet=2.0,
     gas_oil_entry_pressure=2.8,
     gas_oil_pore_size_distribution_index=2.0,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 
 # Override for specific region (e.g., different rock type)
@@ -301,7 +301,7 @@ model = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_pore_size_distribution_index_water_wet=2.0,
     gas_oil_entry_pressure=2.8,
     gas_oil_pore_size_distribution_index=2.0,
-    wettability=bores.WettabilityType.WATER_WET,
+    wettability=bores.Wettability.WATER_WET,
 )
 
 # Create saturation grids

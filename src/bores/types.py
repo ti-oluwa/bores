@@ -36,7 +36,7 @@ __all__ = [
     "TwoDimensions",
     "WellFluidType",
     "Wettability",
-    "WettabilityType",
+    "Wettability",
 ]
 
 T = typing.TypeVar("T")
@@ -109,7 +109,7 @@ MiscibilityModel = typing.Literal["immiscible", "todd_longstaff"]
 """Miscibility models for fluid interactions in the simulation"""
 
 
-class ArrayLike(typing.Generic[Tco], typing.Protocol):
+class ArrayLike(typing.Protocol[Tco]):
     """
     Protocol for an array-like object that supports
     basic operations like length, indexing, iteration, and containment checks.
@@ -213,7 +213,7 @@ class CapillaryPressures(typing.TypedDict):
     gas_oil: FloatOrArray  # Pcgo = Pg - Po
 
 
-class WettabilityType(enum.Enum):
+class Wettability(enum.Enum):
     """Enum representing the wettability type of the reservoir rock."""
 
     WATER_WET = "water_wet"
@@ -222,9 +222,6 @@ class WettabilityType(enum.Enum):
 
     def __str__(self) -> str:
         return self.value
-
-
-Wettability = WettabilityType  # Alias for backward compatibility
 
 
 @attrs.frozen
@@ -282,18 +279,18 @@ class RelativeMobilityRange(TypedDict):
     gas: Range
 
 
-K_con = typing.TypeVar("K_con", contravariant=True)
-V_con = typing.TypeVar("V_con", contravariant=True)
+Kcon = typing.TypeVar("Kcon", contravariant=True)
+Vcon = typing.TypeVar("Vcon", contravariant=True)
 
 
-class SupportsSetItem(typing.Generic[K_con, V_con], typing.Protocol):
+class SupportsSetItem(typing.Protocol, typing.Generic[Kcon, Vcon]):
     """
     Protocol for objects that support item assignment.
     """
 
-    def __setitem__(self, key: K_con, value: V_con, /) -> None:
+    def __setitem__(self, key: Kcon, value: Vcon, /) -> None:
         """Sets the item at the specified key to the given value."""
         ...
 
 
-GasZFactorMethod = typing.Literal["auto", "papay", "hall-yarborough", "dak"]
+GasZFactorMethod = typing.Literal["papay", "hall-yarborough", "dak"]

@@ -274,9 +274,9 @@ def setup_config(Path, bores, pvt_tables):
 
     timer = bores.Timer(
         initial_step_size=bores.Time(hours=4.5),
-        max_step_size=bores.Time(days=5.0),
-        min_step_size=bores.Time(minutes=10.0),
-        simulation_time=bores.Time(days=30),  # 30 days
+        max_step_size=bores.Time(days=2.0),
+        min_step_size=bores.Time(hours=1.0),
+        simulation_time=bores.Time(days=60),  # 30 days
         ramp_up_factor=1.2,
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,
@@ -288,7 +288,7 @@ def setup_config(Path, bores, pvt_tables):
         residual_oil_saturation_gas=0.15,
         residual_oil_saturation_water=0.25,
         residual_gas_saturation=0.045,
-        wettability=bores.WettabilityType.WATER_WET,
+        wettability=bores.Wettability.WATER_WET,
         water_exponent=2.0,
         oil_exponent=2.0,
         gas_exponent=2.0,
