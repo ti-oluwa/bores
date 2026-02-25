@@ -19,7 +19,7 @@ def _():
     )
     stream = bores.StateStream(store=store, auto_replay=True)
 
-    states = list(stream.replay(steps=lambda step: step == 0 or step % 2 == 0))
+    states = list(stream.replay(steps=None))
     return bores, itertools, np, states
 
 
@@ -726,9 +726,9 @@ def _(bores, states, viz):
         # cmax=0.01
     )
 
-    property = "z"
+    property = "sgr"
     figures = []
-    timesteps = [750]
+    timesteps = [150]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

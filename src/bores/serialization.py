@@ -384,48 +384,48 @@ def _serialize(
                 f"Value {value!r} does not match any type in {typ}"
             )
 
-        if origin in (list, tuple, Sequence) or (
-            origin and isinstance(origin, type) and issubclass(origin, Sequence)
-        ):
-            if not isinstance(value, (str, bytes)) and isinstance(value, Sequence):
-                element_type = args[0] if args else type(None)
-                return [
-                    _serialize(v, recurse, serializers, element_type) for v in value
-                ]
+        if (
+            origin in (list, tuple, Sequence)
+            or (origin and isinstance(origin, type) and issubclass(origin, Sequence))
+        ) and (not isinstance(value, (str, bytes)) and isinstance(value, Sequence)):
+            element_type = args[0] if args else type(None)
+            return [_serialize(v, recurse, serializers, element_type) for v in value]
 
-        if origin in (dict, Mapping) or (
-            origin and isinstance(origin, type) and issubclass(origin, Mapping)
-        ):
-            if isinstance(value, Mapping):
-                key_type = args[0] if len(args) > 0 else type(None)
-                value_type = args[1] if len(args) > 1 else type(None)
-                return {
-                    _serialize(k, recurse, serializers, key_type): _serialize(
-                        v, recurse, serializers, value_type
-                    )
-                    for k, v in value.items()
-                }
-
-    if _is_typed_dict_type(typ):
-        if isinstance(value, Mapping):
-            annotations = typing.get_type_hints(typ, include_extras=False)
+        if (
+            origin in (dict, Mapping)
+            or (origin and isinstance(origin, type) and issubclass(origin, Mapping))
+        ) and isinstance(value, Mapping):
+            key_type = args[0] if len(args) > 0 else type(None)
+            value_type = args[1] if len(args) > 1 else type(None)
             return {
-                k: _serialize(v, recurse, serializers, annotations.get(k, type(v)))
+                _serialize(k, recurse, serializers, key_type): _serialize(
+                    v, recurse, serializers, value_type
+                )
                 for k, v in value.items()
             }
 
-    if _is_namedtuple_type(typ):
-        if isinstance(value, tuple) and hasattr(value, "_fields"):
-            annotations = typing.get_type_hints(typ, include_extras=False)
-            return {
-                field: _serialize(
-                    getattr(value, field),
-                    recurse,
-                    serializers,
-                    annotations.get(field, type(getattr(value, field))),
-                )
-                for field in value._fields  # type: ignore[attr-defined]
-            }
+    if _is_typed_dict_type(typ) and isinstance(value, Mapping):
+        annotations = typing.get_type_hints(typ, include_extras=False)
+        return {
+            k: _serialize(v, recurse, serializers, annotations.get(k, type(v)))
+            for k, v in value.items()
+        }
+
+    if (
+        _is_namedtuple_type(typ)
+        and isinstance(value, tuple)
+        and hasattr(value, "_fields")
+    ):
+        annotations = typing.get_type_hints(typ, include_extras=False)
+        return {
+            field: _serialize(
+                getattr(value, field),
+                recurse,
+                serializers,
+                annotations.get(field, type(getattr(value, field))),
+            )
+            for field in value._fields  # type: ignore[attr-defined]
+        }
 
     # Fallback check for Mapping/Sequence at runtime
     # (for cases where type annotation isn't available or is too generic)
