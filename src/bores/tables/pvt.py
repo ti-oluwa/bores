@@ -1285,10 +1285,10 @@ def build_pvt_table_data(
     water_salinity: typing.Optional[float] = None,
     estimated_solution_gor: typing.Optional[float] = None,
     salinities: typing.Optional[OneDimensionalGrid] = None,
-    solution_gas_to_oil_ratios: typing.Optional[OneDimensionalGrid] = None,
     bubble_point_pressures: typing.Optional[
         typing.Union[OneDimensionalGrid, TwoDimensionalGrid]
     ] = None,
+    solution_gas_to_oil_ratios: typing.Optional[OneDimensionalGrid] = None,
     reservoir_gas: typing.Optional[str] = None,
     build_oil_properties: bool = True,
     build_water_properties: bool = True,
@@ -1318,7 +1318,11 @@ def build_pvt_table_data(
     gas_solubility_in_water_table: typing.Optional[ThreeDimensionalGrid] = None,
 ) -> PVTTableData:
     """
-    Build comprehensive PVT table data using empirical correlations.
+    Build a best effort comprehensive PVT table data using provided table/data in
+    combination with empirical correlations.
+
+    Uses provided tables when available and derives other tables not explicitly provided using
+    known PVT correlations.
 
     This factory function generates complete 2D (P-T) and 3D (P-T-Salinity) lookup tables
     for fluid properties. It uses the same correlations as `reservoir_model()` but pre-computes
@@ -1328,7 +1332,7 @@ def build_pvt_table_data(
     - Oil properties: 2D tables with shape (n_pressures, n_temperatures)
     - Gas properties: 2D tables with shape (n_pressures, n_temperatures)
     - Water properties: 3D tables with shape (n_pressures, n_temperatures, n_salinities)
-    - Bubble point: 1D shape (n_temperatures) OR 2D shape (n_solution_gor, n_temperatures)
+    - Bubble point pressure (used where needed): 1D shape (n_temperatures) OR 2D shape (n_solution_gor, n_temperatures)
 
     **Water Properties are 3D**
     Water properties depend on salinity, so all water tables are 3D (P, T, S).
@@ -1344,12 +1348,13 @@ def build_pvt_table_data(
         Used if `salinities` array is not provided.
     :param estimated_solution_gor: Estimated solution gas-to-oil ratio (SCF/STB) for
         1D bubble point calculation when `solution_gas_to_oil_ratios` is not provided.
-        If None, defaults to 500 SCF/STB (typical value for medium crude oils).
+        If None, defaults to solving for it iteratively.
         This only affects the bubble point curve, not the actual Rs(P,T) table.
     :param salinities: 1D array of salinities (ppm) for 3D water property tables.
         If None, uses [water_salinity] as single-value array.
+    :param bubble_point_pressures: Optional Pb - 1D (n_t) or 2D (n_rs, n_t)
     :param solution_gas_to_oil_ratios: 1D array of Rs values (SCF/STB) for 2D bubble point table
-    :param reservoir_gas: Gas type (e.g. "CO2", "Methane"), defaults to `constants.RESERVOIR_GAS_NAME`
+    :param reservoir_gas: Gas type (e.g. "CO2", "Methane"), defaults to `c.RESERVOIR_GAS_NAME`
 
     :param build_oil_properties: If True, compute oil property tables (2D)
     :param build_water_properties: If True, compute water property tables (3D)
@@ -1362,7 +1367,6 @@ def build_pvt_table_data(
     :param oil_density_table: Optional pre-computed oil density (n_p, n_t)
     :param oil_formation_volume_factor_table: Optional pre-computed Bo (n_p, n_t)
     :param solution_gas_to_oil_ratio_table: Optional pre-computed Rs (n_p, n_t)
-    :param bubble_point_pressures: Optional Pb - 1D (n_t) or 2D (n_rs, n_t)
 
     :param gas_viscosity_table: Optional pre-computed gas viscosity (n_p, n_t)
     :param gas_compressibility_table: Optional pre-computed gas compressibility (n_p, n_t)
@@ -1399,7 +1403,7 @@ def build_pvt_table_data(
 
     # Create table with interpolators for fast lookup
     tables = PVTTables(
-        table_data=table_data,
+        data=table_data,
         interpolation_method="cubic",
         validate=True,
         warn_on_extrapolation=True,
@@ -1557,7 +1561,7 @@ def build_pvt_table_data(
         name="gas_solubility_in_water_table",
     )
 
-    # Validate bubble_point_pressures shape if provided
+    # Validate `bubble_point_pressures` shape if provided
     if bubble_point_pressures is not None:
         if bubble_point_pressures.ndim == 1:
             if len(bubble_point_pressures) != n_t:

@@ -417,6 +417,9 @@ DEFAULT_CONSTANTS: typing.Dict[str, typing.Union[typing.Any, Constant]] = {
     "DAYS_PER_YEAR": Constant(
         value=365.25, description="Number of days in a year", unit="day/year"
     ),
+    "MONTHS_PER_YEAR": Constant(
+        value=12, description="Number of months in a year", unit="month/year"
+    ),
     "SECONDS_PER_YEAR": Constant(
         value=365.25 * 86400.0, description="Number of seconds in a year", unit="s/year"
     ),

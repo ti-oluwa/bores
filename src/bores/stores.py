@@ -1,5 +1,8 @@
 """State storage backends."""
 
+import shutil
+
+import base64
 import functools
 import logging
 import sys
@@ -20,6 +23,7 @@ from zarr.storage import StoreLike  # type: ignore[import-untyped]
 
 from bores.errors import StorageError, ValidationError
 from bores.serialization import Serializable, SerializableT
+from bores.utils import safe_json_dumps, safe_json_loads
 
 __all__ = [
     "HDF5Store",
@@ -190,6 +194,11 @@ class DataStore(typing.Generic[SerializableT], ABC):
 
         :return: List of `EntryMeta` instances in insertion order.
         """
+        ...
+
+    @abstractmethod
+    def flush(self) -> None:
+        """Flush the data store clean. Clear every data item stored."""
         ...
 
     def count(self) -> int:
@@ -840,6 +849,12 @@ class ZarrStore(DataStore[SerializableT]):
                         obj = typ.load(raw)
                         yield validator(obj) if validator is not None else obj
 
+    def flush(self) -> None:
+        store = self.store
+        if not isinstance(store, Path):
+            return
+        shutil.rmtree(store)
+
     def __repr__(self) -> str:
         cname = getattr(self.compressor, "cname", str(self.compressor))
         return f"{self.__class__.__name__}(store={self.store!r}, compressor={cname!r})"
@@ -1052,7 +1067,7 @@ class HDF5Store(DataStore[SerializableT]):
             typing.Callable[[SerializableT], typing.Dict[str, typing.Any]]
         ] = None,
     ) -> None:
-        with h5py.File(str(self.filepath), "w") as f:  # always truncate
+        with h5py.File(str(self.filepath), mode="w") as f:  # always truncate
             count = 0
             for index, item in enumerate(data):
                 if validator is not None:
@@ -1076,7 +1091,7 @@ class HDF5Store(DataStore[SerializableT]):
         ] = None,
     ) -> EntryMeta:
         mode = "a" if self.filepath.exists() else "w"
-        with h5py.File(str(self.filepath), mode) as f:
+        with h5py.File(str(self.filepath), mode=mode) as f:
             current_count = int(f.attrs.get("count", 0))
             if validator is not None:
                 item = validator(item)
@@ -1091,7 +1106,7 @@ class HDF5Store(DataStore[SerializableT]):
         if not self.filepath.exists():
             return []
         metas = []
-        with h5py.File(str(self.filepath), "r") as f:
+        with h5py.File(str(self.filepath), mode="r") as f:
             for name in sorted(f.keys()):
                 idx = _get_index_from_group_name(name)
                 if idx is not None:
@@ -1113,7 +1128,7 @@ class HDF5Store(DataStore[SerializableT]):
         predicate: typing.Optional[typing.Callable[[EntryMeta], bool]] = None,
         validator: typing.Optional[DataValidator[SerializableT]] = None,
     ) -> typing.Generator[SerializableT, None, None]:
-        with h5py.File(str(self.filepath), "r") as f:
+        with h5py.File(str(self.filepath), mode="r") as f:
             if indices is not None:
                 index_set = set(indices)
                 for name in sorted(f.keys()):
@@ -1151,6 +1166,10 @@ class HDF5Store(DataStore[SerializableT]):
                             raw.pop("count", None)
                             obj = typ.load(raw)
                             yield validator(obj) if validator is not None else obj
+
+    def flush(self) -> None:
+        with h5py.File(str(self.filepath), mode="w"):
+            pass
 
     def __repr__(self) -> str:
         return (
@@ -1203,12 +1222,8 @@ class JSONStore(DataStore[SerializableT]):
                 }
             )
 
-        with open(self.filepath, "wb") as f:
-            f.write(
-                orjson.dumps(
-                    items, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_INDENT_2
-                )
-            )
+        with open(self.filepath, mode="wb") as f:
+            f.write(safe_json_dumps(items))
 
     @reraise_storage_error
     def entries(self) -> typing.List[EntryMeta]:
@@ -1216,7 +1231,7 @@ class JSONStore(DataStore[SerializableT]):
             return []
 
         with open(self.filepath, "rb") as f:
-            items = orjson.loads(f.read())
+            items = safe_json_loads(f.read())
         return [
             EntryMeta(
                 idx=e["_index"],
@@ -1234,7 +1249,7 @@ class JSONStore(DataStore[SerializableT]):
         predicate: typing.Optional[typing.Callable[[EntryMeta], bool]] = None,
         validator: typing.Optional[DataValidator[SerializableT]] = None,
     ) -> typing.Generator[SerializableT, None, None]:
-        with open(self.filepath, "rb") as f:
+        with open(self.filepath, mode="rb") as f:
             items = orjson.loads(f.read())
 
         if indices is not None:
@@ -1257,8 +1272,121 @@ class JSONStore(DataStore[SerializableT]):
             obj = typ.load(entry["data"])
             yield validator(obj) if validator is not None else obj
 
+    def flush(self) -> None:
+        self.dump([])
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(filepath={self.filepath!r})"
+
+
+# Register constructors and representers to make yaml atleast work with numpy scalars and arrays
+
+
+def _ndarray_representer(
+    dumper: typing.Union[yaml.Dumper, yaml.SafeDumper], data: np.typing.NDArray
+):
+    if data.ndim > 2 or data.size > 50:
+        return dumper.represent_mapping(
+            "!ndarray",
+            {
+                "dtype": str(data.dtype),
+                "shape": list(data.shape),
+                "data": base64.b64encode(data.tobytes()).decode(),
+            },
+        )
+    return dumper.represent_mapping(
+        "!ndarray",
+        {
+            "dtype": str(data.dtype),
+            "shape": list(data.shape),
+            "data": data.flatten().tolist(),
+        },
+    )
+
+
+def _np_scalar_representer(
+    dumper: typing.Union[yaml.Dumper, yaml.SafeDumper], data: np.generic
+):
+    return dumper.represent_mapping(
+        "!np_scalar",
+        {"dtype": str(data.dtype), "value": data.item()},
+    )
+
+
+def _ndarray_from_base64(
+    encoded: str, dtype: np.typing.DTypeLike, shape: typing.Tuple[int, ...]
+) -> np.typing.NDArray:
+    raw = base64.b64decode(encoded)
+    arr = np.frombuffer(raw, dtype=dtype)
+    return arr.reshape(shape)
+
+
+def _ndarray_constructor(
+    loader: typing.Union[yaml.Loader, yaml.FullLoader, yaml.UnsafeLoader],
+    node: yaml.Node,
+):
+    try:
+        if not isinstance(node, yaml.MappingNode):
+            raise TypeError(f"Expected MappingNode, got {type(node)}")
+
+        mapping = loader.construct_mapping(node, deep=True)
+        data = mapping["data"]
+        dtype = mapping["dtype"]
+        dtype = np.dtype(mapping["dtype"])
+        shape = tuple(mapping["shape"])
+
+        if isinstance(data, str):
+            return _ndarray_from_base64(data, dtype=dtype, shape=shape)
+
+        arr = np.array(data, dtype=dtype)
+        if arr.size != np.prod(shape):
+            raise ValueError(f"Array size {arr.size} does not match shape {shape}")
+        return arr.reshape(shape)
+    except Exception:
+        print("Failed !ndarray constructor:")
+        print(f"  tag: {node.tag}")
+        print(
+            f"  line: {node.start_mark.line + 1}, column: {node.start_mark.column + 1}"
+        )
+        print(f"  node type: {type(node).__name__}")
+        print(f"  node content: {node.value if hasattr(node, 'value') else node}")
+        raise
+
+
+def _np_scalar_constructor(
+    loader: typing.Union[yaml.Loader, yaml.FullLoader, yaml.UnsafeLoader],
+    node: yaml.Node,
+):
+    node = typing.cast(yaml.MappingNode, node)
+    mapping = loader.construct_mapping(node, deep=True)
+    dtype = np.dtype(mapping["dtype"])
+    return dtype.type(mapping["value"])
+
+
+yaml.add_constructor("!np_scalar", _np_scalar_constructor)
+yaml.add_constructor("!ndarray", _ndarray_constructor)
+
+yaml.SafeDumper.add_representer(np.ndarray, _ndarray_representer)
+yaml.add_representer(np.ndarray, _ndarray_representer)
+
+yaml.SafeDumper.add_representer(np.generic, _np_scalar_representer)
+# Register scalar representer for all np.generic types too
+for t in [
+    np.float16,
+    np.float32,
+    np.float64,
+    np.float128,
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
+]:
+    yaml.SafeDumper.add_representer(t, _np_scalar_representer)
+    yaml.add_representer(np.generic, _np_scalar_representer)
 
 
 @storage_backend("yaml", "yml")
@@ -1271,10 +1399,7 @@ class YAMLStore(DataStore[SerializableT]):
 
     supports_append: bool = False
 
-    def __init__(
-        self,
-        filepath: typing.Union[PathLike, str],
-    ):
+    def __init__(self, filepath: typing.Union[PathLike, str]):
         """
         Initialize the store
 
@@ -1314,8 +1439,8 @@ class YAMLStore(DataStore[SerializableT]):
         if not self.filepath.exists():
             return []
 
-        with open(self.filepath, "r", encoding="utf-8") as f:
-            items = yaml.safe_load(f) or []
+        with open(self.filepath, mode="r", encoding="utf-8") as f:
+            items = yaml.load(f, Loader=yaml.FullLoader) or []
         return [
             EntryMeta(
                 idx=e["_index"],
@@ -1333,8 +1458,8 @@ class YAMLStore(DataStore[SerializableT]):
         predicate: typing.Optional[typing.Callable[[EntryMeta], bool]] = None,
         validator: typing.Optional[DataValidator[SerializableT]] = None,
     ) -> typing.Generator[SerializableT, None, None]:
-        with open(self.filepath, "r", encoding="utf-8") as f:
-            items = yaml.safe_load(f) or []
+        with open(self.filepath, mode="r", encoding="utf-8") as f:
+            items = yaml.load(f, Loader=yaml.FullLoader) or []
 
         if indices is not None:
             index_set = set(indices)
@@ -1355,6 +1480,9 @@ class YAMLStore(DataStore[SerializableT]):
         for entry in items:
             obj = typ.load(entry["data"])
             yield validator(obj) if validator is not None else obj
+
+    def flush(self) -> None:
+        self.dump([])
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(filepath={self.filepath!r})"
@@ -1442,4 +1570,4 @@ class StoreSerializable(Serializable):
         store = new_store(ext, path)
         self.to_store(store, **dump_kwargs)
 
-    save = to_file
+    save = to_file  # Alias for convenience

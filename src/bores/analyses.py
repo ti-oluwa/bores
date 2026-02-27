@@ -217,11 +217,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         if self._max_step != (self._state_count - 1 + self._min_step):
             logger.debug(
-                "Model states have non-sequential time steps. Min step: %d, Max step: %d, "
-                "State count: %d. Some production metrics may be inaccurate.",
-                self._min_step,
-                self._max_step,
-                self._state_count,
+                f"Model states have non-sequential time steps. Min step: {self._min_step}, Max step: {self._max_step}, "
+                "State count: {self._state_count}. Some production metrics may be inaccurate."
             )
 
         # We use per-instance memoization caches prevent memory leaks.
@@ -270,7 +267,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         :return: Resolved step number
         """
         if step < 0:
-            # -1 should give max_step, -2 should give second-to-last, etc.
+            # -1 should give `max_step`, -2 should give second-to-last, etc.
             return int(self._max_step + step + 1)
         return int(step)
 
@@ -422,7 +419,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         Example:
         ```python
-        analyst = Analyst(states)
+        analyst = ModelAnalyst(states)
         rf = analyst.oil_recovery_factor
         print(f"Oil Recovery Factor: {rf:.2%}")
         # Oil Recovery Factor: 32.50%
@@ -519,7 +516,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - Material balance validation
 
         Note:
-            For pure gas reservoirs with minimal oil, this equals free_gas_recovery_factor.
+            For pure gas reservoirs with minimal oil, this equals `free_gas_recovery_factor`.
             For oil reservoirs, this provides a complete picture of gas recovery from all sources.
 
         :return: The total gas recovery factor as a fraction (0 to 1)
@@ -542,33 +539,37 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         # Total initial gas
         total_initial_gas = initial_free_gas + initial_solution_gas
-
         if total_initial_gas == 0:
             return 0.0
 
         # Get cumulative free gas produced
-        cumulative_free_gas = self.cumulative_free_gas_produced  # scf (free gas only)
+        cumulative_free_gas_produced = (
+            self.cumulative_free_gas_produced
+        )  # scf (free gas only)
 
         # Track per-step Rs weighted by oil production rather than applying avg_initial_gor
         # uniformly. Solution gas released at each step depends on Rs at that step's pressure.
-        cumulative_solution_gas = 0.0
+        cumulative_solution_gas_produced = 0.0
         for s in self._sorted_steps:
             st = self._states[s]
             rs_grid = st.model.fluid_properties.solution_gas_to_oil_ratio_grid
             oil_production = st.production.oil
             if oil_production is None:
                 continue
+
             step_in_days = st.step_size * c.DAYS_PER_SECOND
             oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
             oil_production_stb_day = (
                 oil_production * c.CUBIC_FEET_TO_BARRELS / oil_fvf_grid
             )
-            cumulative_solution_gas += float(
+            cumulative_solution_gas_produced += float(
                 np.nansum(rs_grid * oil_production_stb_day) * step_in_days
             )
 
         # Total gas produced
-        total_gas_produced = cumulative_free_gas + cumulative_solution_gas
+        total_gas_produced = (
+            cumulative_free_gas_produced + cumulative_solution_gas_produced
+        )
         return float(total_gas_produced / total_initial_gas)
 
     @property
@@ -584,7 +585,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         """
         return self.free_gas_recovery_factor
 
-    def _get_cell_area_in_acres(self, x_dim: float, y_dim: float) -> float:
+    def compute_cell_area(self, x_dim: float, y_dim: float) -> float:
         """
         Computes the area of a grid cell in acres.
 
@@ -592,7 +593,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         :param y_dim: The dimension of the cell in the y-direction (ft).
         :return: The area of the cell in acres.
         """
-        # Per-instance dict cache instead of @functools.cache
         key = (x_dim, y_dim)
         if key not in self._cell_area_cache:
             cell_area_in_ft2 = x_dim * y_dim
@@ -606,7 +606,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         :param step: The time step index to compute oil in place for.
         :return: The total oil in place in STB
         """
-        # Per-instance dict cache prevents memory leaks; resolve step first so cache key is canonical
+        # Resolve step first so cache key is canonical
         step = self._resolve_step(step)
         if step in self._oil_in_place_cache:
             return self._oil_in_place_cache[step]
@@ -619,13 +619,12 @@ class ModelAnalyst(typing.Generic[NDimension]):
             return 0.0
 
         model = state.model
-        cell_area_in_acres = self._get_cell_area_in_acres(*model.cell_dimension[:2])
+        cell_area_in_acres = self.compute_cell_area(*model.cell_dimension[:2])
         logger.debug(
             f"Computing oil in place at time step {step}, cell area={cell_area_in_acres:.4f} acres"
         )
         cell_area_grid = uniform_grid(
-            grid_shape=model.grid_shape,
-            value=cell_area_in_acres,
+            grid_shape=model.grid_shape, value=cell_area_in_acres
         )
         stoiip_grid = compute_hydrocarbon_in_place(
             area=cell_area_grid,
@@ -649,7 +648,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         :param step: The time step index to compute gas in place for.
         :return: The total free gas in place in SCF
         """
-        # Per-instance dict cache prevents memory leaks
         step = self._resolve_step(step)
         if step in self._gas_in_place_cache:
             return self._gas_in_place_cache[step]
@@ -662,13 +660,12 @@ class ModelAnalyst(typing.Generic[NDimension]):
             return 0.0
 
         model = state.model
-        cell_area_in_acres = self._get_cell_area_in_acres(*model.cell_dimension[:2])
+        cell_area_in_acres = self.compute_cell_area(*model.cell_dimension[:2])
         logger.debug(
             f"Computing gas in place at time step {step}, cell area={cell_area_in_acres:.4f} acres"
         )
         cell_area_grid = uniform_grid(
-            grid_shape=model.grid_shape,
-            value=cell_area_in_acres,
+            grid_shape=model.grid_shape, value=cell_area_in_acres
         )
         stgiip_grid = compute_hydrocarbon_in_place(
             area=cell_area_grid,
@@ -692,7 +689,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         :param step: The time step index to compute water in place for.
         :return: The total water in place in STB
         """
-        # Per-instance dict cache prevents memory leaks
         step = self._resolve_step(step)
         if step in self._water_in_place_cache:
             return self._water_in_place_cache[step]
@@ -706,10 +702,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         model = state.model
         logger.debug(f"Computing water in place at time step {step}")
-        cell_area_in_acres = self._get_cell_area_in_acres(*model.cell_dimension[:2])
+        cell_area_in_acres = self.compute_cell_area(*model.cell_dimension[:2])
         cell_area_grid = uniform_grid(
-            grid_shape=model.grid_shape,
-            value=cell_area_in_acres,
+            grid_shape=model.grid_shape, value=cell_area_in_acres
         )
         water_in_place_grid = compute_hydrocarbon_in_place(
             area=cell_area_grid,
@@ -813,7 +808,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         cells_obj: typing.Optional[Cells],
     ) -> float:
         """Internal cached implementation of `oil_produced`."""
-        # Per-instance dict cache prevents memory leaks
         key = (from_step, to_step, cells_obj)
         if key in self._oil_produced_cache:
             return self._oil_produced_cache[key]
@@ -822,6 +816,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             f"Computing oil produced from time step {from_step} to {to_step}, cells filter: {cells_obj}"
         )
         total_production = 0.0
+
         # Compute mask once before the loop; `grid_shape` is constant across steps
         mask = None
         if cells_obj is not None:
@@ -889,7 +884,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - (slice, slice, slice): Region
         :return: The cumulative gas produced in SCF
         """
-        # Resolve step before building cache key
         to_step = self._resolve_step(to_step)
         cells_obj = _ensure_cells(cells)
         return self._free_gas_produced(from_step, to_step, cells_obj)
@@ -901,13 +895,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
         cells_obj: typing.Optional[Cells],
     ) -> float:
         """Internal cached implementation of `free_gas_produced`."""
-        # Per-instance dict cache prevents memory leaks
         key = (from_step, to_step, cells_obj)
         if key in self._free_gas_produced_cache:
             return self._free_gas_produced_cache[key]
 
         total_production = 0.0
-        # Compute mask once before the loop
         mask = None
         if cells_obj is not None:
             first_state = next(
@@ -971,7 +963,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - (slice, slice, slice): Region
         :return: The cumulative water produced in STB
         """
-        # Resolve step before building cache key
         to_step = self._resolve_step(to_step)
         cells_obj = _ensure_cells(cells)
         return self._water_produced(from_step, to_step, cells_obj)
@@ -983,13 +974,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
         cells_obj: typing.Optional[Cells],
     ) -> float:
         """Internal cached implementation of `water_produced`."""
-        # Per-instance dict cache prevents memory leaks
         key = (from_step, to_step, cells_obj)
         if key in self._water_produced_cache:
             return self._water_produced_cache[key]
 
         total_production = 0.0
-        # Compute mask once before the loop
         mask = None
         if cells_obj is not None:
             first_state = next(
@@ -1057,7 +1046,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - (slice, slice, slice): Region
         :return: The cumulative oil injected in STB
         """
-        # Resolve step and ensure cells in public method before caching
         to_step = self._resolve_step(to_step)
         cells_obj = _ensure_cells(cells)
         return self._oil_injected(from_step, to_step, cells_obj)
@@ -1069,7 +1057,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         cells_obj: typing.Optional[Cells],
     ) -> float:
         """Internal cached implementation of `oil_injected`."""
-        # Per-instance dict cache prevents memory leaks
         key = (from_step, to_step, cells_obj)
         if key in self._oil_injected_cache:
             return self._oil_injected_cache[key]
@@ -1141,7 +1128,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - (slice, slice, slice): Region
         :return: The cumulative gas injected in SCF
         """
-        # Resolve step before building cache key
         to_step = self._resolve_step(to_step)
         cells_obj = _ensure_cells(cells)
         return self._gas_injected(from_step, to_step, cells_obj)
@@ -1159,7 +1145,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
             return self._gas_injected_cache[key]
 
         total_injection = 0.0
-        # Compute mask once before the loop
         mask = None
         if cells_obj is not None:
             first_state = next(
@@ -1224,7 +1209,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - (slice, slice, slice): Region
         :return: The cumulative water injected in STB
         """
-        # Resolve step before building cache key
         to_step = self._resolve_step(to_step)
         cells_obj = _ensure_cells(cells)
         return self._water_injected(from_step, to_step, cells_obj)
@@ -1236,13 +1220,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
         cells_obj: typing.Optional[Cells],
     ) -> float:
         """Internal cached implementation of `water_injected`."""
-        # Per-instance dict cache prevents memory leaks
         key = (from_step, to_step, cells_obj)
         if key in self._water_injected_cache:
             return self._water_injected_cache[key]
 
         total_injection = 0.0
-        # Compute mask once before the loop
         mask = None
         if cells_obj is not None:
             first_state = next(
@@ -1314,9 +1296,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
         to_step = self._resolve_step(to_step)
 
         if cumulative:
-            # Optimized: Use incremental accumulation instead of recalculating from min_step each time
+            # Use incremental accumulation instead of recalculating from `min_step` each time
             cumulative_total = 0.0
-            # First, catch up from min_step to from_step - 1 (if needed)
+            # First, catch up from `min_step` to `from_step` - 1 (if needed)
             if from_step > self._min_step:
                 cumulative_total = self.oil_produced(
                     self._min_step, from_step - 1, cells=cells_obj
@@ -1368,9 +1350,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
         to_step = self._resolve_step(to_step)
 
         if cumulative:
-            # Optimized: Use incremental accumulation instead of recalculating from min_step each time
+            # Use incremental accumulation instead of recalculating from `min_step` each time
             cumulative_total = 0.0
-            # First, catch up from min_step to from_step - 1 (if needed)
+            # First, catch up from `min_step` to `from_step` - 1 (if needed)
             if from_step > self._min_step:
                 cumulative_total = self.free_gas_produced(
                     self._min_step, from_step - 1, cells=cells_obj
@@ -1422,9 +1404,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
         to_step = self._resolve_step(to_step)
 
         if cumulative:
-            # Optimized: Use incremental accumulation instead of recalculating from min_step each time
+            # Use incremental accumulation instead of recalculating from `min_step` each time
             cumulative_total = 0.0
-            # First, catch up from min_step to from_step - 1 (if needed)
+            # First, catch up from `min_step` to `from_step` - 1 (if needed)
             if from_step > self._min_step:
                 cumulative_total = self.water_produced(
                     self._min_step, from_step - 1, cells=cells_obj
@@ -1476,9 +1458,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
         to_step = self._resolve_step(to_step)
 
         if cumulative:
-            # Optimized: Use incremental accumulation instead of recalculating from min_step each time
+            # Use incremental accumulation instead of recalculating from `min_step` each time
             cumulative_total = 0.0
-            # First, catch up from min_step to from_step - 1 (if needed)
+            # First, catch up from `min_step` to `from_step` - 1 (if needed)
             if from_step > self._min_step:
                 cumulative_total = self.oil_injected(
                     self._min_step, from_step - 1, cells=cells_obj
@@ -1530,9 +1512,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
         to_step = self._resolve_step(to_step)
 
         if cumulative:
-            # Optimized: Use incremental accumulation instead of recalculating from min_step each time
+            # Use incremental accumulation instead of recalculating from `min_step` each time
             cumulative_total = 0.0
-            # First, catch up from min_step to from_step - 1 (if needed)
+            # First, catch up from `min_step` to `from_step` - 1 (if needed)
             if from_step > self._min_step:
                 cumulative_total = self.gas_injected(
                     self._min_step, from_step - 1, cells=cells_obj
@@ -1584,9 +1566,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
         to_step = self._resolve_step(to_step)
 
         if cumulative:
-            # Optimized: Use incremental accumulation instead of recalculating from min_step each time
+            # Use incremental accumulation instead of recalculating from `min_step` each time
             cumulative_total = 0.0
-            # First, catch up from min_step to from_step - 1 (if needed)
+            # First, catch up from `min_step` to `from_step` - 1 (if needed)
             if from_step > self._min_step:
                 cumulative_total = self.water_injected(
                     self._min_step, from_step - 1, cells=cells_obj
@@ -1652,7 +1634,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         Example:
         ```python
-        analyst = Analyst(states)
+        analyst = ModelAnalyst(states)
 
         # Get full recovery factor history
         for t, rf in analyst.oil_recovery_factor_history():
@@ -1670,9 +1652,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         # If cells filter is specified, compute STOIIP for that region
         if stoiip is not None:
-            pass
+            oiip = stoiip
         elif cells_obj is None:
-            stoiip = self.stock_tank_oil_initially_in_place
+            oiip = self.stock_tank_oil_initially_in_place
         else:
             initial_state = self.get_state(self._min_step)
             if initial_state is None:
@@ -1688,7 +1670,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             porosity = model.rock_properties.porosity_grid
             ntg = model.rock_properties.net_to_gross_ratio_grid
             thickness = model.thickness_grid
-            cell_area_in_acres = self._get_cell_area_in_acres(*model.cell_dimension[:2])
+            cell_area_in_acres = self.compute_cell_area(*model.cell_dimension[:2])
             cell_area_grid = uniform_grid(
                 grid_shape=model.grid_shape, value=cell_area_in_acres
             )
@@ -1705,16 +1687,18 @@ class ModelAnalyst(typing.Generic[NDimension]):
             )
             if mask is not None:
                 stoiip_grid = np.where(mask, stoiip_grid, 0.0)
-            stoiip = float(np.nansum(stoiip_grid))
+            oiip = float(np.nansum(stoiip_grid))
 
-        if stoiip == 0:
+        if oiip == 0:
             # If no initial oil, recovery factor is always 0
             for t in range(from_step, to_step + 1, interval):
                 yield (t, 0.0)
         else:
             for t in range(from_step, to_step + 1, interval):
-                cumulative_oil = self.oil_produced(self._min_step, t, cells=cells_obj)
-                rf = cumulative_oil / stoiip
+                cumulative_oil_produced = self.oil_produced(
+                    self._min_step, t, cells=cells_obj
+                )
+                rf = cumulative_oil_produced / oiip
                 yield (t, rf)
 
     def free_gas_recovery_factor_history(
@@ -1751,7 +1735,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         Example:
         ```python
-        analyst = Analyst(states)
+        analyst = ModelAnalyst(states)
 
         # Track gas cap depletion over time
         for t, rf in analyst.free_gas_recovery_factor_history():
@@ -1772,6 +1756,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 raise ValidationError(
                     f"Initial state (step {self._min_step}) not available"
                 )
+
             mask = cells_obj.get_mask(
                 initial_state.model.grid_shape, initial_state.wells
             )
@@ -1781,7 +1766,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             porosity = model.rock_properties.porosity_grid
             ntg = model.rock_properties.net_to_gross_ratio_grid
             thickness = model.thickness_grid
-            cell_area_in_acres = self._get_cell_area_in_acres(*model.cell_dimension[:2])
+            cell_area_in_acres = self.compute_cell_area(*model.cell_dimension[:2])
             cell_area_grid = uniform_grid(
                 grid_shape=model.grid_shape, value=cell_area_in_acres
             )
@@ -1805,10 +1790,10 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 yield (t, 0.0)
         else:
             for t in range(from_step, to_step + 1, interval):
-                cumulative_gas = self.free_gas_produced(
+                cumulative_gas_produced = self.free_gas_produced(
                     self._min_step, t, cells=cells_obj
                 )
-                rf = cumulative_gas / giip
+                rf = cumulative_gas_produced / giip
                 yield (t, rf)
 
     def total_gas_recovery_factor_history(
@@ -1841,7 +1826,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         Example:
         ```python
-        analyst = Analyst(states)
+        analyst = ModelAnalyst(states)
 
         # Track total gas recovery (free + solution) over time
         for t, rf in analyst.total_gas_recovery_factor_history():
@@ -1873,7 +1858,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             porosity = model.rock_properties.porosity_grid
             ntg = model.rock_properties.net_to_gross_ratio_grid
             thickness = model.thickness_grid
-            cell_area_in_acres = self._get_cell_area_in_acres(*model.cell_dimension[:2])
+            cell_area_in_acres = self.compute_cell_area(*model.cell_dimension[:2])
             cell_area_grid = uniform_grid(
                 grid_shape=model.grid_shape, value=cell_area_in_acres
             )
@@ -2015,7 +2000,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             )
 
         model = state.model
-        cell_area_in_acres = self._get_cell_area_in_acres(*model.cell_dimension[:2])
+        cell_area_in_acres = self.compute_cell_area(*model.cell_dimension[:2])
         cell_area_grid = uniform_grid(
             grid_shape=model.grid_shape, value=cell_area_in_acres
         )
@@ -2156,7 +2141,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - (slice, slice, slice): Region
         :return: `InstantaneousRates` containing detailed injection rate analysis.
         """
-        # Bug 1 & 13: resolve step and convert cells before building cache key
         step = self._resolve_step(step)
         cells_obj = _ensure_cells(cells)
         cache_key = (step, cells_obj)
@@ -2349,8 +2333,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state.model.fluid_properties.gas_compressibility_grid
         )
         # Cumulative production
-        cumulative_oil = self.oil_produced(self._min_step, step)
-        cumulative_water = self.water_produced(self._min_step, step)
+        cumulative_oil_produced = self.oil_produced(self._min_step, step)
+        cumulative_water_produced = self.water_produced(self._min_step, step)
 
         # Initial volumes in place
         initial_oil = self.oil_in_place(self._min_step)
@@ -2360,9 +2344,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
         # Calculate total compressibility (rock + fluid)
         total_compressibility = (
             rock_compressibility
-            + current_oil_sat * oil_compressibility
-            + current_water_sat * water_compressibility
-            + current_gas_sat * gas_compressibility
+            + (current_oil_sat * oil_compressibility)
+            + (current_water_sat * water_compressibility)
+            + (current_gas_sat * gas_compressibility)
         )
 
         # DRIVE MECHANISM CALCULATIONS
@@ -2371,14 +2355,15 @@ class ModelAnalyst(typing.Generic[NDimension]):
         oil_expansion_factor = current_oil_fvf / initial_oil_fvf
         # Oil expansion contribution (dimensionally consistent: fraction x volume factor)
         oil_expansion_drive = (
-            (cumulative_oil / initial_oil) * (current_oil_fvf - initial_oil_fvf)
+            (cumulative_oil_produced / initial_oil)
+            * (current_oil_fvf - initial_oil_fvf)
             if initial_oil > 0
             else 0.0
         )
 
         # Gas liberation from oil (solution gas released as pressure drops)
         gas_liberation_drive = (
-            (cumulative_oil / initial_oil)
+            (cumulative_oil_produced / initial_oil)
             * (initial_gor - current_gor)
             * current_gas_fvf
             if initial_oil > 0
@@ -2404,10 +2389,10 @@ class ModelAnalyst(typing.Generic[NDimension]):
         cumulative_water_injected = self.water_injected(self._min_step, step)
         aquifer_influx = max(
             0.0,
-            current_water
-            - initial_water
-            + cumulative_water
-            - cumulative_water_injected,
+            (
+                (current_water - initial_water)
+                + (cumulative_water_produced - cumulative_water_injected)
+            ),
         )
         water_drive = (
             (aquifer_influx + water_influx_from_saturation) / initial_oil
@@ -2426,7 +2411,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 * initial_state.model.rock_properties.porosity_grid
                 * initial_state.model.rock_properties.net_to_gross_ratio_grid
             )
-            * self._get_cell_area_in_acres(*initial_state.model.cell_dimension[:2])
+            * self.compute_cell_area(*initial_state.model.cell_dimension[:2])
             * c.ACRE_FOOT_TO_CUBIC_FEET
         )
         compressibility_expansion = (
@@ -2521,9 +2506,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 vertical_sweep_efficiency=0.0,
             )
 
-        # Rename to avoid shadowing – `state` (the ModelState) and `current_model`
-        # (the inner Model) are now distinct names, preventing the original variable from being
-        # overwritten and making debugging far easier.
         initial_model = initial_state.model
         current_model = state.model
         grid_shape = current_model.grid_shape
@@ -2787,7 +2769,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - (slice, slice, slice): Region
         :return: `ProductivityAnalysis` containing productivity metrics based on actual production data.
         """
-        # Bug 1 & 13: resolve step and ensure cells before building cache key
+        # Resolve step and ensure cells before building cache key
         step = self._resolve_step(step)
         cells_obj = _ensure_cells(cells)
         cache_key = (step, phase, cells_obj)
@@ -2882,11 +2864,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
                             i, j, k
                         ]
                     )
-                    cell_flow_rate_rb = state.production.oil[
+                    cell_flow_rate_ft3 = state.production.oil[
                         i, j, k
                     ]  # ft³/day (reservoir bbl)
                     cell_flow_rate_stb = (
-                        cell_flow_rate_rb * c.CUBIC_FEET_TO_BARRELS / oil_fvf
+                        cell_flow_rate_ft3 * c.CUBIC_FEET_TO_BARRELS / oil_fvf
                     )  # STB/day
 
                 elif phase == "water":
@@ -2897,9 +2879,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
                             i, j, k
                         ]
                     )
-                    cell_flow_rate_rb = state.production.water[i, j, k]  # ft³/day
+                    cell_flow_rate_ft3 = state.production.water[i, j, k]  # ft³/day
                     cell_flow_rate_stb = (
-                        cell_flow_rate_rb * c.CUBIC_FEET_TO_BARRELS / water_fvf
+                        cell_flow_rate_ft3 * c.CUBIC_FEET_TO_BARRELS / water_fvf
                     )  # STB/day
 
                 else:  # gas
@@ -2910,8 +2892,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
                             i, j, k
                         ]
                     )
-                    cell_flow_rate_rb = state.production.gas[i, j, k]  # ft³/day
-                    cell_flow_rate_stb = cell_flow_rate_rb / gas_fvf  # SCF/day
+                    cell_flow_rate_ft3 = state.production.gas[i, j, k]  # ft³/day
+                    cell_flow_rate_stb = cell_flow_rate_ft3 / gas_fvf  # SCF/day
 
                 if cell_flow_rate_stb == 0:
                     continue
@@ -3148,6 +3130,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         from_step: int = 0,
         to_step: int = -1,
         phase: typing.Literal["oil", "gas", "water"] = "oil",
+        max_decline_per_year: float = 2.0,
     ) -> typing.Tuple[str, typing.Dict[str, DeclineCurveResult]]:
         """
         Automatically recommend the best decline curve model based on statistical fit and physical constraints.
@@ -3257,6 +3240,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         :param phase: Phase to analyze - "oil", "gas", or "water".
             Different phases may have different optimal decline models.
             Gas typically has steeper decline than oil.
+        :param max_decline_per_year: Maximum acceptable rate decline factor per year (e.g 2.0 for 200%)
         :return: Tuple containing:
             1. str: Recommended model name ("exponential", "harmonic", or "hyperbolic")
             2. dict: Dictionary with all three model results for comparison
@@ -3289,28 +3273,28 @@ class ModelAnalyst(typing.Generic[NDimension]):
         ```
 
         Notes:
-            - Always review all three model fits visually before accepting recommendation
-            - High R² does not guarantee accurate long-term forecasts
-            - Consider using multiple models for P10/P50/P90 reserve scenarios:
-              * P90 (conservative): Exponential or steepest decline
-              * P50 (best estimate): Recommended model
-              * P10 (optimistic): Harmonic or shallowest decline
-            - For regulatory reporting (SEC), exponential is often required regardless of fit
-            - Hyperbolic decline should transition to exponential for long-term forecasts
-              (typically after 3-5 years or when bxDixt > 0.5)
-            - Be cautious with harmonic decline (b=1.0) as it may overestimate reserves
-            - If well has undergone stimulation, workover, or facility changes during
-              history period, consider analyzing pre- and post-change periods separately
-            - Water production typically follows different decline patterns than oil/gas
-            - For unconventional wells, hyperbolic is usually most appropriate for
-              first 2-5 years, then transition to exponential
+        - Always review all three model fits visually before accepting recommendation
+        - High R² does not guarantee accurate long-term forecasts
+        - Consider using multiple models for P10/P50/P90 reserve scenarios:
+            * P90 (conservative): Exponential or steepest decline
+            * P50 (best estimate): Recommended model
+            * P10 (optimistic): Harmonic or shallowest decline
+        - For regulatory reporting (SEC), exponential is often required regardless of fit
+        - Hyperbolic decline should transition to exponential for long-term forecasts
+            (typically after 3-5 years or when bxDixt > 0.5)
+        - Be cautious with harmonic decline (b=1.0) as it may overestimate reserves
+        - If well has undergone stimulation, workover, or facility changes during
+            history period, consider analyzing pre- and post-change periods separately
+        - Water production typically follows different decline patterns than oil/gas
+        - For unconventional wells, hyperbolic is usually most appropriate for
+            first 2-5 years, then transition to exponential
 
         Industry Best Practices:
-            - SPE: Use hyperbolic to exponential transition for proved reserves
-            - SEC: Often requires exponential for proved undeveloped reserves
-            - Operators: Use model that best matches analog well performance
-            - Always perform sensitivity analysis on decline parameters
-            - Update decline curves annually as new production data becomes available
+        - SPE: Use hyperbolic to exponential transition for proved reserves
+        - SEC: Often requires exponential for proved undeveloped reserves
+        - Operators: Use model that best matches analog well performance
+        - Always perform sensitivity analysis on decline parameters
+        - Update decline curves annually as new production data becomes available
         """
         models = ["exponential", "hyperbolic", "harmonic"]
         results: typing.Dict[str, DeclineCurveResult] = {}
@@ -3321,6 +3305,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 to_step=to_step,
                 decline_type=model,  # type: ignore
                 phase=phase,
+                max_decline_per_year=max_decline_per_year,
             )
             results[model] = result
 
@@ -3334,7 +3319,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         timesteps_per_year = c.SECONDS_PER_YEAR / step_size_seconds
 
         # Convert typical decline rate bounds from per-year to per-timestep
-        max_decline_per_year = 2.0  # 0-200% per year
         max_decline_per_timestep = max_decline_per_year / timesteps_per_year
 
         # Recommend based on R² and physical reasonableness
@@ -3369,6 +3353,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             "exponential", "hyperbolic", "harmonic"
         ] = "exponential",
         phase: typing.Literal["oil", "gas", "water"] = "oil",
+        max_decline_per_year: float = 2.0,
     ) -> DeclineCurveResult:
         """
         Fits a decline curve model to production data over a specified time range.
@@ -3384,6 +3369,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         :param to_step: Ending time step for analysis.
         :param decline_type: Type of decline curve ('exponential', 'hyperbolic', 'harmonic').
         :param phase: Phase to analyze ('oil', 'gas', 'water').
+        :param max_decline_per_year: Maximum acceptable rate decline factor per year (e.g 2.0 for 200%)
         :return: `DeclineCurveResult` containing fitted decline curve parameters and forecasts.
         """
         if decline_type not in {"exponential", "hyperbolic", "harmonic"}:
@@ -3560,10 +3546,10 @@ class ModelAnalyst(typing.Generic[NDimension]):
         )
 
         # Upper bound for decline rate: 2.0 per year → 2.0/timesteps_per_year per timestep
-        max_decline_per_timestep = 2.0 / timesteps_per_year
+        max_decline_per_timestep = max_decline_per_year / timesteps_per_year
 
         # Perform non-linear curve fitting
-        optimized_parameters, parameter_covariance = curve_fit(
+        optimized_parameters, _ = curve_fit(
             hyperbolic_decline_function,
             filtered_steps,
             positive_production_rates,
@@ -3617,7 +3603,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             predicted_rates=predicted_hyperbolic_rates.tolist(),
         )
 
-    dca = DCA = decline_curve_analysis
+    dca = decline_curve_analysis
 
     def forecast_production(
         self,
@@ -3663,7 +3649,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             rate falls below this value. Default is None (no economic limit applied).
         :return: List of tuples containing (step, forecasted_rate). Rates are in
             per-day units (STB/day or scf/day). Time steps are absolute values continuing
-            from the last historical time step. Returns empty list if decline_result
+            from the last historical time step. Returns empty list if `decline_result`
             contains errors.
         """
         if decline_result.error:
@@ -3696,7 +3682,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 rate = 0.0
 
             # Economic limit is already in per-day units (same as rate), so direct comparison works
-            if economic_limit and rate < economic_limit:
+            if economic_limit is not None and rate < economic_limit:
                 break
 
             forecast.append((future_time, float(rate)))
@@ -3939,7 +3925,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         return float(avg_displacing_mobility / avg_displaced_mobility)
 
-    mr = MR = mobility_ratio
+    mr = mobility_ratio
 
     def reservoir_volumetrics_history(
         self, from_step: int = 0, to_step: int = -1, interval: int = 1
@@ -3963,6 +3949,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         to_step: int = -1,
         interval: int = 1,
         rate_type: typing.Literal["production", "injection"] = "production",
+        cells: typing.Union[Cells, CellFilter] = None,
     ) -> typing.Generator[typing.Tuple[int, InstantaneousRates], None, None]:
         """
         Generator for instantaneous rates history over time.
@@ -3975,14 +3962,14 @@ class ModelAnalyst(typing.Generic[NDimension]):
         """
         to_step = self._resolve_step(to_step)
 
-        rate_method = (
+        instantaneous_rate_method = (
             self.instantaneous_production_rates
             if rate_type == "production"
             else self.instantaneous_injection_rates
         )
 
         for t in range(from_step, to_step + 1, interval):
-            yield (t, rate_method(t))
+            yield (t, instantaneous_rate_method(t, cells=cells))
 
     def cumulative_production_history(
         self, from_step: int = 0, to_step: int = -1, interval: int = 1

@@ -3,14 +3,13 @@ from contextvars import ContextVar
 
 import numpy as np
 
-
 __all__ = [
     "get_dtype",
-    "set_dtype",
-    "with_precision",
-    "use_64bit_precision",
-    "use_32bit_precision",
     "get_floating_point_info",
+    "set_dtype",
+    "use_32bit_precision",
+    "use_64bit_precision",
+    "with_precision",
 ]
 
 _bores_dtype: ContextVar[np.typing.DTypeLike] = ContextVar(
@@ -20,7 +19,7 @@ _bores_dtype: ContextVar[np.typing.DTypeLike] = ContextVar(
 
 def get_dtype() -> np.typing.DTypeLike:
     """
-    Get the current data type for used for computations in bores.
+    Get the current data type for used for computations in `bores`.
 
     This defines the precision used in calculations.
 
@@ -31,7 +30,7 @@ def get_dtype() -> np.typing.DTypeLike:
 
 def set_dtype(dtype: np.typing.DTypeLike) -> None:
     """
-    Set the default data type for bores computations.
+    Set the default data type for `bores` computations.
 
     Useful for setting precision for current context.
 
@@ -43,7 +42,7 @@ def set_dtype(dtype: np.typing.DTypeLike) -> None:
 @contextmanager
 def with_precision(dtype: np.typing.DTypeLike):
     """
-    Context manager to temporarily set the data type, and hence the precision for bores computations.
+    Context manager to temporarily set the data type, and hence the precision for `bores` computations.
 
     :param dtype: The data type to set within the context.
     """
@@ -56,30 +55,30 @@ def with_precision(dtype: np.typing.DTypeLike):
 
 def use_128bit_precision() -> None:
     """
-    Set the default data type to float128 for bores computations.
+    Set the default data type to float128 for `bores` computations.
     """
     set_dtype(np.float128)
 
 
 def use_64bit_precision() -> None:
     """
-    Set the default data type to float64 for bores computations.
+    Set the default data type to float64 for `bores` computations.
     """
     set_dtype(np.float64)
 
 
 def use_32bit_precision() -> None:
     """
-    Set the default data type to float32 for bores computations.
+    Set the default data type to float32 for `bores` computations.
 
-    Default precision for bores.
+    Default precision for `bores`.
     """
     set_dtype(np.float32)
 
 
 def get_floating_point_info() -> np.finfo[np.floating]:
     """
-    Get the floating point information for the current data type used in bores computations.
+    Get the floating point information for the current data type used in `bores` computations.
 
     :return: The floating point information.
     """

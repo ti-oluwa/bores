@@ -1,7 +1,9 @@
+import base64
 import typing
 
 import numba  # type: ignore[import-untyped]
 import numpy as np
+import orjson
 from numba.extending import overload  # type: ignore[import-untyped]
 
 __all__ = [
@@ -246,3 +248,63 @@ def max_overload(x):
             return np.max(x)
 
         return impl
+
+
+def _numpy_default(obj: typing.Any) -> typing.Mapping[str, typing.Any]:
+    if isinstance(obj, np.ndarray):
+        # Small arrays are stored as JSON list
+        if obj.ndim <= 2 and obj.size < 50:
+            return {
+                "__ndarray__": True,
+                "encoding": "list",
+                "dtype": str(obj.dtype),
+                "shape": obj.shape,
+                "data": obj.tolist(),
+            }
+
+        # Large arrays are stored as base64
+        return {
+            "__ndarray__": True,
+            "encoding": "base64",
+            "dtype": str(obj.dtype),
+            "shape": obj.shape,
+            "data": base64.b64encode(obj.tobytes()).decode(),
+        }
+
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
+def _decode_ndarray(obj: typing.Mapping[str, typing.Any]) -> np.typing.NDArray:
+    dtype = np.dtype(obj["dtype"])
+    shape = tuple(obj["shape"])
+
+    if obj["encoding"] == "list":
+        return np.array(obj["data"], dtype=dtype).reshape(shape)
+
+    if obj["encoding"] == "base64":
+        raw = base64.b64decode(obj["data"])
+        return np.frombuffer(raw, dtype=dtype).reshape(shape)
+
+    raise TypeError(
+        "Data for type `np.ndarray` is not deserializable. Data may have been corrupted"
+    )
+
+
+def _walk(obj: typing.Any) -> typing.Any:
+    if isinstance(obj, dict):
+        if "__ndarray__" in obj:
+            return _decode_ndarray(obj)
+        return {k: _walk(v) for k, v in obj.items()}
+
+    if isinstance(obj, list):
+        return [_walk(v) for v in obj]
+
+    return obj
+
+
+def safe_json_dumps(data: typing.Any) -> bytes:
+    return orjson.dumps(data, default=_numpy_default, option=orjson.OPT_INDENT_2)
+
+
+def safe_json_loads(data: typing.Any) -> typing.Any:
+    return _walk(orjson.loads(data))

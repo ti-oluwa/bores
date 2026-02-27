@@ -336,7 +336,7 @@ def compute_harmonic_mean(value1: float, value2: float) -> float:
     return (2 * value1 * value2) / summation
 
 
-def compute_oil_specific_gravity_from_density(
+def compute_oil_specific_gravity(
     oil_density: float,
     pressure: float,
     temperature: float,
@@ -364,7 +364,7 @@ def compute_oil_specific_gravity_from_density(
 
         SG = ρ_stp / ρ_water
 
-    where ρ_water is the density of water at standard conditions (assumed 62.4 lbm/ft³).
+    where `ρ_water` is the density of water at standard conditions (assumed 62.4 lbm/ft³).
 
     :param oil_density: Oil density at reservoir conditions (lbm/ft³)
     :param pressure: Reservoir pressure (psi)
@@ -378,9 +378,8 @@ def compute_oil_specific_gravity_from_density(
         (oil_compressibility * delta_p)
         + (c.OIL_THERMAL_EXPANSION_COEFFICIENT_IMPERIAL * delta_t)
     )
-    correction_factor = clip(
-        correction_factor, 0.2, 2.0
-    )  # Avoid numerical issues with small/large values
+    # Avoid numerical issues with small/large values
+    correction_factor = clip(correction_factor, 0.2, 2.0)
     oil_density_at_stp = oil_density * correction_factor
     return oil_density_at_stp / c.STANDARD_WATER_DENSITY_IMPERIAL
 

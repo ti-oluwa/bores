@@ -27,7 +27,7 @@ from bores.correlations.arrays import (
     compute_oil_bubble_point_pressure,
     compute_oil_compressibility,
     compute_oil_formation_volume_factor,
-    compute_oil_specific_gravity_from_density,
+    compute_oil_specific_gravity,
     compute_oil_viscosity,
     compute_todd_longstaff_effective_density,
     compute_todd_longstaff_effective_viscosity,
@@ -507,7 +507,7 @@ def build_oil_specific_gravity_grid(
     :param oil_compressibility_grid: N-Dimensional array of oil compressibility values (psi⁻¹).
     :return: N-Dimensional array of oil specific gravity (dimensionless) corresponding to each grid cell.
     """
-    result = compute_oil_specific_gravity_from_density(
+    result = compute_oil_specific_gravity(
         oil_density=oil_density_grid,
         pressure=pressure_grid,
         temperature=temperature_grid,

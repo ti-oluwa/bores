@@ -4,33 +4,32 @@
 3D 3-Phase Black-Oil Reservoir Modelling and Simulation Framework.
 """
 
-from ._precision import *  # noqa
-from .models import *  # noqa
-from .simulate import *  # noqa
-from .constants import *  # noqa
-from .grids import *  # noqa
-from .factories import *  # noqa
-from .boundary_conditions import *  # noqa
-from .wells import *  # noqa
-from .types import *  # noqa
-from .relperm import *  # noqa
-from .capillary_pressures import *  # noqa
-from .visualization import *  # noqa
-from .grids import *  # noqa
-from .states import *  # noqa
-from .fractures import *  # noqa
-from .utils import *  # noqa
-from .timing import *  # noqa
-from .config import *  # noqa
-from .tables import *  # noqa
-from .analyses import *  # noqa
-from .stores import *  # noqa
-from .streams import *  # noqa
-from .serialization import *  # noqa
-from .errors import *  # noqa
-from .diffusivity import *  # noqa
+from ._precision import *
+from .analyses import *
+from .boundary_conditions import *
+from .capillary_pressures import *
+from .config import *
+from .constants import *
+from .diffusivity import *
+from .errors import *
+from .factories import *
+from .fractures import *
+from .grids import *
+from .models import *
+from .relperm import *
+from .serialization import *
+from .simulate import *
+from .states import *
+from .stores import *
+from .streams import *
+from .tables import *
+from .timing import *
+from .types import *
+from .utils import *
+from .visualization import *
+from .wells import *
 
-use_32bit_precision()  # noqa
+use_32bit_precision()  
 
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

@@ -296,7 +296,7 @@ def compute_total_fluid_compressibility(
     return total_fluid_compressibility  # type: ignore[return-value]
 
 
-def compute_oil_specific_gravity_from_density(
+def compute_oil_specific_gravity(
     oil_density: NDimensionalGrid[NDimension],
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],

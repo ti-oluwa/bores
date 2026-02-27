@@ -8,6 +8,7 @@ import numpy as np
 import numpy.typing as npt
 
 from bores.errors import ValidationError
+from bores.grids.base import array as bores_array
 from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
 from bores.types import CapillaryPressures, FloatOrArray, FluidPhase, Wettability
@@ -97,9 +98,9 @@ class TwoPhaseCapillaryPressureTable(Serializable):
     """The first fluid phase (typically the wetting phase), e.g., 'water' or 'oil'."""
     non_wetting_phase: FluidPhase
     """The second fluid phase (typically the non-wetting phase), e.g., 'oil' or 'gas'."""
-    wetting_phase_saturation: npt.NDArray = attrs.field(converter=np.asarray)
+    wetting_phase_saturation: npt.NDArray = attrs.field(converter=bores_array)
     """The saturation values for the wetting phase (phase1), ranging from 0 to 1."""
-    capillary_pressure: npt.NDArray = attrs.field(converter=np.asarray)
+    capillary_pressure: npt.NDArray = attrs.field(converter=bores_array)
     """Capillary pressure values (Pc = P_non-wetting - P_wetting) corresponding to saturations."""
 
     def __attrs_post_init__(self) -> None:

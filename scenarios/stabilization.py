@@ -5,10 +5,12 @@ app = marimo.App(width="full", app_title="bores")
 
 
 @app.cell
-def build_run_from_base_setup():
+def build_run_from_setup():
     import logging
     from pathlib import Path
+
     import numpy as np
+
     import bores
 
     logging.basicConfig(level=logging.INFO)
@@ -39,7 +41,7 @@ def save_run(Path, run):
 
 
 @app.cell
-def create_store(Path, bores):
+def make_store(Path, bores):
     store = bores.ZarrStore(
         store=Path("./scenarios/runs/stabilization/results/stabilization.zarr")
     )
@@ -47,22 +49,19 @@ def create_store(Path, bores):
 
 
 @app.cell
-def execute_run(bores, run, store):
-    stream = bores.StateStream(
-        run(),
+def run_simulation(bores, run, store):
+    with bores.StateStream(
+        run,
         store=store,
         background_io=True,
-    )
-    with stream:
+    ) as stream:
         last_state = stream.last()
     return (last_state,)
 
 
 @app.cell
-def capture_last_model_state(Path, last_state):
-    last_state.model.to_file(
-        Path("./scenarios/runs/stabilization/results/model.h5")
-    )
+def capture_last_state(Path, last_state):
+    last_state.model.to_file(Path("./scenarios/runs/stabilization/results/model.h5"))
     return
 
 

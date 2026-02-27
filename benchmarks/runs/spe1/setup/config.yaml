@@ -3,10 +3,10 @@
   _meta: {}
   data:
     timer:
-      initial_step_size: 21600.0
-      max_step_size: 432000.0
-      min_step_size: 600.0
-      simulation_time: 31557600.0
+      initial_step_size: 1296000.0
+      max_step_size: 1296000.0
+      min_step_size: 3600.0
+      simulation_time: 315576000.0
       max_cfl_number: 0.9
       cfl_safety_margin: 0.85
       ramp_up_factor: 1.2
@@ -18,9 +18,9 @@
       use_constant_step_size: false
       elapsed_time: 0.0
       step: 0
-      step_size: 21600.0
-      next_step_size: 21600.0
-      ema_step_size: 21600.0
+      step_size: 1296000.0
+      next_step_size: 1296000.0
+      ema_step_size: 1296000.0
       last_step_failed: false
       rejection_count: 0
       steps_since_last_failure: 0
@@ -32,51 +32,96 @@
           oil_water_table:
             wetting_phase: water
             non_wetting_phase: oil
-            wetting_phase_saturation:
-              __ndarray__: true
-              dtype: <f4
+            wetting_phase_saturation: !ndarray
+              dtype: float32
               shape:
               - 2
-              data: AAAAAAAAgD8=
-            wetting_phase_relative_permeability:
-              __ndarray__: true
-              dtype: <f4
+              data:
+              - 0.0
+              - 1.0
+            wetting_phase_relative_permeability: !ndarray
+              dtype: float32
               shape:
               - 2
-              data: AAAAAAAAAAA=
-            non_wetting_phase_relative_permeability:
-              __ndarray__: true
-              dtype: <f4
+              data:
+              - 0.0
+              - 0.0
+            non_wetting_phase_relative_permeability: !ndarray
+              dtype: float32
               shape:
               - 2
-              data: AACAPwAAAAA=
+              data:
+              - 1.0
+              - 0.0
           gas_oil_table:
             wetting_phase: oil
             non_wetting_phase: gas
-            wetting_phase_saturation:
-              __ndarray__: true
-              dtype: <f4
+            wetting_phase_saturation: !ndarray
+              dtype: float32
               shape:
-              - 35
-              data: mpkZPjMzMz7NzEw+ZmZmPgAAgD7NzIw+mpmZPmZmpj4zM7M+AADAPs3MzD6amdk+ZmbmPjMz8z4AAAA/ZmYGP83MDD8zMxM/mpkZPwAAID9mZiY/zcwsPzMzMz+amTk/AABAP2ZmRj/NzEw/MzNTP5qZWT8AAGA/ZmZmP83MbD8zM3M/mpl5PwAAgD8=
-            wetting_phase_relative_permeability:
-              __ndarray__: true
-              dtype: <f4
+              - 15
+              data:
+              - 0.0
+              - 0.1499999761581421
+              - 0.30000001192092896
+              - 0.3999999761581421
+              - 0.5
+              - 0.550000011920929
+              - 0.6000000238418579
+              - 0.699999988079071
+              - 0.75
+              - 0.800000011920929
+              - 0.8799999952316284
+              - 0.949999988079071
+              - 0.9800000190734863
+              - 0.9990000128746033
+              - 1.0
+            wetting_phase_relative_permeability: !ndarray
+              dtype: float32
               shape:
-              - 35
-              data: AAAAAAAAAAAAAAAAAAAAAAAAAAC0Adg4uRwvOoy+AjvIJY473NcBPCdrVDzQCaE80PDmPCC0Hj147VI9TWqIPTeKrD1eKtY9fc0CPiCWHT6jlTs+BvJcPmTogD4sK5U+clOrPghzwz6Am90+wt35Po0lDD8Yehw/5PQtP/GdQD+RfVQ/kZtpPwAAgD8=
-            non_wetting_phase_relative_permeability:
-              __ndarray__: true
-              dtype: <f4
+              - 15
+              data:
+              - 0.0
+              - 0.0
+              - 0.0
+              - 9.999999747378752e-05
+              - 0.0010000000474974513
+              - 0.009999999776482582
+              - 0.020999999716877937
+              - 0.09000000357627869
+              - 0.20000000298023224
+              - 0.3499999940395355
+              - 0.699999988079071
+              - 0.9800000190734863
+              - 0.996999979019165
+              - 1.0
+              - 1.0
+            non_wetting_phase_relative_permeability: !ndarray
+              dtype: float32
               shape:
-              - 35
-              data: AACAP0xsWj/pZDk/2XwcPwFOAz9z8to+rUu1Pu8ClT4VAHM+8GtEPrJGHT49Rvk9xk/DPU8hlz2CqWY9flItPQAAAD2mZLk8J02DPPlJNTzrAfM7UkmdOxtMQzvNr+Y6rg6AOopVAzoHRXM5/wjDOP8FAjiL4eo2vTeGNQAAAAAAAAAAAAAAAAAAAAA=
+              - 15
+              data:
+              - 1.0
+              - 0.9800000190734863
+              - 0.9399999976158142
+              - 0.8700000047683716
+              - 0.7200000286102295
+              - 0.6000000238418579
+              - 0.4099999964237213
+              - 0.1899999976158142
+              - 0.125
+              - 0.07500000298023224
+              - 0.02500000037252903
+              - 0.004999999888241291
+              - 0.0
+              - 0.0
+              - 0.0
           mixing_rule: eclipse_rule
       capillary_pressure_table:
         brooks_corey_capillary_pressure_model:
-          irreducible_water_saturation: 0.0
-          residual_oil_saturation_water: 0.25
-          residual_oil_saturation_gas: 0.15
+          irreducible_water_saturation: 0.12
+          residual_oil_saturation_water: 0.0
+          residual_oil_saturation_gas: 0.0
           residual_gas_saturation: 0.0
           oil_water_entry_pressure_water_wet: 1.0
           oil_water_entry_pressure_oil_wet: 5.0
@@ -88,20 +133,20 @@
           mixed_wet_water_fraction: 0.5
     wells:
       injection_wells:
-        INJ-1:
+        GAS-INJ:
           injection_well:
-            name: INJ-1
+            name: GAS-INJ
             perforating_intervals:
             - - - 0
                 - 0
                 - 0
               - - 0
                 - 0
-                - 19
-            radius: 0.5
+                - 0
+            radius: 0.25
             control:
               constant_rate_control:
-                target_rate: 43.840062395038586
+                target_rate: 100000000.0
                 bhp_limit: null
                 target_phase: null
                 clamp:
@@ -111,10 +156,10 @@
             orientation: z
             is_active: true
             injected_fluid:
-              name: Methane
+              name: Gas
               phase: gas
-              specific_gravity: 0.65
-              molecular_weight: 16.04246
+              specific_gravity: 0.792
+              molecular_weight: 22.9398048
               salinity: null
               is_miscible: false
               todd_longstaff_omega: 0.67
@@ -124,21 +169,22 @@
               density: null
               viscosity: null
       production_wells:
-        PROD-1:
+        OIL-PROD:
           production_well:
-            name: PROD-1
+            name: OIL-PROD
             perforating_intervals:
-            - - - 99
-                - 0
-                - 0
-              - - 99
-                - 0
-                - 19
-            radius: 0.5
+            - - - 9
+                - 9
+                - 2
+              - - 9
+                - 9
+                - 2
+            radius: 0.25
             control:
-              bhp_control:
-                bhp: 95.0
-                target_phase: gas
+              adaptive_bhp_rate_control:
+                target_rate: -20000.0
+                bhp_limit: 300.0
+                target_phase: null
                 clamp:
                   production_clamp:
                     value: 0.0
@@ -148,17 +194,23 @@
             produced_fluids:
             - name: Oil
               phase: oil
-              specific_gravity: 0.7003367003367004
+              specific_gravity: !np_scalar
+                dtype: float64
+                value: 0.6875555040579514
               molecular_weight: 180.0
             - name: Gas
               phase: gas
-              specific_gravity: 0.8156862745098039
-              molecular_weight: 16.04246
+              specific_gravity: 0.792
+              molecular_weight: 22.9398048
+            - name: Water
+              phase: water
+              specific_gravity: 1.0
+              molecular_weight: 18.01528
     well_schedules: null
     boundary_conditions: null
     pressure_convergence_tolerance: 1.0e-06
     saturation_convergence_tolerance: 0.0001
-    max_iterations: 200
+    max_iterations: 250
     output_frequency: 1
     scheme: impes
     use_pseudo_pressure: true
@@ -503,6 +555,10 @@
         value: 365.25
         description: Number of days in a year
         unit: day/year
+      MONTHS_PER_YEAR:
+        value: 12
+        description: Number of months in a year
+        unit: month/year
       SECONDS_PER_YEAR:
         value: 31557600.0
         description: Number of seconds in a year
@@ -595,13 +651,13 @@
     log_interval: 10
     pressure_solver: bicgstab
     saturation_solver: bicgstab
-    pressure_preconditioner: ilu
+    pressure_preconditioner: cached_ilu
     saturation_preconditioner: ilu
     phase_appearance_tolerance: 1.0e-06
     residual_oil_drainage_ratio_water_flood: 0.6
     residual_oil_drainage_ratio_gas_flood: 0.6
     residual_gas_drainage_ratio: 0.5
-    max_oil_saturation_change: 0.15
+    max_oil_saturation_change: 0.05
     max_water_saturation_change: 0.4
-    max_gas_saturation_change: 0.1
-    max_pressure_change: 30.0
+    max_gas_saturation_change: 0.05
+    max_pressure_change: 200.0

@@ -10,6 +10,7 @@ def setup_run():
     from pathlib import Path
 
     import numpy as np
+
     import bores
 
     logging.basicConfig(level=logging.INFO)
@@ -24,6 +25,7 @@ def setup_run():
         recompute_threshold=0.3,
     )
     ilu_preconditioner.register(override=True)
+
     # Load the new run with the resulting model state from the primary depletion run
     run = bores.Run.from_files(
         model_path=Path("./scenarios/runs/primary_depletion/results/model.h5"),
@@ -32,18 +34,16 @@ def setup_run():
     )
 
     # Gas injection wells, 3-spot pattern
-    injection_clamp = bores.InjectionClamp()
-    control = bores.AdaptiveBHPRateControl(
-        target_rate=50000,
-        target_phase="gas",
-        bhp_limit=1500,
-        clamp=injection_clamp,
-    )
     gas_injector_1 = bores.injection_well(
         well_name="GI-1",
         perforating_intervals=[((16, 3, 1), (16, 3, 3))],
         radius=0.3542,  # 8.5 inch wellbore
-        control=control,
+        control=bores.AdaptiveBHPRateControl(
+            target_rate=50000,
+            target_phase="gas",
+            bhp_limit=1500,
+            clamp=bores.InjectionClamp(),
+        ),
         injected_fluid=bores.InjectedFluid(
             name="Methane",
             phase=bores.FluidPhase.GAS,
@@ -101,13 +101,13 @@ def setup_run():
                 name="Gas",
                 phase=bores.FluidPhase.GAS,
                 specific_gravity=0.65,
-                molecular_weight=16.04,
+                molecular_weight=bores.c.MOLECULAR_WEIGHT_CH4,
             ),
             bores.ProducedFluid(
                 name="Water",
                 phase=bores.FluidPhase.WATER,
                 specific_gravity=1.05,
-                molecular_weight=18.015,
+                molecular_weight=bores.c.MOLECULAR_WEIGHT_WATER,
             ),
         ),
         skin_factor=2.5,
@@ -130,7 +130,7 @@ def setup_run():
         initial_step_size=bores.Time(hours=30.0),
         max_step_size=bores.Time(days=10.0),
         min_step_size=bores.Time(hours=6.0),
-        simulation_time=bores.Time(days=(bores.c.DAYS_PER_YEAR * 5) + 100),
+        simulation_time=bores.Time(years=10, days=100),
         max_cfl_number=0.9,
         ramp_up_factor=1.2,
         backoff_factor=0.5,
@@ -152,7 +152,7 @@ def save_run(Path, run):
 
 
 @app.cell
-def create_store(Path, bores):
+def make_store(Path, bores):
     store = bores.ZarrStore(
         store=Path("./scenarios/runs/ch4_injection/results/ch4_injection.zarr")
     )
@@ -160,14 +160,13 @@ def create_store(Path, bores):
 
 
 @app.cell
-def execute_run(bores, run, store):
-    stream = bores.StateStream(
-        run(),
+def run_simulation(bores, run, store):
+    with bores.StateStream(
+        run,
         store=store,
-        batch_size=30,
+        batch_size=20,
         background_io=True,
-    )
-    with stream:
+    ) as stream:
         stream.consume()
     return
 

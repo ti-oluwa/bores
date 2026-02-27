@@ -458,7 +458,7 @@ class StateStream(typing.Generic[NDimension]):
         """
         self._started = True
         logger.info(
-            f"Started stream session ({self.store!r})"
+            f"Started stream session to {self.store!r}"
             if self.store
             else "Started stream session (no persistence)"
         )

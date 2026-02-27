@@ -8,6 +8,7 @@ from datetime import timedelta
 import attrs
 from typing_extensions import Self
 
+from bores.constants import c
 from bores.errors import TimingError, ValidationError
 from bores.stores import StoreSerializable
 
@@ -23,6 +24,8 @@ def Time(
     hours: float = 0,
     days: float = 0,
     weeks: float = 0,
+    months: float = 0,
+    years: float = 0,
 ) -> float:
     """
     Expresses time components as total seconds.
@@ -33,8 +36,16 @@ def Time(
     :param hours: Number of hours.
     :param days: Number of days.
     :param weeks: Number of weeks.
+    :param months: Number of months.
+    :param years: Number of years.
     :return: Total time in seconds.
     """
+    if years:
+        days += years * c.DAYS_PER_YEAR
+
+    if months:
+        days += (years * c.DAYS_PER_YEAR) / c.MONTHS_PER_YEAR
+
     delta = timedelta(
         weeks=weeks,
         days=days,

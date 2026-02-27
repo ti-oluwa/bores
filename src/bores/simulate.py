@@ -955,7 +955,7 @@ class Run(StoreSerializable):
     config = Config.from_file("path/to/simulation_config.yaml")
 
     run = Run(model=model, config=config)
-    for state in run():
+    for state in run:
         # Process the model state at each output interval
         process(state)
 
@@ -982,15 +982,14 @@ class Run(StoreSerializable):
     )
     """ISO timestamp of when this run was created."""
 
-    def execute(self) -> typing.Generator[ModelState[ThreeDimensions], None, None]:
-        """Execute this simulation run."""
-        return run(self.model, self.config)
-
     def __call__(
         self,
     ) -> typing.Generator[ModelState[ThreeDimensions], None, None]:
-        """Execute this simulation run."""
-        return self.execute()
+        """Returns a genrator that executes this simulation run."""
+        return run(self.model, self.config)
+
+    def __iter__(self) -> typing.Iterator[ModelState[ThreeDimensions]]:
+        return iter(self())
 
     @classmethod
     def from_files(

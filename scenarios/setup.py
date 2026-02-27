@@ -7,8 +7,10 @@ app = marimo.App(width="full")
 @app.cell
 def setup_3d_model():
     import typing
-    import numpy as np
     from pathlib import Path
+
+    import numpy as np
+
     import bores
 
     bores.use_32bit_precision()
@@ -139,10 +141,10 @@ def setup_3d_model():
     # Permeability distribution
     # Higher permeability in middle layers (better reservoir quality)
     # Anisotropy ratio kv/kh ~ 0.1 (typical for layered sandstone)
-    x_perm_values = bores.array([12, 25, 40, 18, 55, 70, 90, 35, 48, 22])  # mD
+    x_permeability_values = bores.array([12, 25, 40, 18, 55, 70, 90, 35, 48, 22])  # mD
     x_permeability_grid = bores.layered_grid(
         grid_shape=grid_shape,
-        layer_values=x_perm_values,
+        layer_values=x_permeability_values,
         orientation=bores.Orientation.Z,
     )
     # Slight directional permeability difference
@@ -161,12 +163,12 @@ def setup_3d_model():
     )
 
     # Realistic temperature gradient (~1.5°F per 100 ft)
-    surface_temp = 60.0  # °F
-    temp_gradient = 0.015  # °F/ft
-    layer_temps = surface_temp + (layer_depths * temp_gradient)
+    surface_temperature = 60.0  # °F
+    temperature_gradient = 0.015  # °F/ft
+    layer_temperatures = surface_temperature + (layer_depths * temperature_gradient)
     temperature_grid = bores.layered_grid(
         grid_shape=grid_shape,
-        layer_values=layer_temps,  # ~180-182°F
+        layer_values=layer_temperatures,  # ~180-182°F
         orientation=bores.Orientation.Z,
     )
     # Rock compressibility for sandstone
@@ -315,6 +317,7 @@ def setup_config(Path, bores, pvt_tables):
         recompute_threshold=0.3,
     )
     preconditioner_factory.register(override=True)
+
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,

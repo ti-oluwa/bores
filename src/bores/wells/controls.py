@@ -448,7 +448,6 @@ class BHPControl(WellControl[WellFluidTcon]):
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :return: Flow rate in (bbl/day or ft³/day).
         """
-        # Early return checks
         if _should_return_zero(
             fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):

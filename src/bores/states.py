@@ -7,6 +7,7 @@ import attrs
 import numpy as np
 
 from bores._precision import get_dtype
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.grids.base import (
     CapillaryPressureGrids,
@@ -47,7 +48,7 @@ class ModelState(
     step_size: float
     """The time step size in seconds"""
     time: float
-    """The simulation time reached in seconds"""
+    """The simulation time reached in seconds. Time elapsed at this state in seconds"""
     model: ReservoirModel[NDimension]
     """The reservoir model at this state"""
     wells: Wells[NDimension]
@@ -71,6 +72,21 @@ class ModelState(
         if self._well_exists is None:
             object.__setattr__(self, "_well_exists", self.wells.exists())
         return self._well_exists  # type: ignore[return-value]
+
+    @property
+    def time_in_days(self) -> float:
+        """Time elapsed at this state in days"""
+        return self.time / 86400
+
+    @property
+    def time_in_weeks(self) -> float:
+        """Time elapsed at this state in weeks"""
+        return self.time / 7 * 86400
+
+    @property
+    def time_in_years(self) -> float:
+        """Time elapsed at this state in years"""
+        return self.time / c.DAYS_PER_YEAR * 86400
 
 
 def _validate_array(

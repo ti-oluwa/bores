@@ -4,17 +4,13 @@ import threading
 import typing
 
 import attrs
-import numba  # type: ignore[import-untyped]
+import numba
 import numpy as np
 import numpy.typing as npt
 
 from bores.errors import ValidationError
-from bores.serialization import (
-    Serializable,
-    make_serializable_type_registrar,
-    ndarray_deserializer,
-    ndarray_serializer,
-)
+from bores.grids.base import array as bores_array
+from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
 from bores.types import (
     FloatOrArray,
@@ -780,19 +776,7 @@ def get_relperm_table(name: str) -> typing.Type[RelativePermeabilityTable]:
 
 
 @attrs.frozen
-class TwoPhaseRelPermTable(
-    Serializable,
-    serializers={
-        "wetting_phase_saturation": ndarray_serializer,
-        "wetting_phase_relative_permeability": ndarray_serializer,
-        "non_wetting_phase_relative_permeability": ndarray_serializer,
-    },
-    deserializers={
-        "wetting_phase_saturation": ndarray_deserializer,
-        "wetting_phase_relative_permeability": ndarray_deserializer,
-        "non_wetting_phase_relative_permeability": ndarray_deserializer,
-    },
-):
+class TwoPhaseRelPermTable(Serializable):
     """
     Two-phase relative permeability lookup table.
 
@@ -811,15 +795,15 @@ class TwoPhaseRelPermTable(
     non_wetting_phase: FluidPhase
     """The non-wetting fluid phase, e.g., 'oil' (for oil-water (water-wet)) or 'gas' (for gas-oil (oil-wet))."""
     wetting_phase_saturation: npt.NDArray[np.floating] = attrs.field(
-        converter=np.asarray
+        converter=bores_array
     )
     """The saturation values for the wetting phase, ranging from 0 to 1."""
     wetting_phase_relative_permeability: npt.NDArray[np.floating] = attrs.field(
-        converter=np.asarray
+        converter=bores_array
     )
     """Relative permeability values for wetting phase corresponding to the saturation values."""
     non_wetting_phase_relative_permeability: npt.NDArray[np.floating] = attrs.field(
-        converter=np.asarray
+        converter=bores_array
     )
     """Relative permeability values for non-wetting phase corresponding to the saturation values."""
 
