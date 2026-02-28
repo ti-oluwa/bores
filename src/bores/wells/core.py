@@ -241,7 +241,7 @@ def compute_oil_well_rate(
 
     or for slightly compressible fluids:
 
-        Q = 7.08e-3 * W * M * ln(1 + c_f * (P_bhp - P)) / c_f
+        Q = 7.08e-3 * W * M * [exp(c_f * (P_bhp - P)) - 1] / c_f
 
     where:
         - Q is the well rate (bbl/day)
@@ -264,11 +264,23 @@ def compute_oil_well_rate(
 
     pressure_difference = bottom_hole_pressure - pressure
     if fluid_compressibility:
+        # THis can be inaccurate fro large pressure differences,
+        # as it assume compressibility effect is small (c * ΔP << 1)
+        # which may not always be the case
+        # well_rate = (
+        #     7.08e-3
+        #     * well_index
+        #     * phase_mobility
+        #     * np.log(1 + (fluid_compressibility * pressure_difference))
+        #     / fluid_compressibility
+        # )
+        # So we use the exact solution to: dq/dP = k * λ * (1 + c * P)
+        # Integrated to give: q = (k * λ / c) * [exp(c * ΔP) - 1]
         well_rate = (
             7.08e-3
             * well_index
             * phase_mobility
-            * np.log(1 + (fluid_compressibility * pressure_difference))
+            * (np.exp(fluid_compressibility * pressure_difference) - 1)
             / fluid_compressibility
         )
     else:
@@ -286,6 +298,7 @@ def compute_gas_well_rate(
     use_pseudo_pressure: bool = True,
     pseudo_pressure_table: typing.Optional[GasPseudoPressureTable] = None,
     formation_volume_factor: typing.Optional[float] = None,
+    gas_gravity: typing.Optional[float] = None,
 ) -> float:
     """
     Compute the gas well rate using the well index and pressure drop.
@@ -325,7 +338,8 @@ def compute_gas_well_rate(
     :param average_compressibility_factor: The average gas compressibility factor Z (default is 1.0).
     :param use_pseudo_pressure: Whether to use pseudo-pressure formulation (default is True).
     :param pseudo_pressure_table: Pre-computed pseudo-pressure table for fast lookup (required if use_pseudo_pressure is True).
-    :param formation_volume_factor: Gas formation volume factor (ft³/SCF). If provided, it will be used directly instead of calculating from Z, T, and P.
+    :param formation_volume_factor: Gas formation volume factor (ft³/SCF). If provided, it will be used directly instead of calculating from gas gravity, T, and P.
+    :param gas_gravity: Gas specific gravity required if `formation_volume_factor` is not provided.
     :return: The gas well rate (ft³/day).
     """
     if well_index <= 0:
@@ -366,14 +380,18 @@ def compute_gas_well_rate(
         gas_fvf = formation_volume_factor
     else:
         # Compute gas formation volume factor (ft³/SCF)
-        # Bg = 0.02827 * (Z_avg * T) / P_avg
-        average_pressure = 0.5 * (pressure + bottom_hole_pressure)
-        gas_fvf = (
-            0.02827
-            * average_compressibility_factor
-            * temperature_rankine
-            / average_pressure
-        )  # ft³/SCF
+        # Bg = 0.02827 * (Z_res * T) / P_res
+        if gas_gravity is None:
+            raise ComputationError(
+                "`gas_gravity` is required if gas `formation_volume_factor` is not provided"
+            )
+        z_at_reservoir = compute_gas_compressibility_factor(
+            pressure=pressure,  # ← reservoir pressure, not average!
+            temperature=temperature,
+            gas_gravity=gas_gravity,
+            method="dak",
+        )
+        gas_fvf = 0.02827 * z_at_reservoir * temperature_rankine / pressure  # ft³/SCF
     return well_rate * gas_fvf  # ft³/day
 
 
@@ -864,14 +882,14 @@ class InjectedFluid(WellFluid):
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
                     gas_gravity=np.full_like(pressure, self.specific_gravity),
-                    method="dak"
+                    method="dak",
                 )
             else:
                 gas_z_factor = compute_gas_compressibility_factor(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
                     gas_gravity=self.specific_gravity,
-                    method="dak"
+                    method="dak",
                 )
         if use_vectorization:
             return compute_gas_density_vectorized(
@@ -933,14 +951,14 @@ class InjectedFluid(WellFluid):
                         pressure=pressure,  # type: ignore
                         temperature=temperature,  # type: ignore
                         gas_gravity=np.full_like(pressure, self.specific_gravity),
-                        method="dak"
+                        method="dak",
                     )
                 else:
                     gas_z_factor = compute_gas_compressibility_factor(
                         pressure=pressure,  # type: ignore
                         temperature=temperature,  # type: ignore
                         gas_gravity=self.specific_gravity,
-                        method="dak"
+                        method="dak",
                     )
 
             if use_vectorization:
@@ -1103,14 +1121,14 @@ class InjectedFluid(WellFluid):
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
                     gas_gravity=np.full_like(pressure, self.specific_gravity),
-                    method="dak"
+                    method="dak",
                 )
             else:
                 gas_z_factor = compute_gas_compressibility_factor(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
                     gas_gravity=self.specific_gravity,
-                    method="dak"
+                    method="dak",
                 )
 
         if use_vectorization:

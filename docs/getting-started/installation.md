@@ -1,213 +1,211 @@
 # Installation
 
-This guide walks you through installing BORES and its dependencies.
+This page covers how to install BORES, verify your setup, and troubleshoot common issues. BORES supports Python 3.10 and above on Linux, macOS, and Windows.
 
 ---
 
-## Requirements
+## Prerequisites
 
-- **Python**: 3.10 or higher
-- **Operating System**: Windows, macOS, or Linux
-- **Memory**: 4GB RAM minimum (8GB+ recommended for large models)
+Before installing BORES, make sure you have the following:
 
----
+- **Python 3.10 or later** - BORES uses modern typing features and requires Python 3.10 as a minimum. You can check your version with `python --version`.
+- **A C compiler** - Numba (used for JIT-compiled numerical kernels) occasionally needs to compile extensions. On Linux, `gcc` is typically available by default. On macOS, install Xcode command line tools with `xcode-select --install`. On Windows, the Microsoft Visual C++ Build Tools are sufficient.
+- **A working internet connection** - Required to download BORES and its dependencies from PyPI.
 
-## Installation Methods
-
-### Using `uv` (Recommended)
-
-[`uv`](https://github.com/astral-sh/uv) is a fast Python package manager that handles dependencies efficiently.
-
-```bash
-# Install uv if you don't have it
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install BORES
-uv add bores-framework
-```
-
-!!! tip "Why uv?"
-    `uv` is **10-100x faster** than pip and handles complex dependencies better. Perfect for scientific computing packages like BORES.
-
-### Using `pip`
-
-```bash
-pip install bores-framework
-```
-
-### Development Installation
-
-To install from source (for contributing or development):
-
-```bash
-# Clone the repository
-git clone https://github.com/ti-oluwa/bores.git
-cd bores
-
-# Install with uv
-uv sync
-
-# Or with pip
-pip install -e .
-```
-
----
-
-## Verify Installation
-
-Check that BORES installed correctly:
-
-```python
-import bores
-
-print(f"BORES version: {bores.__version__}")
-print(f"Precision: {bores.get_dtype()}")
-```
-
-Expected output:
-```
-BORES version: 0.0.1
-Precision: float32
-```
-
----
-
-## Dependencies
-
-BORES automatically installs these key dependencies:
+BORES depends on several scientific Python packages that will be installed automatically:
 
 | Package | Purpose |
 |---------|---------|
-| **NumPy** | Array operations and numerical computing |
-| **SciPy** | Sparse linear solvers |
-| **Numba** | JIT compilation for performance |
-| **attrs** | Immutable data structures |
-| **Plotly** | Interactive 3D visualization |
-| **CoolProp** | Fluid property calculations |
-| **h5py/zarr** | Data storage backends |
+| numpy | Array operations and linear algebra |
+| scipy | Sparse matrix solvers and numerical methods |
+| numba | JIT compilation for performance-critical functions |
+| attrs / cattrs | Immutable data models and serialization |
+| h5py / zarr | HDF5 and Zarr storage backends |
+| plotly | Visualization (series, maps, 3D volumes) |
 
-!!! info "Platform-Specific Builds"
-    On Windows/Linux x86_64, BORES uses optimized Intel MKL builds of NumPy/SciPy for better performance. macOS and ARM architectures use standard builds.
+---
+
+## Install BORES
+
+=== "uv (recommended)"
+
+    [uv](https://docs.astral.sh/uv/) is a fast Python package manager that handles dependency resolution efficiently. If you do not have `uv` installed yet, you can install it with:
+
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
+
+    Then install BORES:
+
+    ```bash
+    uv pip install bores-framework
+    ```
+
+    If you are working from a cloned copy of the BORES repository, you can install it in development mode:
+
+    ```bash
+    uv sync
+    ```
+
+    This reads the `pyproject.toml` and installs all dependencies, including optional dev tools.
+
+=== "pip"
+
+    You can install BORES with standard pip:
+
+    ```bash
+    pip install bores-framework
+    ```
+
+    Or to ensure that pip uses an index for MKL-optimized numpy/scipy for x86_64 Linux/Windows:
+
+    ```bash
+    pip install bores-framework --extra-index-url https://urob.github.io/numpy-mkl
+    ```
+
+    For development mode from a local clone:
+
+    ```bash
+    pip install -e ".[dev]"
+    ```
+
+!!! tip "Virtual Environments"
+
+    Always install BORES inside a virtual environment to avoid conflicts with other packages. With `uv`, virtual environments are managed automatically. With `pip`, create one using `python -m venv .venv` and activate it before installing.
+
+---
+
+## Verify Your Installation
+
+Run the following script to confirm that BORES is installed correctly and its core dependencies are available:
+
+```python
+import bores
+print(f"BORES version: {bores.__version__}")
+print(f"Default precision: {bores.get_dtype()}")
+```
+
+Expected output:
+
+```
+BORES version: 0.1.0
+Default precision: <class 'numpy.float32'>
+```
+
+If you see an `ImportError`, double-check that you installed BORES in the correct Python environment and that all dependencies resolved successfully.
 
 ---
 
 ## Optional Dependencies
 
-### Development Tools
+BORES includes several optional packages that extend its capabilities. These are installed by default with the standard installation, but are worth knowing about if you are working in a minimal environment.
 
-For contributing to BORES:
+### Thermodynamics - CoolProp and thermo
+
+BORES uses [CoolProp](http://www.coolprop.org/) and [thermo](https://github.com/CalebBell/thermo) for advanced fluid property calculations, particularly when computing gas properties from first principles. These packages enable accurate PVT calculations for non-standard gases like CO2 or nitrogen.
 
 ```bash
-uv sync --extra dev
+pip install coolprop thermo
 ```
 
-This installs:
+### Visualization - Plotly and Trame
 
-- **ruff**: Fast linting and formatting
-- **mypy**: Type checking
-- **marimo**: Interactive notebooks (for examples)
-
-### Visualization
-
-Plotly is included by default, but you may want:
+The visualization module relies on [Plotly](https://plotly.com/python/) for generating charts and 3D renders, along with [Kaleido](https://github.com/nicholasgasior/kaleido) for static image export and [Trame](https://kitware.github.io/trame/) for interactive 3D volume visualization in web browsers.
 
 ```bash
-# For exporting static images
-pip install kaleido
+pip install plotly kaleido trame
+```
 
-# Already included in BORES
+### Storage - HDF5 and Zarr
+
+BORES supports multiple storage backends for saving and loading simulation results. [h5py](https://www.h5py.org/) provides HDF5 support, while [zarr](https://zarr.dev/) enables chunked, compressed array storage suitable for large simulations.
+
+```bash
+pip install h5py zarr
 ```
 
 ---
 
 ## Troubleshooting
 
-### Import Errors
+### Numba compilation errors
 
-**Problem**: `ModuleNotFoundError: No module named 'bores'`
+Numba compiles Python functions to machine code on first use. If you encounter compilation errors, try the following:
 
-**Solution**: Ensure BORES is installed in the active Python environment:
+1. **Update Numba**: Ensure you have numba >= 0.63.0 installed.
+2. **Clear the cache**: Delete Numba's cache directory, typically found at `__pycache__` folders containing `.nbi` and `.nbc` files.
+3. **Check your compiler**: Run `numba -s` to print system information and verify that a compatible C compiler is detected.
 
-```bash
-python -c "import sys; print(sys.executable)"
-pip list | grep bores
-```
+!!! note "First-run latency"
 
-### NumPy/SciPy Issues
+    The first time you import BORES or run a simulation, Numba compiles several cached functions. This may take 10-30 seconds. Subsequent runs will be much faster because compiled code is cached to disk.
 
-**Problem**: Errors related to BLAS/LAPACK on Linux
+### Missing BLAS/LAPACK libraries
 
-**Solution**: Install system BLAS libraries:
+scipy and numpy depend on optimized linear algebra libraries. On Linux, if you see errors about missing BLAS or LAPACK:
 
-```bash
-# Ubuntu/Debian
-sudo apt-get install libblas-dev liblapack-dev
+=== "Ubuntu / Debian"
 
-# CentOS/RHEL
-sudo yum install blas-devel lapack-devel
-```
+    ```bash
+    sudo apt-get install libopenblas-dev liblapack-dev
+    ```
 
-### Memory Errors
+=== "Fedora / RHEL"
 
-**Problem**: `MemoryError` when building large models
-
-**Solution**: Use 32-bit precision (default):
-
-```python
-import bores
-bores.use_32bit_precision()  # This is the default
-```
-
-See [Performance Optimization](../advanced/performance-optimization.md) for more tips.
-
-### CoolProp Errors
-
-**Problem**: Errors with fluid property calculations
-
-**Solution**: CoolProp sometimes needs manual install:
-
-```bash
-pip install --upgrade coolprop
-```
-
----
-
-## Platform-Specific Notes
-
-=== "Windows"
-
-    Windows users may need Visual C++ Redistributable:
-
-    - Download from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-    - Or install via Windows Update
+    ```bash
+    sudo dnf install openblas-devel lapack-devel
+    ```
 
 === "macOS"
 
-    macOS users on Apple Silicon (M1/M2/M3):
+    macOS ships with the Accelerate framework, which provides BLAS/LAPACK. No additional installation is needed.
 
-    - BORES works natively on ARM
-    - No Rosetta needed
-    - Standard NumPy/SciPy (not MKL)
+=== "Windows"
 
-=== "Linux"
+    The numpy and scipy wheels on PyPI bundle their own BLAS/LAPACK (OpenBLAS). No additional installation is typically required. If you installed via `uv` on x86_64, MKL-optimized versions are used automatically.
 
-    Linux users benefit from optimized MKL builds:
+### HDF5 build failures
 
-    - Best performance on x86_64
-    - Install BLAS/LAPACK for optimal results
-    - WSL2 fully supported
+If `h5py` fails to install, it may be because the HDF5 C library is not available on your system:
+
+=== "Ubuntu / Debian"
+
+    ```bash
+    sudo apt-get install libhdf5-dev
+    ```
+
+=== "macOS"
+
+    ```bash
+    brew install hdf5
+    ```
+
+=== "Windows"
+
+    Pre-built wheels for h5py are available on PyPI and should install without issues. If you encounter problems, try upgrading pip: `pip install --upgrade pip`.
+
+---
+
+## Platform Notes
+
+### Linux
+
+Linux is the primary development and testing platform for BORES. All features, including MKL-optimized linear algebra on x86_64, work out of the box with the standard installation.
+
+### macOS
+
+BORES works on both Intel and Apple Silicon Macs. On Apple Silicon (M1/M2/M3/M4), Numba uses the ARM64 backend, which is fully supported. The Accelerate framework provides optimized BLAS/LAPACK.
+
+### Windows
+
+BORES is supported on Windows 10 and later. If you are using Windows Subsystem for Linux (WSL), the Linux installation instructions apply. Native Windows installation works with both `uv` and `pip`.
+
+!!! info "MKL Optimization"
+
+    On x86_64 Linux and Windows, BORES is configured to use Intel MKL-optimized versions of numpy and scipy when installed via `uv`. This provides significant performance improvements for linear algebra operations, which are central to reservoir simulation. macOS and non-x86 architectures use standard OpenBLAS builds.
 
 ---
 
 ## Next Steps
 
-**Installation complete!** Now let's run your first simulation:
-
-[:octicons-arrow-right-24: Quick Start Guide](quickstart.md)
-
----
-
-## Getting Help
-
-- **Installation issues**: [GitHub Issues](https://github.com/ti-oluwa/bores/issues)
-- **General questions**: [GitHub Discussions](https://github.com/ti-oluwa/bores/discussions)
+With BORES installed, head to the [Quickstart](quickstart.md) to build and run your first simulation.

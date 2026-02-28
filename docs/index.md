@@ -1,155 +1,153 @@
-# BORES Framework
+# BORES - Black-Oil Reservoir Engineering Simulation
 
-**3D Three-Phase Black-Oil Reservoir Modelling and Simulation Framework in Python**
+BORES is a 3D three-phase black-oil reservoir modelling and simulation framework written in Python. It provides a Pythonic API for constructing reservoir models, defining wells and boundary conditions, running multiphase flow simulations, and analyzing results. BORES targets petroleum engineers, researchers, and students who need a transparent, scriptable alternative to closed-source commercial simulators.
 
-<div style="text-align: center; margin: 2rem 0;">
-  <img src="https://img.shields.io/pypi/v/bores-framework?color=blue" alt="PyPI">
-  <img src="https://img.shields.io/pypi/pyversions/bores-framework" alt="Python">
-  <img src="https://img.shields.io/github/license/ti-oluwa/bores" alt="License">
-</div>
+!!! warning "Research and Educational Use"
 
----
-
-## What is BORES?
-
-BORES (Black-Oil REservoir Simulator) is a **3D three-phase reservoir simulation framework** designed for educational, research, and prototyping purposes. It provides a clean, Pythonic API for building reservoir models, running simulations, and analyzing results.
-
-!!! warning "Important Disclaimer"
-    BORES is designed for **educational, research, and prototyping purposes**. It is **not production-grade software** and should not be used for critical business decisions, regulatory compliance, or field development planning. Always validate results against established commercial simulators.
-
----
-
-## Why BORES?
-
-Existing reservoir simulators are either:
-
-- **Closed-source** (Eclipse, CMG) - expensive, limited extensibility
-- **Low-level languages** (C/C++, Fortran) - steep learning curve
-- **Complex APIs** (MRST, OPM) - difficult to prototype with
-
-BORES fills this gap by providing:
-
-- **Simple Python API** - Easy to learn, even for beginners
-- **Fully 3D** - Three-phase (oil, water, gas) black-oil modeling
-- **Educational Focus** - Clear code, comprehensive documentation
-- **Extensible** - Build custom models and workflows
-- **Fast Prototyping** - Test ideas quickly with Pythonic syntax
-
-!!! info "Unit System"
-    BORES uses **Oilfield Units** throughout: feet (ft), psi, STB, SCF, °F, etc.
+    BORES is currently in **alpha** (v0.1.0). It is designed for educational and research purposes. Do not use it for production field development planning or regulatory submissions without independent verification. Results should always be validated against analytical solutions or established commercial simulators before drawing engineering conclusions.
 
 ---
 
 ## Quick Example
 
-Here's a complete waterflood simulation in ~50 lines:
+The following example sets up and runs a small 3D waterflood simulation from scratch. It defines a 10x10x3 grid, places one injector and one producer, and runs for 365 days using the default IMPES scheme.
 
 ```python
 import bores
+import numpy as np
 
-# Define grid
-grid_shape = (30, 20, 6)
-cell_dimension = (100.0, 100.0)  # ft
+# Set precision (32-bit is the default)
+bores.use_32bit_precision()
 
-# Build model using factory
+# Grid dimensions: 10x10x3 cells, each 100 ft x 100 ft, 20 ft thick
+grid_shape = (10, 10, 3)
+cell_dimension = (100.0, 100.0)
+
+# Build property grids
+thickness = bores.build_uniform_grid(grid_shape, value=20.0)         # ft
+pressure = bores.build_uniform_grid(grid_shape, value=3000.0)        # psi
+porosity = bores.build_uniform_grid(grid_shape, value=0.20)          # fraction
+temperature = bores.build_uniform_grid(grid_shape, value=180.0)      # deg F
+oil_viscosity = bores.build_uniform_grid(grid_shape, value=1.5)      # cP
+bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)    # psi
+
+# Saturations (must sum to 1.0)
+So = bores.build_uniform_grid(grid_shape, value=0.75)
+Sw = bores.build_uniform_grid(grid_shape, value=0.25)
+Sg = bores.build_uniform_grid(grid_shape, value=0.00)
+
+# Residual and irreducible saturations
+Sorw = bores.build_uniform_grid(grid_shape, value=0.20)
+Sorg = bores.build_uniform_grid(grid_shape, value=0.15)
+Sgr = bores.build_uniform_grid(grid_shape, value=0.05)
+Swir = bores.build_uniform_grid(grid_shape, value=0.20)
+Swc = bores.build_uniform_grid(grid_shape, value=0.20)
+
+# Isotropic permeability: 100 mD
+perm_grid = bores.build_uniform_grid(grid_shape, value=100.0)
+permeability = bores.RockPermeability(x=perm_grid, y=perm_grid, z=perm_grid)
+
+# Build the reservoir model
 model = bores.reservoir_model(
-    grid_shape=grid_shape,
-    cell_dimension=cell_dimension,
-    thickness_grid=thickness_grid,
-    pressure_grid=pressure_grid,
-    porosity_grid=porosity_grid,
-    absolute_permeability=permeability,
-    # ... rock and fluid properties
+    grid_shape=grid_shape, cell_dimension=cell_dimension,
+    thickness_grid=thickness, pressure_grid=pressure,
+    rock_compressibility=3e-6, absolute_permeability=permeability,
+    porosity_grid=porosity, temperature_grid=temperature,
+    water_saturation_grid=Sw, gas_saturation_grid=Sg,
+    oil_saturation_grid=So, oil_viscosity_grid=oil_viscosity,
+    oil_bubble_point_pressure_grid=bubble_point,
+    residual_oil_saturation_water_grid=Sorw,
+    residual_oil_saturation_gas_grid=Sorg,
+    residual_gas_saturation_grid=Sgr,
+    irreducible_water_saturation_grid=Swir,
+    connate_water_saturation_grid=Swc,
 )
 
 # Define wells
 injector = bores.injection_well(
-    well_name="I-1",
-    perforating_intervals=[((5, 5, 2), (5, 5, 4))],
-    control=bores.ConstantRateControl(target_rate=500),  # STB/day
-    injected_fluid=bores.InjectedFluid(phase=bores.FluidPhase.WATER),
-)
-
-producer = bores.production_well(
-    well_name="P-1",
-    perforating_intervals=[((25, 15, 2), (25, 15, 4))],
-    control=bores.AdaptiveBHPRateControl(
-        target_rate=-300,  # STB/day
-        bhp_limit=800,  # psi
+    well_name="INJ-1",
+    perforating_intervals=[((0, 0, 0), (0, 0, 2))],
+    radius=0.25,
+    control=bores.ConstantRateControl(target_rate=500.0),
+    injected_fluid=bores.InjectedFluid(
+        name="Water", phase=bores.FluidPhase.WATER,
+        specific_gravity=1.0, molecular_weight=18.015,
     ),
 )
+producer = bores.production_well(
+    well_name="PROD-1",
+    perforating_intervals=[((9, 9, 0), (9, 9, 2))],
+    radius=0.25,
+    control=bores.PrimaryPhaseRateControl(
+        primary_phase=bores.FluidPhase.OIL,
+        primary_control=bores.AdaptiveBHPRateControl(
+            target_rate=-500.0, target_phase="oil", bhp_limit=1000.0,
+        ),
+        secondary_clamp=bores.ProductionClamp(),
+    ),
+    produced_fluids=[
+        bores.ProducedFluid(name="Oil", phase=bores.FluidPhase.OIL,
+                            specific_gravity=0.85, molecular_weight=200.0),
+        bores.ProducedFluid(name="Water", phase=bores.FluidPhase.WATER,
+                            specific_gravity=1.0, molecular_weight=18.015),
+    ],
+)
+wells = bores.wells_(injectors=[injector], producers=[producer])
 
-# Configure simulation
+# Rock-fluid tables (Brooks-Corey relative permeability + capillary pressure)
+rock_fluid = bores.RockFluidTables(
+    relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+        water_exponent=2.0, oil_exponent=2.0, gas_exponent=2.0,
+    ),
+    capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(),
+)
+
+# Simulation configuration
+Time = bores.Timer.Time
 config = bores.Config(
     timer=bores.Timer(
-        initial_step_size=bores.Time(hours=4),
-        max_step_size=bores.Time(days=10),
-        min_step_size=bores.Time(hours=1),
-        simulation_time=bores.Time(days=bores.c.DAYS_PER_YEAR * 5),  # 5 years
+        initial_step_size=Time(days=1),
+        max_step_size=Time(days=10),
+        min_step_size=Time(hours=1),
+        simulation_time=Time(days=365),
     ),
-    wells=bores.wells_(injectors=[injector], producers=[producer]),
+    rock_fluid_tables=rock_fluid,
+    wells=wells,
     scheme="impes",
 )
 
-# Run simulation
-run = bores.Run(model=model, config=config)
-for state in run():
-    print(f"Day {state.time / 86400:.1f}, Pressure: {state.model.fluid_properties.pressure_grid.mean():.1f} psi")
+# Run the simulation and collect states
+states = list(bores.run(model, config))
+final = states[-1]
+print(f"Completed {final.step} steps in {final.time_in_days:.1f} days")
+print(f"Final avg pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi")
 ```
 
 ---
 
-## Key Features
+## Key Capabilities
 
-### **Model Building**
+BORES covers the core elements of black-oil reservoir simulation within a single Python package.
 
-- Layered and uniform grid builders
-- Structural dip support (azimuth convention)
-- Saturation initialization with fluid contacts
-- Anisotropic permeability
+**Three-phase flow simulation** - Solves coupled pressure and saturation equations for oil, water, and gas phases using the IMPES (Implicit Pressure, Explicit Saturation) scheme. Explicit and fully implicit schemes are also available.
 
-### **Wells & Controls**
+**PVT correlations and tables** - Ships with industry-standard correlations (Standing, Vasquez-Beggs, Lee-Gonzalez, and others) for computing fluid properties from pressure and temperature. You can also supply your own PVT tables for direct lookup.
 
-- Production and injection wells
-- Adaptive BHP and rate controls
-- Multi-phase production
-- Miscible gas injection (Todd-Longstaff model)
-- Well scheduling
+**Well modelling** - Supports injection and production wells with multiple control modes: constant rate, BHP control, and adaptive BHP-rate control. Wells can have multiple perforating intervals, skin factors, and scheduled control changes.
 
-### **Physics**
+**Flexible boundary conditions** - Includes constant pressure, no-flow, flux boundaries, periodic boundaries, and Carter-Tracy aquifer models. Boundary conditions can be combined on different faces of the reservoir grid.
 
-- IMPES and explicit schemes
-- PVT correlations (Standing, Vasquez-Beggs, etc.)
-- PVT tables for performance
-- Relative permeability models (Corey, Brooks-Corey, LET)
-- Capillary pressure
-- Aquifer support (Carter-Tracy)
-
-### **Performance**
-
-- Numba JIT compilation
-- 32-bit precision option (memory/speed)
-- Adaptive timestep control (CFL-based)
-- Sparse solvers (BiCGSTAB, GMRES, AMG)
-- Cached preconditioners
-
-### **Storage & Analysis**
-
-- Multiple backends (HDF5, Zarr, YAML, JSON)
-- Streaming for large simulations
-- Recovery factor analysis
-- Production profiles
-- 1D/2D/3D visualization (Plotly)
+**Post-simulation analysis** - Built-in analysis tools for computing recovery factors, production profiles, front tracking, and mobility ratios. Plotly-based visualization produces 1D series, 2D maps, and interactive 3D volume renders.
 
 ---
 
-## Who is BORES For?
+## Who Is BORES For?
 
-- **Students** learning reservoir engineering
-- **Researchers** prototyping new methods
-- **Petroleum Engineers** exploring workflows
-- **Educators** teaching simulation concepts
-- **Python Developers** interested in reservoir simulation
+BORES is built for people who want to understand and experiment with reservoir simulation at the code level. If you are a petroleum engineering student working through textbook problems, BORES lets you set up models programmatically and inspect every intermediate calculation. You can trace how pressure propagates through a grid, watch saturation fronts develop, and compare numerical results against analytical solutions.
+
+Researchers working on new recovery methods, relative permeability models, or solver algorithms will find value in BORES as a testbed. The codebase uses immutable data models, making it straightforward to run parameter sweeps or compare different configurations without worrying about accidental state mutation. The factory-function design keeps model construction explicit and auditable.
+
+Practicing engineers who want a quick scripting tool for screening studies or generating initial estimates may also find BORES useful, provided they validate results against trusted tools. BORES is not a replacement for commercial simulators like Eclipse, CMG, or tNavigator, but it serves well as a complementary learning and prototyping tool.
 
 ---
 
@@ -157,68 +155,28 @@ for state in run():
 
 <div class="grid cards" markdown>
 
-- :material-clock-fast:{ .lg .middle } **Quick Start**
+-   **Installation**
 
     ---
 
-    Get up and running in 5 minutes
+    Install BORES with `uv` or `pip` and verify your setup.
 
-    [:octicons-arrow-right-24: Quickstart Guide](getting-started/quickstart.md)
+    [:octicons-arrow-right-24: Installation](getting-started/installation.md)
 
-- :material-school:{ .lg .middle } **Tutorials**
-
-    ---
-
-    Step-by-step guides from beginner to advanced
-
-    [:octicons-arrow-right-24: Start Learning](tutorials/index.md)
-
-- :material-book-open-variant:{ .lg .middle } **User Guide**
+-   **Quickstart**
 
     ---
 
-    Comprehensive guide to all features
+    Build and run your first reservoir simulation in under 5 minutes.
 
-    [:octicons-arrow-right-24: Read the Guide](guides/index.md)
+    [:octicons-arrow-right-24: Quickstart](getting-started/quickstart.md)
 
-- :material-code-braces:{ .lg .middle } **Examples**
+-   **Core Concepts**
 
     ---
 
-    Complete working examples you can run
+    Understand the simulation pipeline, data model design, and conventions.
 
-    [:octicons-arrow-right-24: View Examples](examples/index.md)
+    [:octicons-arrow-right-24: Concepts](getting-started/concepts.md)
 
 </div>
-
----
-
-## Installation
-
-```bash
-# Using uv (recommended)
-uv add bores-framework
-
-# Using pip
-pip install bores-framework
-```
-
-[Full installation instructions →](getting-started/installation.md)
-
----
-
-## Community & Support
-
-- **Issues**: [GitHub Issues](https://github.com/ti-oluwa/bores/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ti-oluwa/bores/discussions)
-- **Source Code**: [GitHub Repository](https://github.com/ti-oluwa/bores)
-
----
-
-## License
-
-BORES is open source software licensed under the MIT License.
-
----
-
-**Ready to dive in?** Start with the [Quickstart Guide](getting-started/quickstart.md) or jump into [Tutorials](tutorials/index.md).

@@ -36,6 +36,7 @@ def update_pvt_grids(
     wells: Wells[ThreeDimensions],
     miscibility_model: MiscibilityModel,
     pvt_tables: typing.Optional[PVTTables] = None,
+    use_constant_saturation_pressure: bool = False,
 ) -> FluidProperties[ThreeDimensions]:
     """
     Updates PVT fluid properties grids using the current pressure and temperature values.

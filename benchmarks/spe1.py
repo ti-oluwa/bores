@@ -89,7 +89,7 @@ def setup_grid():
 
     # Oil compressibility (undersaturated)
     # Derived from Bo: (1.695-1.579)/(1.695 * 5000) ≈ 1.37e-5 1/psi
-    oil_compressibility_grid = bores.uniform_grid(grid_shape=grid_shape, value=1.37e-5)
+    # oil_compressibility_grid = bores.uniform_grid(grid_shape=grid_shape, value=1.37e-5)
 
     # -------------------------------------------------------------------------
     # Rock properties
@@ -156,13 +156,13 @@ def setup_grid():
     oil_viscosity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.51)  # cP
 
     # Oil specific gravity from Table 2 dead oil density at 14.7 psia: 46.244 lb/ft³ (assuming oil is incompressible at STP)
-    oil_specific_gravity = compute_oil_specific_gravity(
-        oil_density=46.244,
-        pressure=14.7,
-        temperature=200.0,
-        oil_compressibility=1.37e-5,
-    )
-    # oil_specific_gravity = 46.244 / bores.c.STANDARD_WATER_DENSITY_IMPERIAL
+    # oil_specific_gravity = compute_oil_specific_gravity(
+    #     oil_density=46.244,
+    #     pressure=14.7,
+    #     temperature=200.0,
+    #     oil_compressibility=1.37e-5,
+    # )
+    oil_specific_gravity = 46.244 / bores.c.STANDARD_WATER_DENSITY_IMPERIAL
     oil_specific_gravity_grid = bores.uniform_grid(
         grid_shape=grid_shape, value=oil_specific_gravity
     )
@@ -476,7 +476,7 @@ def setup_grid():
         gas_saturation_grid=gas_saturation_grid,
         oil_viscosity_grid=oil_viscosity_grid,
         oil_specific_gravity_grid=oil_specific_gravity_grid,
-        oil_compressibility_grid=oil_compressibility_grid,
+        # oil_compressibility_grid=oil_compressibility_grid,
         gas_gravity_grid=gas_gravity_grid,
         gas_viscosity_grid=gas_viscosity_grid,
         residual_oil_saturation_water_grid=residual_oil_saturation_water_grid,
@@ -586,7 +586,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     relative_permeability_table = bores.ThreePhaseRelPermTable(
         oil_water_table=oil_water_table,
         gas_oil_table=gas_oil_table,
-        mixing_rule=bores.eclipse_rule,
+        mixing_rule=bores.stone_I_rule,
     )
 
     # -------------------------------------------------------------------------
@@ -637,10 +637,14 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         well_name="OIL-PROD",
         perforating_intervals=[((9, 9, 2), (9, 9, 2))],
         radius=0.25,
-        control=bores.AdaptiveBHPRateControl(
-            target_rate=-20000.0,  # 20,000 STB/D production
-            bhp_limit=300.0,  # min BHP 300 psia
-            clamp=bores.ProductionClamp(),
+        control=bores.PrimaryPhaseRateControl(
+            primary_phase="oil",
+            primary_control=bores.ConstantRateControl(
+                target_rate=-20_000.0,  # 20,000 STB/D production
+                bhp_limit=100.0,  # min BHP 100 psia
+                clamp=bores.ProductionClamp(),
+            ),
+            secondary_clamp=bores.ProductionClamp(),
         ),
         produced_fluids=(
             bores.ProducedFluid(
@@ -672,8 +676,8 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     # Timer
     # -------------------------------------------------------------------------
     timer = bores.Timer(
-        initial_step_size=bores.Time(days=15.0),
-        max_step_size=bores.Time(days=15.0),
+        initial_step_size=bores.Time(days=5.0),
+        max_step_size=bores.Time(days=30.0),
         min_step_size=bores.Time(hours=1.0),
         simulation_time=bores.Time(years=10.0),
         max_cfl_number=0.9,
@@ -711,7 +715,6 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
 @app.cell
 def setup_store(Path, bores):
     store = bores.ZarrStore(store=Path("./benchmarks/runs/spe1/results/spe1.zarr"))
-
     return (store,)
 
 
@@ -739,9 +742,8 @@ def run_simulation(Path, bores, store):
 
 
     last_state = None
-    store.flush()
     with bores.StateStream(run, store=store, background_io=True) as stream:
-        for state in stream.until(condition=GOR_gte_20_000):
+        for state in stream:
             last_state = state
 
     if last_state is not None:
@@ -751,7 +753,7 @@ def run_simulation(Path, bores, store):
 
 @app.cell
 def load_states(stream):
-    states = list(stream.replay())
+    states = list(stream.replay(steps=lambda s: s == 0 or s % 4 == 0 or s == 1460))
     return (states,)
 
 
@@ -777,6 +779,9 @@ def setup_analysis(bores, np, states):
 
     water_cut_history = []
     gor_history = []
+    oil_rate_history = []
+    gas_rate_history = []
+    water_rate_history = []
 
     for s in states:
         time_step = s.step
@@ -801,18 +806,24 @@ def setup_analysis(bores, np, states):
         recovery_efficiency_history.append((time_step, result.recovery_efficiency))
 
     for time_step, result in production_rate_history:
+        oil_rate_history.append((time_step, result.oil_rate))
+        water_rate_history.append((time_step, result.water_rate))
+        gas_rate_history.append((time_step, result.gas_rate))
         water_cut_history.append((time_step, result.water_cut))
         gor_history.append((time_step, result.gas_oil_ratio))
     return (
         analyst,
         avg_pressure_history,
         displacement_efficiency_history,
+        gas_rate_history,
         gas_saturation_history,
         gor_history,
+        oil_rate_history,
         oil_saturation_history,
         recovery_efficiency_history,
         volumetric_sweep_efficiency_history,
         water_cut_history,
+        water_rate_history,
         water_saturation_history,
     )
 
@@ -857,6 +868,52 @@ def saturation_plots(
         height=460,
     )
     saturation_fig.show()
+    return
+
+
+@app.cell
+def _(bores, gas_rate_history, np, oil_rate_history, water_rate_history):
+    oil_rate_fig = bores.make_series_plot(
+        data={
+            "Oil Rate (STB/day)": np.array(oil_rate_history),
+        },
+        title="Oil Production Rate Analysis",
+        x_label="Time Step",
+        y_label="Oil Rate",
+        marker_sizes=6,
+        width=720,
+        height=460,
+    )
+    water_rate_fig = bores.make_series_plot(
+        data={
+            "Water Rate (STB/day)": np.array(water_rate_history),
+        },
+        title="Water Production Rate Analysis",
+        x_label="Time Step",
+        y_label="Water Rate",
+        marker_sizes=6,
+        width=720,
+        height=460,
+    )
+    gas_rate_fig = bores.make_series_plot(
+        data={
+            "Gas Rate (SCF/day)": np.array(gas_rate_history),
+        },
+        title="Gas Production Rate Analysis",
+        x_label="Time Step",
+        y_label="Gas Rate",
+        marker_sizes=6,
+        width=720,
+        height=460,
+    )
+
+    production_rate_plots = bores.merge_plots(
+        oil_rate_fig,
+        water_rate_fig,
+        gas_rate_fig,
+        title="Production Rate Analysis",
+    )
+    production_rate_plots.show()
     return
 
 

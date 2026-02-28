@@ -213,6 +213,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Compute the flow rate for the well using the configured control strategy.
@@ -227,6 +228,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
         :param pvt_tables: `PVTTables` object for fluid property lookups
+        :param kwargs: Additional control-specific context (e.g., primary phase properties for PrimaryPhaseRateControl).
         :return: The flow rate in (bbl/day or ft³/day).
         """
         return self.control.get_flow_rate(
@@ -241,6 +243,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
             use_pseudo_pressure=use_pseudo_pressure,
             fluid_compressibility=fluid_compressibility,
             pvt_tables=pvt_tables,
+            **kwargs,
         )
 
     def get_bottom_hole_pressure(
@@ -255,6 +258,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Compute the bottom-hole pressure for the well using the configured control strategy.
@@ -269,6 +273,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
         :param pvt_tables: `PVTTables` object for fluid property lookups
+        :param kwargs: Additional control-specific context (e.g., primary phase properties for PrimaryPhaseRateControl).
         :return: The bottom-hole pressure (psi).
         """
         return self.control.get_bottom_hole_pressure(
@@ -283,6 +288,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
             use_pseudo_pressure=use_pseudo_pressure,
             fluid_compressibility=fluid_compressibility,
             pvt_tables=pvt_tables,
+            **kwargs,
         )
 
     def shut_in(self) -> None:

@@ -1,469 +1,413 @@
-# Tutorial 5: Miscible Gas Flooding
+# Miscible Gas Flooding
 
-Learn how to implement CO2 miscible flooding for enhanced oil recovery (EOR).
-
----
-
-## What You'll Learn
-
-In this tutorial, you will learn how to:
-
-- Design a miscible CO2 flooding project by assessing reservoir suitability (estimating minimum miscibility pressure and checking if it's achievable at reservoir conditions)
-- Configure CO2 fluid properties correctly by overriding standard gas correlations with accurate density and viscosity values for CO2 at reservoir conditions
-- Set up high-pressure injection operations that maintain reservoir pressure above MMP to ensure miscible displacement
-- Monitor the physical effects of CO2 miscibility including oil swelling, viscosity reduction, and enhanced displacement efficiency
-- Achieve recovery factors exceeding 50% of original oil in place (OOIP) through miscible EOR, significantly higher than primary (15-25%) or waterflood (30-40%) recovery
-
----
-
-## Prerequisites
-
-Complete [Tutorial 4: Gas Injection](04-gas-injection.md) first.
+Model miscible displacement using the Todd-Longstaff method, configure CO2 injection with custom fluid properties, and analyze solvent mixing behavior.
 
 ---
 
 ## Overview
 
-**Miscible flooding** is the most effective EOR technique:
+In the [previous tutorial](04-gas-injection.md), you saw that immiscible gas injection suffers from gravity override and poor sweep efficiency. Miscible gas injection overcomes many of these limitations by creating conditions where the injected gas dissolves into and mixes with the reservoir oil at the molecular level. When miscibility is achieved, the interfacial tension between gas and oil vanishes, residual oil trapping is eliminated, and the displacement efficiency approaches 100% in the swept zone.
 
-- **Mechanism**: CO2 dissolves in oil, reducing viscosity and swelling volume
-- **MMP**: Pressure must exceed Minimum Miscibility Pressure
-- **Recovery**: 40-70% of OOIP (vs 20-30% for waterflooding)
-- **Cost**: Higher than waterflooding, but better economics for high-value oil
+This tutorial introduces the Todd-Longstaff miscible displacement model, which is the industry-standard approach for simulating miscible flooding in black-oil simulators. You will configure CO2 injection with custom density and viscosity properties, run a miscible flood, visualize solvent concentration evolution, and study the sensitivity of the mixing parameter (omega).
 
-**Key difference from immiscible**:
-
-| Parameter | Immiscible (CH4) | Miscible (CO2) |
-| --------- | ---------------- | -------------- |
-| Pressure | Below MMP | Above MMP |
-| Displacement | Poor | Excellent |
-| Oil Recovery | +10-20% | +20-40% |
-| Mixing | Limited | Extensive |
+Miscible flooding is one of the most effective enhanced oil recovery (EOR) techniques, particularly for CO2 injection in light to medium oil reservoirs. Understanding how to set up and interpret miscible simulations is essential for evaluating EOR potential.
 
 ---
 
-## Step 1: Check Reservoir Suitability
+## The Todd-Longstaff Model
 
-Not all reservoirs are suitable for miscible CO2:
+The Todd-Longstaff model is a practical engineering approach to miscible displacement that avoids the computational cost of full compositional simulation. It works by modifying the effective viscosity and density of the oil phase based on how much solvent has mixed into it. The model uses a single mixing parameter, $\omega$ (omega), that controls the degree of mixing between the injected solvent and the reservoir oil.
+
+The effective viscosity is computed as:
+
+$$\mu_{\text{eff}} = \mu_{\text{mix}}^{\omega} \cdot \mu_{\text{seg}}^{1-\omega}$$
+
+where $\mu_{\text{mix}}$ is the fully-mixed viscosity (computed from oil and solvent viscosities), $\mu_{\text{seg}}$ is the segregated (unmixed) viscosity, and $\omega$ ranges from 0 to 1. When $\omega = 1$, the fluids are perfectly mixed within each grid cell. When $\omega = 0$, the fluids are completely segregated and behave as two distinct phases despite being in the same grid cell.
+
+The density follows the same form:
+
+$$\rho_{\text{eff}} = \rho_{\text{mix}}^{\omega} \cdot \rho_{\text{seg}}^{1-\omega}$$
+
+In practice, $\omega$ typically ranges from 0.5 to 0.8 for most reservoir applications. A value of 2/3 (0.667) is the most common default. The choice of $\omega$ depends on grid resolution: coarse grids need lower $\omega$ values to account for unresolved sub-grid mixing, while fine grids can use higher values because more of the physical mixing is resolved by the grid itself.
+
+The model also accounts for pressure-dependent miscibility using the minimum miscibility pressure (MMP). Below the MMP, the displacement is immiscible. Above the MMP, full miscibility is achieved. BORES uses a smooth hyperbolic tangent transition between these regimes, controlled by the `miscibility_transition_width` parameter.
+
+---
+
+## Physical Setup
+
+We use the same 15x15x3 grid for consistency, but now inject CO2 with miscible properties:
+
+- **Grid**: 15x15x3 (675 cells)
+- **Initial pressure**: 3,000 psi (above MMP)
+- **CO2 injector**: Corner (0, 0)
+- **MMP**: 1,800 psi
+- **Todd-Longstaff omega**: 0.67
+- **CO2 density**: 35.0 lbm/ft3 (at reservoir conditions)
+- **CO2 viscosity**: 0.05 cP (at reservoir conditions)
+
+!!! info "Minimum Miscibility Pressure (MMP)"
+
+    The MMP is the lowest pressure at which the injected gas achieves miscibility with the reservoir oil. Below this pressure, a gas-oil interface exists and trapping occurs. Above it, the fluids become fully miscible and can mix in all proportions. The MMP depends on oil composition, gas composition, and temperature. For CO2 injection:
+
+    - **Light oils (35-45 API)**: MMP = 1,200 - 2,500 psi
+    - **Medium oils (25-35 API)**: MMP = 2,000 - 3,500 psi
+    - **Heavy oils (< 25 API)**: MMP > 3,500 psi (often impractical)
+
+---
+
+## Step 1 - Build the Reservoir Model
 
 ```python
 import bores
-from pathlib import Path
+import numpy as np
 
-# Load depleted model
-run = bores.Run.from_files(
-    model_path=Path("./primary_depletion/model.h5"),
-    config_path=Path("./primary_depletion/config.yaml"),
+bores.use_32bit_precision()
+
+grid_shape = (15, 15, 3)
+cell_dimension = (80.0, 80.0)
+
+thickness = bores.build_uniform_grid(grid_shape, value=20.0)
+pressure = bores.build_uniform_grid(grid_shape, value=3000.0)
+porosity = bores.build_uniform_grid(grid_shape, value=0.20)
+temperature = bores.build_uniform_grid(grid_shape, value=180.0)
+oil_viscosity = bores.build_uniform_grid(grid_shape, value=2.0)
+bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)
+oil_sg = bores.build_uniform_grid(grid_shape, value=0.87)
+
+So = bores.build_uniform_grid(grid_shape, value=0.75)
+Sw = bores.build_uniform_grid(grid_shape, value=0.25)
+Sg = bores.build_uniform_grid(grid_shape, value=0.00)
+
+Sorw = bores.build_uniform_grid(grid_shape, value=0.22)
+Sorg = bores.build_uniform_grid(grid_shape, value=0.15)
+Sgr  = bores.build_uniform_grid(grid_shape, value=0.05)
+Swir = bores.build_uniform_grid(grid_shape, value=0.22)
+Swc  = bores.build_uniform_grid(grid_shape, value=0.22)
+
+perm_grid = bores.build_uniform_grid(grid_shape, value=150.0)
+permeability = bores.RockPermeability(x=perm_grid)
+
+model = bores.reservoir_model(
+    grid_shape=grid_shape,
+    cell_dimension=cell_dimension,
+    thickness_grid=thickness,
+    pressure_grid=pressure,
+    rock_compressibility=3e-6,
+    absolute_permeability=permeability,
+    porosity_grid=porosity,
+    temperature_grid=temperature,
+    water_saturation_grid=Sw,
+    gas_saturation_grid=Sg,
+    oil_saturation_grid=So,
+    oil_viscosity_grid=oil_viscosity,
+    oil_specific_gravity_grid=oil_sg,
+    oil_bubble_point_pressure_grid=bubble_point,
+    residual_oil_saturation_water_grid=Sorw,
+    residual_oil_saturation_gas_grid=Sorg,
+    residual_gas_saturation_grid=Sgr,
+    irreducible_water_saturation_grid=Swir,
+    connate_water_saturation_grid=Swc,
+    reservoir_gas="co2",
 )
-
-# Check conditions
-avg_pressure = run.config.model.fluid_properties.pressure_grid.mean()
-avg_depth = run.config.model.depth.mean() if run.config.model.depth is not None else 5000
-temperature = run.config.model.temperature
-
-print("Reservoir Conditions:")
-print(f"  Current pressure: {avg_pressure:.1f} psi")
-print(f"  Depth: {avg_depth:.1f} ft")
-print(f"  Temperature: {temperature:.1f} °F")
-
-# Estimate MMP (correlation for light-medium oil)
-# MMP increases with temperature, decreases with light ends
-oil_api = 35.0  # Assume medium oil
-mmp_estimate = 1200 + 20 * (temperature - 100)  # Simplified correlation
-print(f"\nEstimated MMP: {mmp_estimate:.0f} psi")
-
-# Check feasibility
-if mmp_estimate < 3000:
-    print("GOOD: Reservoir is a good candidate for CO2 miscible flooding")
-    target_pressure = mmp_estimate * 1.2  # 20% above MMP
-    print(f"   Target injection pressure: {target_pressure:.0f} psi")
-else:
-    print("WARNING: MMP may be too high - consider enriched gas or thermal EOR")
 ```
 
-!!! info "MMP Correlations"
-    Actual MMP should be determined by:
-
-    - Slim-tube experiments
-    - PVT cell tests
-    - Commercial correlations (Alston, Yellig-Metcalfe)
-
-    Rule of thumb: MMP = 1000-1500 psi for light oil, 2000-3000 psi for medium oil
+The only difference in the model construction is `reservoir_gas="co2"`, which tells the PVT correlation engine that the gas phase properties should be computed for CO2 rather than methane. This affects gas viscosity, density, compressibility factor, and other derived properties.
 
 ---
 
-## Step 2: Configure CO2 Properties
-
-**Critical**: CO2 properties deviate from standard correlations:
+## Step 2 - Configure the CO2 Injection Well
 
 ```python
-# Standard correlation (WRONG for CO2!)
-# Would give density ~3-7 lbm/ft³
-# Actual CO2 density at reservoir conditions: ~35 lbm/ft³
+co2_injector = bores.injection_well(
+    well_name="CO2-INJ-1",
+    perforating_intervals=[((0, 0, 0), (0, 0, 2))],
+    radius=0.25,
+    control=bores.ConstantRateControl(target_rate=500.0),
+    injected_fluid=bores.InjectedFluid(
+        name="CO2",
+        phase=bores.FluidPhase.GAS,
+        specific_gravity=1.52,
+        molecular_weight=44.01,
+        is_miscible=True,
+        minimum_miscibility_pressure=1800.0,
+        todd_longstaff_omega=0.67,
+        density=35.0,       # lbm/ft3 at reservoir conditions
+        viscosity=0.05,     # cP at reservoir conditions
+    ),
+)
+```
 
-# Correct CO2 properties
-co2_density = 35.0  # lbm/ft³ at 2500 psi, 180°F (from tables or EOS)
-co2_viscosity = 0.05  # cP at reservoir conditions
-co2_sg = 1.52  # Specific gravity (relative to air)
-co2_mw = 44.01  # Molecular weight
+This is the most important part of the tutorial. The `InjectedFluid` has several new parameters compared to the immiscible gas injection:
 
-print("CO2 Properties (at reservoir conditions):")
-print(f"  Density: {co2_density} lbm/ft³")
-print(f"  Viscosity: {co2_viscosity} cP")
-print(f"  Specific gravity: {co2_sg} (air=1)")
+**`is_miscible=True`** activates the Todd-Longstaff miscible displacement model. Without this flag, the gas and oil phases remain separate regardless of pressure.
+
+**`minimum_miscibility_pressure=1800.0`** sets the MMP in psi. Since our reservoir pressure is 3,000 psi, which is well above the MMP, the displacement will be fully miscible from the start. If reservoir pressure drops below the MMP during the simulation, the model automatically transitions to immiscible behavior.
+
+**`todd_longstaff_omega=0.67`** is the mixing parameter. The value of 2/3 is the most commonly used default in the industry. We will explore the sensitivity to this parameter later in the tutorial.
+
+**`density=35.0` and `viscosity=0.05`** override the correlation-based property calculations. This is important for CO2 because standard gas correlations (designed for hydrocarbon gases) significantly underestimate CO2 density and may give inaccurate viscosity values. At reservoir conditions (3,000 psi, 180 F), supercritical CO2 has a density around 35 lbm/ft3 and a viscosity around 0.05 cP. These values should ideally come from laboratory measurements or an equation of state model.
+
+!!! danger "CO2 Properties Require Overrides"
+
+    Standard gas PVT correlations in BORES (and most black-oil simulators) are calibrated for hydrocarbon gases and can give errors of 25% or more for CO2 density. Always provide explicit `density` and `viscosity` values for CO2 injection based on lab data, NIST tables, or an equation of state calculation. The overrides are backward compatible - if you omit them, BORES falls back to correlations.
+
+---
+
+## Step 3 - Define the Producer and Configure
+
+```python
+producer = bores.production_well(
+    well_name="PROD-1",
+    perforating_intervals=[((14, 14, 0), (14, 14, 2))],
+    radius=0.25,
+    control=bores.PrimaryPhaseRateControl(
+        primary_phase=bores.FluidPhase.OIL,
+        primary_control=bores.AdaptiveBHPRateControl(
+            target_rate=-400.0,
+            target_phase="oil",
+            bhp_limit=800.0,
+        ),
+        secondary_clamp=bores.ProductionClamp(),
+    ),
+    produced_fluids=[
+        bores.ProducedFluid(
+            name="Oil", phase=bores.FluidPhase.OIL,
+            specific_gravity=0.87, molecular_weight=200.0,
+        ),
+        bores.ProducedFluid(
+            name="Water", phase=bores.FluidPhase.WATER,
+            specific_gravity=1.0, molecular_weight=18.015,
+        ),
+        bores.ProducedFluid(
+            name="CO2", phase=bores.FluidPhase.GAS,
+            specific_gravity=1.52, molecular_weight=44.01,
+        ),
+    ],
+)
+
+wells = bores.wells_(injectors=[co2_injector], producers=[producer])
+
+rock_fluid = bores.RockFluidTables(
+    relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+        water_exponent=2.5,
+        oil_exponent=2.0,
+        gas_exponent=2.0,
+    ),
+    capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(),
+)
+
+config = bores.Config(
+    timer=bores.Timer(
+        initial_step_size=bores.Time(days=0.5),
+        max_step_size=bores.Time(days=5),
+        min_step_size=bores.Time(hours=0.5),
+        simulation_time=bores.Time(days=1095),
+    ),
+    rock_fluid_tables=rock_fluid,
+    wells=wells,
+    scheme="impes",
+    miscibility_model="todd_longstaff",
+)
+```
+
+The critical configuration change is `miscibility_model="todd_longstaff"` in the `Config`. This tells the simulator to use the Todd-Longstaff miscible model during saturation updates. Without this setting, the simulator would treat all gas injection as immiscible regardless of the `InjectedFluid` settings.
+
+The timer settings are the same as the immiscible gas injection tutorial because miscible fronts can be equally sharp.
+
+---
+
+## Step 4 - Run the Simulation
+
+```python
+states = list(bores.run(model, config))
+final = states[-1]
+print(f"Completed {final.step} steps in {final.time_in_days:.1f} days")
+print(f"Final avg pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi")
+print(f"Final avg oil saturation: {final.model.fluid_properties.oil_saturation_grid.mean():.4f}")
 ```
 
 ---
 
-## Step 3: Create High-Pressure CO2 Injectors
+## Step 5 - Visualize Solvent Concentration
+
+One of the unique outputs of a miscible simulation is the solvent concentration field. This tracks how much CO2 has mixed into the oil phase in each cell, ranging from 0 (pure oil) to 1 (pure solvent).
 
 ```python
-# Grid dimensions
-nx, ny, nz = run.config.model.grid_shape
+viz = bores.plotly3d.DataVisualizer()
 
-# Injector locations (updip, corners for 4-spot)
-injector_locations = [
-    (3, 3),
-    (3, nx-4),
-    (nx-4, 3),
-    (nx-4, nx-4),
-]
+# Visualize solvent concentration at midpoint and end
+for state in [states[len(states) // 2], states[-1]]:
+    fig = viz.make_plot(
+        source=state,
+        property="solvent-concentration",
+        plot_type="volume",
+        title=f"Solvent Concentration at Day {state.time_in_days:.0f}",
+    )
+    fig.show()
+```
 
-# High-rate injection control
-injection_clamp = bores.InjectionClamp()
-control = bores.AdaptiveBHPRateControl(
-    target_rate=1_000_000,  # SCF/day (high rate for miscible)
-    target_phase="gas",
-    bhp_limit=3500,  # psi (well above MMP)
-    clamp=injection_clamp,
+The solvent concentration visualization shows the mixing zone between the pure CO2 bank and the undisplaced oil. In a miscible flood, this transition zone is smoother than the sharp front you see in immiscible displacement. The concentration field reveals how effectively the CO2 is contacting and mixing with the oil.
+
+### Concentration Profile Over Time
+
+```python
+time_days = np.array([s.time_in_days for s in states])
+avg_concentration = np.array([
+    s.model.fluid_properties.solvent_concentration_grid.mean() for s in states
+])
+
+fig = bores.make_series_plot(
+    data=np.column_stack([time_days, avg_concentration]),
+    title="Average Solvent Concentration Over Time",
+    x_label="Time (days)",
+    y_label="Solvent Concentration (fraction)",
 )
+fig.show()
+```
 
-# Create CO2 injectors
-injectors = []
-for idx, (i, j) in enumerate(injector_locations, start=1):
-    injector = bores.injection_well(
-        well_name=f"CO2-{idx}",
-        perforating_intervals=[((i, j, 1), (i, j, 3))],  # Top layers
-        radius=0.3542,
-        control=control,
+The average solvent concentration increases over time as more CO2 enters the reservoir and mixes with the oil. The rate of increase depends on the injection rate relative to the pore volume and the mixing efficiency (controlled by omega).
+
+---
+
+## Step 6 - Compare Miscible vs Immiscible Recovery
+
+```python
+avg_So = np.array([
+    s.model.fluid_properties.oil_saturation_grid.mean() for s in states
+])
+
+initial_So = 0.75
+recovery_factor = (initial_So - avg_So) / initial_So
+
+fig = bores.make_series_plot(
+    data=np.column_stack([time_days, recovery_factor]),
+    title="Oil Recovery Factor (Miscible CO2 Flood)",
+    x_label="Time (days)",
+    y_label="Recovery Factor (fraction of OOIP)",
+)
+fig.show()
+```
+
+Compare this recovery curve with the immiscible gas flood from [Tutorial 4](04-gas-injection.md). The miscible flood should show significantly higher ultimate recovery because:
+
+1. **Zero residual oil in swept zones** - Miscibility eliminates capillary trapping, so oil saturation can drop to zero in cells fully contacted by CO2 (instead of being limited to Sorg = 0.15 in the immiscible case).
+
+2. **Better sweep efficiency** - The mixing of CO2 with oil reduces the viscosity contrast, improving the mobility ratio and reducing viscous fingering.
+
+3. **Density modification** - As CO2 dissolves into oil, it changes the oil density, which can reduce gravity segregation effects.
+
+---
+
+## Step 7 - Omega Sensitivity Analysis
+
+The mixing parameter $\omega$ has a significant effect on miscible flood performance. Here is how you would set up a sensitivity study by running multiple simulations with different omega values:
+
+```python
+# This is a conceptual example showing how to run a sensitivity study
+omega_values = [0.33, 0.50, 0.67, 0.80, 1.00]
+results = {}
+
+for omega in omega_values:
+    # Create a new injector with different omega
+    inj = bores.injection_well(
+        well_name="CO2-INJ-1",
+        perforating_intervals=[((0, 0, 0), (0, 0, 2))],
+        radius=0.25,
+        control=bores.ConstantRateControl(target_rate=500.0),
         injected_fluid=bores.InjectedFluid(
             name="CO2",
             phase=bores.FluidPhase.GAS,
-            specific_gravity=co2_sg,
-            molecular_weight=co2_mw,
-            density=co2_density,  # CRITICAL: Override correlation
-            viscosity=co2_viscosity,  # CRITICAL: Override correlation
-            minimum_miscibility_pressure=mmp_estimate,
-            todd_longstaff_omega=0.67,  # Moderate mixing for CO2
+            specific_gravity=1.52,
+            molecular_weight=44.01,
             is_miscible=True,
-            concentration=1.0,  # 100% CO2
+            minimum_miscibility_pressure=1800.0,
+            todd_longstaff_omega=omega,
+            density=35.0,
+            viscosity=0.05,
         ),
-        is_active=True,
-        skin_factor=1.0,
     )
-    injectors.append(injector)
 
-print(f"Created {len(injectors)} CO2 injection wells")
-```
+    # Update wells and config
+    wells_omega = bores.wells_(injectors=[inj], producers=[producer])
+    config_omega = config.with_updates(wells=wells_omega)
 
-!!! warning "Property Overrides"
-    **Always specify `density` and `viscosity` for CO2!**
+    # Run simulation
+    states_omega = list(bores.run(model, config_omega))
 
-    Without overrides:
-    - Correlation density: ~5 lbm/ft³ (WRONG)
-    - Actual density: ~35 lbm/ft³ (CORRECT)
-    - Error: ~600% (UNACCEPTABLE)
+    # Store recovery factor
+    time_d = np.array([s.time_in_days for s in states_omega])
+    avg_so = np.array([
+        s.model.fluid_properties.oil_saturation_grid.mean() for s in states_omega
+    ])
+    rf = (initial_So - avg_so) / initial_So
+    results[f"omega = {omega:.2f}"] = np.column_stack([time_d, rf])
 
----
-
-## Step 4: Update Producer for High GOR
-
-```python
-# Central producer
-producer_loc = (nx//2, ny//2)
-
-production_clamp = bores.ProductionClamp()
-control = bores.MultiPhaseRateControl(
-    oil_control=bores.AdaptiveBHPRateControl(
-        target_rate=-200,  # STB/day
-        target_phase="oil",
-        bhp_limit=1500,  # Higher BHP for miscible (prevent gas breakout)
-        clamp=production_clamp,
-    ),
-    gas_control=bores.AdaptiveBHPRateControl(
-        target_rate=-1000,  # MCF/day (very high for CO2 breakthrough)
-        target_phase="gas",
-        bhp_limit=1500,
-        clamp=production_clamp,
-    ),
-    water_control=bores.AdaptiveBHPRateControl(
-        target_rate=-30,  # STB/day
-        target_phase="water",
-        bhp_limit=1500,
-        clamp=production_clamp,
-    ),
+# Plot all recovery curves together
+fig = bores.make_series_plot(
+    data=results,
+    title="Recovery Factor Sensitivity to Todd-Longstaff Omega",
+    x_label="Time (days)",
+    y_label="Recovery Factor (fraction of OOIP)",
 )
-
-producer = bores.production_well(
-    well_name="P-1",
-    perforating_intervals=[((producer_loc[0], producer_loc[1], 2),
-                            (producer_loc[0], producer_loc[1], 5))],
-    radius=0.3542,
-    control=control,
-    produced_fluids=(
-        bores.ProducedFluid(name="Oil", phase=bores.FluidPhase.OIL,
-                           specific_gravity=0.85, molecular_weight=180.0),
-        bores.ProducedFluid(name="Gas", phase=bores.FluidPhase.GAS,
-                           specific_gravity=1.52, molecular_weight=44.01),  # CO2 properties
-        bores.ProducedFluid(name="Water", phase=bores.FluidPhase.WATER,
-                           specific_gravity=1.05, molecular_weight=18.015),
-    ),
-    skin_factor=2.5,
-)
-
-wells = bores.wells_(injectors=injectors, producers=[producer])
+fig.show()
 ```
+
+You should observe the following trends:
+
+- **$\omega$ = 0.33** (low mixing): Behaves closer to immiscible displacement. Poor mixing, lower recovery.
+- **$\omega$ = 0.67** (default): Moderate mixing. Represents typical field-scale behavior.
+- **$\omega$ = 1.00** (perfect mixing): Each grid cell is perfectly mixed. Highest recovery but may be optimistic for coarse grids.
+
+!!! tip "Choosing Omega"
+
+    The appropriate $\omega$ value depends on your grid resolution:
+
+    - **Coarse grids (> 100 ft cells)**: Use $\omega$ = 0.5 - 0.67 to compensate for unresolved mixing
+    - **Medium grids (30 - 100 ft cells)**: Use $\omega$ = 0.67 - 0.8
+    - **Fine grids (< 30 ft cells)**: Use $\omega$ = 0.8 - 1.0 since the grid resolves more mixing
+    - **When in doubt**: Start with $\omega$ = 2/3 (0.667)
 
 ---
 
-## Step 5: Configure Simulation
+## When to Use Miscible Flooding
 
-```python
-# Timer for 2-year miscible flood
-timer = bores.Timer(
-    initial_step_size=bores.Time(hours=24.0),
-    max_step_size=bores.Time(days=7.0),
-    min_step_size=bores.Time(hours=12.0),
-    simulation_time=bores.Time(days=2 * bores.c.DAYS_PER_YEAR),
-    max_cfl_number=0.9,
-)
+Miscible gas flooding is most appropriate when:
 
-# Enable Todd-Longstaff
-run.config = run.config.with_updates(
-    wells=wells,
-    timer=timer,
-    miscibility_model="todd_longstaff",
-)
+**Reservoir pressure exceeds the MMP.** If the reservoir pressure is below the MMP, you cannot achieve miscibility without first re-pressurizing the reservoir (typically through waterflooding). This is why miscible floods are often implemented as tertiary recovery after a waterflood.
 
-# Save
-setup_dir = Path("./tutorial_05_co2_flood")
-setup_dir.mkdir(exist_ok=True)
-run.to_file(setup_dir / "run.h5")
-```
+**The oil is light to medium gravity.** Heavier oils have higher MMPs, making miscibility harder to achieve. For oils below 25 API, the required MMP may exceed the fracture pressure of the formation.
+
+**CO2 or enriched gas is available.** CO2 is the most common miscible injectant because it achieves miscibility at lower pressures than lean natural gas. Enriched gas (natural gas with added intermediate hydrocarbons) is an alternative when CO2 is not available.
+
+**The reservoir has reasonable continuity.** Miscible floods are most effective in continuous, well-connected reservoirs where the solvent can contact a large fraction of the oil volume. Highly fractured or compartmentalized reservoirs may not benefit from miscible injection.
 
 ---
 
-## Step 6: Execute Simulation
+## Key Takeaways
 
-```python
-store = bores.ZarrStore(setup_dir / "results.zarr")
-stream = bores.StateStream(
-    run(),
-    store=store,
-    batch_size=20,
-    background_io=True,
-)
+1. **The Todd-Longstaff model** simulates miscible displacement by modifying effective oil viscosity and density based on solvent concentration and the mixing parameter $\omega$.
 
-print("Starting CO2 miscible flooding...")
-with stream:
-    for state in stream:
-        if state.step % 50 == 0:
-            time_days = state.time / 86400
-            avg_p = state.model.fluid_properties.pressure_grid.mean()
-            print(f"Day {time_days:4.0f}: P = {avg_p:.1f} psi")
+2. **`InjectedFluid` with `is_miscible=True`** enables miscible behavior. You must also provide `minimum_miscibility_pressure` and `todd_longstaff_omega`.
 
-print("Simulation complete!")
-```
+3. **CO2 properties require explicit overrides** (`density` and `viscosity` parameters) because standard gas correlations are inaccurate for CO2 at reservoir conditions.
+
+4. **`miscibility_model="todd_longstaff"`** must be set in the `Config` to activate miscible simulation during the solver loop.
+
+5. **The mixing parameter $\omega$** controls the degree of sub-grid mixing. Use 0.67 as a default and adjust based on grid resolution and calibration data.
+
+6. **Miscible flooding eliminates residual oil trapping**, achieving near-100% displacement efficiency in swept zones, which can dramatically increase recovery compared to immiscible injection.
 
 ---
 
-## Step 7: Analyze Results
+## What You Have Learned
 
-### Recovery Factor
+Across these five tutorials, you have progressed from a simple depletion study to an advanced miscible flooding simulation:
 
-```python
-import matplotlib.pyplot as plt
+1. **[Your First Simulation](01-first-simulation.md)** - The complete BORES workflow, primary depletion drive
+2. **[Building Reservoir Models](02-building-models.md)** - Heterogeneity, anisotropy, structural dip
+3. **[Waterflood Simulation](03-waterflood.md)** - Secondary recovery with water injection
+4. **[Gas Injection](04-gas-injection.md)** - Immiscible gas displacement, gravity override
+5. **Miscible Gas Flooding** (this tutorial) - Todd-Longstaff miscible displacement with CO2
 
-states = list(store.load(bores.ModelState))
-analyst = bores.ModelAnalyst(states, initial_stoiip=1_500_000)  # From primary run
-
-# Final recovery
-print(f"\nRecovery Factors:")
-print(f"  Total Oil RF: {analyst.oil_recovery_factor:.2%}")
-print(f"  Cumulative oil: {analyst.cumulative_oil_produced:,.0f} STB")
-
-# Compare to primary/waterflood
-primary_rf = 0.20  # Assume 20% from primary
-waterflood_rf = 0.40  # Assume 40% from waterflood
-incremental_co2 = analyst.oil_recovery_factor - waterflood_rf
-
-print(f"\nIncremental Recovery:")
-print(f"  Over primary: +{(analyst.oil_recovery_factor - primary_rf)*100:.1f}%")
-print(f"  Over waterflood: +{incremental_co2*100:.1f}%")
-```
-
-### Sweep Efficiency
-
-```python
-sweep = analyst.sweep_efficiency_analysis(step=-1, displacing_phase="gas")
-print(f"\nSweep Efficiency:")
-print(f"  Volumetric: {sweep.volumetric_sweep_efficiency:.2%}")
-print(f"  Displacement: {sweep.displacement_efficiency:.2%}")
-print(f"  Recovery efficiency: {sweep.recovery_efficiency:.2%}")
-
-# Miscible flooding should have high displacement efficiency (>80%)
-if sweep.displacement_efficiency > 0.8:
-    print("  EXCELLENT: High displacement efficiency indicates miscible displacement")
-else:
-    print("  WARNING: Low displacement efficiency - verify pressure maintained above MMP")
-```
-
-### CO2 Utilization
-
-```python
-co2_injected = analyst.gas_injected(0, -1) / 1e6  # MMSCF
-incremental_oil = (analyst.oil_recovery_factor - waterflood_rf) * 1_500_000  # STB
-
-co2_utilization = co2_injected / incremental_oil if incremental_oil > 0 else float('inf')
-
-print(f"\nCO2 Utilization:")
-print(f"  CO2 injected: {co2_injected:.1f} MMSCF")
-print(f"  Incremental oil: {incremental_oil:,.0f} STB")
-print(f"  CO2/oil ratio: {co2_utilization:.2f} MSCF/STB")
-
-# Typical: 4-10 MSCF/STB for miscible flooding
-if co2_utilization < 10:
-    print("  GOOD: Efficient CO2 utilization within typical range")
-else:
-    print("  WARNING: High CO2 usage - check for channeling or poor sweep")
-```
-
-### Pressure Maintenance
-
-```python
-times = []
-pressures = []
-
-for step in range(0, analyst.max_step, 10):
-    state = analyst.get_state(step)
-    times.append(state.time / 86400)
-    pressures.append(state.model.fluid_properties.pressure_grid.mean())
-
-plt.figure(figsize=(10, 6))
-plt.plot(times, pressures, 'b-', linewidth=2, label='Reservoir Pressure')
-plt.axhline(y=mmp_estimate, color='r', linestyle='--', linewidth=2,
-            label=f'MMP ({mmp_estimate:.0f} psi)')
-plt.axhline(y=target_pressure, color='g', linestyle=':', linewidth=2,
-            label=f'Target ({target_pressure:.0f} psi)')
-plt.xlabel('Time (days)')
-plt.ylabel('Pressure (psi)')
-plt.title('Pressure History - CO2 Miscible Flooding')
-plt.legend()
-plt.grid(True, alpha=0.3)
-plt.show()
-
-# Check if pressure maintained above MMP
-avg_pressure_final = pressures[-1]
-if avg_pressure_final > mmp_estimate:
-    print(f"GOOD: Pressure maintained above MMP ({avg_pressure_final:.0f} > {mmp_estimate:.0f} psi)")
-else:
-    print(f"WARNING: Pressure below MMP ({avg_pressure_final:.0f} < {mmp_estimate:.0f} psi) - not fully miscible!")
-```
-
----
-
-## Optimization Tips
-
-### 1. Maximize Miscibility
-
-Ensure pressure > MMP throughout flood:
-
-```python
-# Increase injection BHP limit
-bhp_limit=4000  # Higher pressure
-
-# Or increase injection rate
-target_rate=1_500_000  # SCF/day
-```
-
-### 2. Control CO2 Cycling
-
-High CO2 recycling reduces economics:
-
-```python
-# Use WAG (Water-Alternating-Gas)
-# Or reduce injection rate after breakthrough
-# Or drill infill producers
-```
-
-### 3. Improve Vertical Sweep
-
-CO2 overrides due to low density:
-
-```python
-# Use horizontal wells
-# Inject in lower layers
-# Add conformance control
-```
-
----
-
-## Economic Analysis
-
-```python
-# Simplified economics
-oil_price = 70.0  # $/bbl
-co2_cost = 25.0  # $/MSCF
-opex = 15.0  # $/bbl oil
-
-# Revenue
-oil_revenue = incremental_oil * oil_price
-
-# Costs
-co2_cost_total = co2_injected * 1000 * co2_cost / 1e6  # Convert MMSCF to $
-opex_total = incremental_oil * opex
-
-# Profit
-profit = oil_revenue - co2_cost_total - opex_total
-
-print(f"\nSimplified Economics:")
-print(f"  Oil revenue: ${oil_revenue/1e6:.1f} MM")
-print(f"  CO2 cost: ${co2_cost_total/1e6:.1f} MM")
-print(f"  OPEX: ${opex_total/1e6:.1f} MM")
-print(f"  Profit: ${profit/1e6:.1f} MM")
-print(f"  NPV per barrel: ${profit/incremental_oil:.2f}/bbl")
-```
-
----
-
-## What You Learned
-
-In this tutorial, you successfully:
-
-- Designed a complete CO2 miscible flooding project including reservoir suitability assessment and well pattern design
-- Correctly configured CO2 fluid properties with density and viscosity overrides (critical for accurate simulation since CO2 deviates significantly from standard gas correlations)
-- Set up high-pressure injection operations to maintain reservoir pressure above minimum miscibility pressure (MMP) throughout the flood
-- Monitored pressure maintenance and verified miscibility conditions by tracking average reservoir pressure relative to MMP
-- Analyzed sweep efficiency metrics and CO2 utilization factor to assess displacement effectiveness and project economics
-- Calculated simplified economic metrics including revenue, costs, and net present value per incremental barrel recovered
-
----
-
-## Congratulations!
-
-You have successfully completed all 5 BORES tutorials and learned:
-
-1. Basic simulation setup (1D primary depletion)
-2. Building 3D heterogeneous reservoir models with layered properties and structural dip
-3. Waterflooding operations with injection/production balance and sweep analysis
-4. Immiscible gas injection for pressure maintenance
-5. Miscible CO2 enhanced oil recovery (EOR) with Todd-Longstaff model
-
----
-
-## Next Steps
-
-- **[User Guides](../guides/index.md)** - Deep dive into each module
-- **[Examples](../examples/index.md)** - Complete production scenarios
-- **[Best Practices](../best-practices/index.md)** - Optimization techniques
-- **[API Reference](../reference/api.md)** - Detailed API documentation
+You now have the foundational skills to set up, run, and analyze a wide range of reservoir simulation studies with BORES. For deeper exploration of specific topics, consult the [User Guide](../user-guide/) for detailed coverage of wells, boundary conditions, PVT models, and solver configuration, or the [API Reference](../api-reference/) for complete documentation of every class and function.

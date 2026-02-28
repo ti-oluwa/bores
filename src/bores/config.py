@@ -224,6 +224,7 @@ class Config(
 
     Note: Larger changes can cause density/viscosity jumps and well control issues.
     """
+    use_constant_saturation_pressure: bool = False
 
     _lock: threading.Lock = attrs.field(
         factory=threading.Lock, init=False, repr=False, hash=False

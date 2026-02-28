@@ -997,7 +997,8 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     """
     if pressure <= 0 or temperature <= 0 or gas_gravity <= 0:
         raise ValidationError(
-            "Pressure, temperature, and gas gravity must be positive."
+            f"Pressure, temperature, and gas gravity must be positive.\n"
+            f"Pressure={float(pressure)}psi, Temperature={float(temperature)}°F, Gas gravity={float(gas_gravity)}"
         )
 
     # Get pseudocritical properties

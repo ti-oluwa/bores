@@ -3,8 +3,8 @@
   _meta: {}
   data:
     timer:
-      initial_step_size: 1296000.0
-      max_step_size: 1296000.0
+      initial_step_size: 432000.0
+      max_step_size: 2592000.0
       min_step_size: 3600.0
       simulation_time: 315576000.0
       max_cfl_number: 0.9
@@ -18,9 +18,9 @@
       use_constant_step_size: false
       elapsed_time: 0.0
       step: 0
-      step_size: 1296000.0
-      next_step_size: 1296000.0
-      ema_step_size: 1296000.0
+      step_size: 432000.0
+      next_step_size: 432000.0
+      ema_step_size: 432000.0
       last_step_failed: false
       rejection_count: 0
       steps_since_last_failure: 0
@@ -116,7 +116,7 @@
               - 0.0
               - 0.0
               - 0.0
-          mixing_rule: eclipse_rule
+          mixing_rule: stone_I_rule
       capillary_pressure_table:
         brooks_corey_capillary_pressure_model:
           irreducible_water_saturation: 0.12
@@ -181,11 +181,17 @@
                 - 2
             radius: 0.25
             control:
-              adaptive_bhp_rate_control:
-                target_rate: -20000.0
-                bhp_limit: 300.0
-                target_phase: null
-                clamp:
+              primary_phase_rate_control:
+                primary_phase: oil
+                primary_control:
+                  constant_rate_control:
+                    target_rate: -20000.0
+                    bhp_limit: 100.0
+                    target_phase: null
+                    clamp:
+                      production_clamp:
+                        value: 0.0
+                secondary_clamp:
                   production_clamp:
                     value: 0.0
             skin_factor: 0.0
@@ -194,9 +200,7 @@
             produced_fluids:
             - name: Oil
               phase: oil
-              specific_gravity: !np_scalar
-                dtype: float64
-                value: 0.6875555040579514
+              specific_gravity: 0.7414462081128748
               molecular_weight: 180.0
             - name: Gas
               phase: gas

@@ -1,3 +1,4 @@
+import logging
 import typing
 import warnings
 
@@ -25,6 +26,7 @@ from bores.grids.pvt import (
     build_live_oil_density_grid,
     build_oil_api_gravity_grid,
     build_oil_bubble_point_pressure_grid,
+    build_oil_compressibility_grid,
     build_oil_formation_volume_factor_grid,
     build_solution_gas_to_oil_ratio_grid,
     build_water_bubble_point_pressure_grid,
@@ -50,6 +52,8 @@ from bores.wells import (
     WellControl,
     Wells,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["injection_well", "production_well", "reservoir_model", "wells_"]
 
@@ -168,7 +172,6 @@ def reservoir_model(
     gas_saturation_grid: NDimensionalGrid[NDimension],
     oil_saturation_grid: NDimensionalGrid[NDimension],
     oil_viscosity_grid: NDimensionalGrid[NDimension],
-    oil_compressibility_grid: NDimensionalGrid[NDimension],
     oil_bubble_point_pressure_grid: NDimensionalGrid[NDimension],
     residual_oil_saturation_water_grid: NDimensionalGrid[NDimension],
     residual_oil_saturation_gas_grid: NDimensionalGrid[NDimension],
@@ -176,6 +179,7 @@ def reservoir_model(
     irreducible_water_saturation_grid: NDimensionalGrid[NDimension],
     connate_water_saturation_grid: NDimensionalGrid[NDimension],
     oil_specific_gravity_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
+    oil_compressibility_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
     gas_gravity_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
     gas_viscosity_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
     gas_compressibility_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
@@ -238,7 +242,11 @@ def reservoir_model(
     :param temperature_grid: Reservoir temperature grid (°F).
     :param oil_saturation_grid: Oil saturation grid (fraction).
     :param oil_viscosity_grid: Oil viscosity grid (cP).
-    :param oil_compressibility_grid: Oil compressibility grid (psi⁻¹).
+    :param oil_compressibility_grid: Oil compressibility grid (psi⁻¹), optional.
+        If omitted, computed from correlations. When both this and
+        ``oil_formation_volume_factor_grid`` are omitted, an iterative bootstrap
+        resolves their circular dependency (Bo needs Co above Pb, Co needs Bo
+        below Pb) — typically converges in 2-3 iterations.
     :param oil_specific_gravity_grid: Oil specific gravity grid (dimensionless).
     :param oil_bubble_point_pressure_grid: Oil bubble point pressure grid (psi).
     :param gas_gravity_grid: Gas gravity grid (dimensionless), optional.
@@ -573,27 +581,8 @@ def reservoir_model(
             )
 
     # Formation Volume Factor Grids
-    if oil_formation_volume_factor_grid is None:
-        if pvt_tables is not None:
-            oil_formation_volume_factor_grid = typing.cast(
-                typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.oil_formation_volume_factor(
-                    pressure=pressure_grid,
-                    temperature=temperature_grid,
-                    solution_gor=solution_gas_to_oil_ratio_grid,
-                ),
-            )
-        if oil_formation_volume_factor_grid is None:
-            oil_formation_volume_factor_grid = build_oil_formation_volume_factor_grid(
-                pressure_grid=pressure_grid,
-                temperature_grid=temperature_grid,
-                bubble_point_pressure_grid=oil_bubble_point_pressure_grid,
-                oil_specific_gravity_grid=oil_specific_gravity_grid,
-                gas_gravity_grid=gas_gravity_grid,
-                solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
-                oil_compressibility_grid=oil_compressibility_grid,
-            )
-
+    # Gas FVF must be built before oil FVF/Co because the oil compressibility
+    # liberation correction term (below Pb) depends on gas FVF.
     if gas_formation_volume_factor_grid is None:
         if pvt_tables is not None:
             gas_formation_volume_factor_grid = typing.cast(
@@ -609,6 +598,143 @@ def reservoir_model(
                 temperature_grid=temperature_grid,
                 gas_compressibility_factor_grid=gas_compressibility_factor_grid,  # type: ignore
             )
+
+    # Oil FVF and oil compressibility — resolve circular dependency.
+    # Bo above Pb uses Co: Bo = Bob * exp(-Co * (P - Pb))
+    # Co below Pb uses Bo: Co includes (Bg/Bo) * (dRs/dP) / 5.615 liberation term
+    # When both are missing, iterate to convergence (typically 2-3 passes).
+    if oil_formation_volume_factor_grid is None and pvt_tables is not None:
+        oil_formation_volume_factor_grid = typing.cast(
+            typing.Optional[NDimensionalGrid[NDimension]],
+            pvt_tables.oil_formation_volume_factor(
+                pressure=pressure_grid,
+                temperature=temperature_grid,
+                solution_gor=solution_gas_to_oil_ratio_grid,
+            ),
+        )
+
+    if oil_compressibility_grid is None and pvt_tables is not None:
+        oil_compressibility_grid = typing.cast(
+            typing.Optional[NDimensionalGrid[NDimension]],
+            pvt_tables.oil_compressibility(
+                pressure=pressure_grid,
+                temperature=temperature_grid,
+            ),
+        )
+
+    need_bo = oil_formation_volume_factor_grid is None
+    need_co = oil_compressibility_grid is None
+
+    if need_bo and need_co:
+        # Both missing — iterative bootstrap.
+        # Rs at bubble point is needed for Co below Pb.
+        rs_at_bubble_point_grid = build_solution_gas_to_oil_ratio_grid(
+            pressure_grid=oil_bubble_point_pressure_grid,
+            temperature_grid=temperature_grid,
+            bubble_point_pressure_grid=oil_bubble_point_pressure_grid,
+            gas_gravity_grid=gas_gravity_grid,
+            oil_api_gravity_grid=oil_api_gravity_grid,
+        )
+
+        max_iterations = 10
+        convergence_tolerance = 1e-7  # psi⁻¹
+        oil_compressibility_estimate = np.full_like(pressure_grid, 1e-5)
+
+        logger.debug(
+            "Beginning iterative Bo/Co bootstrap (max_iterations=%d, tolerance=%.2e).",
+            max_iterations,
+            convergence_tolerance,
+        )
+        max_change = 0.0
+        for iteration in range(max_iterations):
+            # Step 1: Build Bo using current Co estimate
+            oil_formation_volume_factor_grid = build_oil_formation_volume_factor_grid(
+                pressure_grid=pressure_grid,
+                temperature_grid=temperature_grid,
+                bubble_point_pressure_grid=oil_bubble_point_pressure_grid,
+                oil_specific_gravity_grid=oil_specific_gravity_grid,
+                gas_gravity_grid=gas_gravity_grid,
+                solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
+                oil_compressibility_grid=oil_compressibility_estimate,
+            )
+
+            # Step 2: Build Co using Bo from step 1
+            oil_compressibility_updated = build_oil_compressibility_grid(
+                pressure_grid=pressure_grid,
+                temperature_grid=temperature_grid,
+                bubble_point_pressure_grid=oil_bubble_point_pressure_grid,
+                oil_api_gravity_grid=oil_api_gravity_grid,
+                gas_gravity_grid=gas_gravity_grid,
+                gor_at_bubble_point_pressure_grid=rs_at_bubble_point_grid,
+                gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
+                oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
+            )
+
+            # Step 3: Check convergence
+            max_change = float(
+                np.max(
+                    np.abs(oil_compressibility_updated - oil_compressibility_estimate)
+                )
+            )
+            logger.debug(
+                "Bo/Co iteration %d/%d: max ΔCo = %.3e psi⁻¹.",
+                iteration + 1,
+                max_iterations,
+                max_change,
+            )
+
+            oil_compressibility_estimate = oil_compressibility_updated
+            if max_change < convergence_tolerance:
+                logger.debug(
+                    "Bo/Co bootstrap converged in %d iteration(s) "
+                    "(max ΔCo = %.3e psi⁻¹ < tolerance %.3e psi⁻¹).",
+                    iteration + 1,
+                    max_change,
+                    convergence_tolerance,
+                )
+                break
+        else:
+            warnings.warn(
+                f"Bo/Co bootstrap did not converge within {max_iterations} iterations "
+                f"(final max ΔCo = {max_change:.3e} psi⁻¹). "
+                "Results may be less accurate for volatile or heavy oils. "
+                "Consider providing pre-computed oil_compressibility_grid.",
+                UserWarning,
+            )
+
+        oil_compressibility_grid = oil_compressibility_estimate
+
+    elif need_bo and not need_co:
+        # Co provided, build Bo in a single pass
+        oil_formation_volume_factor_grid = build_oil_formation_volume_factor_grid(
+            pressure_grid=pressure_grid,
+            temperature_grid=temperature_grid,
+            bubble_point_pressure_grid=oil_bubble_point_pressure_grid,
+            oil_specific_gravity_grid=oil_specific_gravity_grid,
+            gas_gravity_grid=gas_gravity_grid,
+            solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
+            oil_compressibility_grid=oil_compressibility_grid,
+        )
+
+    elif need_co and not need_bo:
+        # Bo provided, build Co in a single pass
+        rs_at_bubble_point_grid = build_solution_gas_to_oil_ratio_grid(
+            pressure_grid=oil_bubble_point_pressure_grid,
+            temperature_grid=temperature_grid,
+            bubble_point_pressure_grid=oil_bubble_point_pressure_grid,
+            gas_gravity_grid=gas_gravity_grid,
+            oil_api_gravity_grid=oil_api_gravity_grid,
+        )
+        oil_compressibility_grid = build_oil_compressibility_grid(
+            pressure_grid=pressure_grid,
+            temperature_grid=temperature_grid,
+            bubble_point_pressure_grid=oil_bubble_point_pressure_grid,
+            oil_api_gravity_grid=oil_api_gravity_grid,
+            gas_gravity_grid=gas_gravity_grid,
+            gor_at_bubble_point_pressure_grid=rs_at_bubble_point_grid,
+            gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
+            oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
+        )
 
     # Gas-free water FVF
     # This is always built from correlations (not a standard PVT table entry).
@@ -737,7 +863,7 @@ def reservoir_model(
         oil_bubble_point_pressure_grid=oil_bubble_point_pressure_grid,
         oil_saturation_grid=oil_saturation_grid,
         oil_viscosity_grid=oil_viscosity_grid,
-        oil_compressibility_grid=oil_compressibility_grid,
+        oil_compressibility_grid=oil_compressibility_grid,  # type: ignore[arg-type]
         oil_specific_gravity_grid=oil_specific_gravity_grid,
         oil_api_gravity_grid=oil_api_gravity_grid,
         oil_density_grid=oil_density_grid,

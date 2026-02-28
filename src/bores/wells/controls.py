@@ -30,6 +30,7 @@ __all__ = [
     "ConstantRateControl",
     "InjectionClamp",
     "MultiPhaseRateControl",
+    "PrimaryPhaseRateControl",
     "ProductionClamp",
     "RateClamp",
     "WellControl",
@@ -312,6 +313,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Compute the flow rate based on the control method.
@@ -347,6 +349,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Compute the effective bottom-hole pressure for this control at current conditions.
@@ -429,6 +432,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Compute flow rate using BHP control (Darcy's law).
@@ -514,6 +518,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Return the specified bottom-hole pressure for BHP control.
@@ -606,6 +611,7 @@ class ConstantRateControl(WellControl[WellFluidTcon]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Return constant target rate, subject to BHP constraint.
@@ -633,7 +639,7 @@ class ConstantRateControl(WellControl[WellFluidTcon]):
 
         # Apply allocation to target rate
         target_rate = (
-            self.target_rate * formation_volume_factor * allocation_fraction
+            self.target_rate * allocation_fraction * formation_volume_factor
         )  # Convert to reservoir rate and allocate to cell
         is_production = target_rate < 0.0  # Negative rate indicates production
         bhp_limit = self.bhp_limit
@@ -697,6 +703,7 @@ class ConstantRateControl(WellControl[WellFluidTcon]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Compute BHP required to achieve target rate.
@@ -719,9 +726,9 @@ class ConstantRateControl(WellControl[WellFluidTcon]):
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return pressure
 
-        # Apply allocation to target rate
+        # Apply allocation to target rate and convert to reservoir rate
         target_rate_reservoir = (
-            self.target_rate * formation_volume_factor * allocation_fraction
+            self.target_rate * allocation_fraction * formation_volume_factor
         )
 
         # Compute required BHP for target rate
@@ -864,6 +871,7 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Compute flow rate adaptively.
@@ -890,10 +898,8 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return 0.0
 
-        # Apply allocation to target rate (for rate mode)
-        target_rate = (
-            self.target_rate * formation_volume_factor * allocation_fraction
-        )  # Convert to reservoir rate and allocate
+        # Apply allocation to target rate (for rate mode) and convert to reservoir rate
+        target_rate = self.target_rate * allocation_fraction * formation_volume_factor
         is_production = target_rate < 0.0  # Negative rate indicates production
         bhp_limit = self.bhp_limit
         # Compute required BHP to achieve target rate
@@ -1005,6 +1011,7 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Compute BHP based on current operating mode.
@@ -1029,7 +1036,7 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
 
         # Apply allocation to target rate (for rate mode)
         target_rate_reservoir = (
-            self.target_rate * formation_volume_factor * allocation_fraction
+            self.target_rate * allocation_fraction * formation_volume_factor
         )
         bhp_limit = self.bhp_limit
 
@@ -1113,6 +1120,306 @@ class AdaptiveBHPRateControl(WellControl[WellFluidTcon]):
 
 @well_control
 @attrs.frozen
+class PrimaryPhaseRateControl(WellControl[WellFluidTcon]):
+    """
+    Well control that fixes one phase's rate and lets other phases flow at the resulting BHP.
+
+    Standard approach in reservoir simulation for production wells: specify an oil (or gas/water)
+    target rate, and the simulator determines the BHP required to deliver that rate. Water and gas
+    then produce at whatever their natural Darcy rates are at that BHP.
+
+    NOTE: This rate control is to be used for **production wells only**.
+
+    Example:
+    ```python
+    control = PrimaryPhaseRateControl(
+        primary_phase=FluidPhase.OIL,
+        primary_control=AdaptiveBHPRateControl(
+            target_rate=-500, target_phase="oil", bhp_limit=1500,
+        ),
+        secondary_clamp=ProductionClamp(),
+    )
+    ```
+
+    :param primary_phase: The phase whose rate is fixed (determines BHP).
+    :param primary_control: Rate or adaptive control applied to the primary phase.
+    :param secondary_clamp: Optional clamp on secondary phase rates (e.g. prevent backflow).
+    """
+
+    __type__ = "primary_phase_rate_control"
+
+    primary_phase: FluidPhase
+    """Phase whose rate is fixed (determines BHP)."""
+
+    primary_control: typing.Union[ConstantRateControl, AdaptiveBHPRateControl]
+    """Rate control applied to the primary phase."""
+
+    secondary_clamp: typing.Optional[RateClamp] = None
+    """Optional clamp on secondary (non-primary) phase rates."""
+
+    def __attrs_post_init__(self) -> None:
+        object.__setattr__(self, "primary_phase", FluidPhase(self.primary_phase))
+
+    def _compute_primary_bhp(
+        self,
+        pressure: float,
+        temperature: float,
+        primary_phase_mobility: float,
+        well_index: float,
+        primary_fluid: WellFluid,
+        primary_formation_volume_factor: float,
+        allocation_fraction: float,
+        use_pseudo_pressure: bool,
+        primary_fluid_compressibility: typing.Optional[float],
+        pvt_tables: typing.Optional[PVTTables],
+    ) -> float:
+        """Compute the BHP established by the primary phase's rate control."""
+        return self.primary_control.get_bottom_hole_pressure(
+            pressure=pressure,
+            temperature=temperature,
+            phase_mobility=primary_phase_mobility,
+            well_index=well_index,
+            fluid=primary_fluid,
+            formation_volume_factor=primary_formation_volume_factor,
+            allocation_fraction=allocation_fraction,
+            is_active=True,
+            use_pseudo_pressure=use_pseudo_pressure,
+            fluid_compressibility=primary_fluid_compressibility,
+            pvt_tables=pvt_tables,
+        )
+
+    def get_bottom_hole_pressure(
+        self,
+        pressure: float,
+        temperature: float,
+        phase_mobility: float,
+        well_index: float,
+        fluid: WellFluid,
+        formation_volume_factor: float,
+        allocation_fraction: float = 1.0,
+        is_active: bool = True,
+        use_pseudo_pressure: bool = False,
+        fluid_compressibility: typing.Optional[float] = None,
+        pvt_tables: typing.Optional[PVTTables] = None,
+        primary_phase_mobility: typing.Optional[float] = None,
+        primary_fluid: typing.Optional[WellFluid] = None,
+        primary_formation_volume_factor: typing.Optional[float] = None,
+        primary_fluid_compressibility: typing.Optional[float] = None,
+        **kwargs: typing.Any,
+    ) -> float:
+        """
+        Compute BHP for semi-implicit pressure equation coupling.
+
+        For the primary phase, BHP is derived from the rate control using its own properties.
+        For secondary phases, BHP is derived using the primary phase's properties so that all
+        phases share a consistent drawdown.
+
+        :param primary_phase_mobility: Mobility of primary phase (required for secondary phases).
+        :param primary_fluid: Primary phase fluid object (required for secondary phases).
+        :param primary_formation_volume_factor: FVF of primary phase (required for secondary phases).
+        :param primary_fluid_compressibility: Compressibility of primary phase (required for secondary phases).
+        """
+        if not is_active or phase_mobility <= 0.0:
+            return pressure
+
+        if fluid.phase == self.primary_phase:
+            return self._compute_primary_bhp(
+                pressure=pressure,
+                temperature=temperature,
+                primary_phase_mobility=phase_mobility,
+                well_index=well_index,
+                primary_fluid=fluid,
+                primary_formation_volume_factor=formation_volume_factor,
+                allocation_fraction=allocation_fraction,
+                use_pseudo_pressure=use_pseudo_pressure,
+                primary_fluid_compressibility=fluid_compressibility,
+                pvt_tables=pvt_tables,
+            )
+
+        if primary_phase_mobility is None or primary_fluid is None:
+            logger.warning(
+                f"Cannot compute BHP for secondary phase {fluid.phase} - "
+                f"primary phase properties not provided. Using cell pressure."
+            )
+            return pressure
+
+        return self._compute_primary_bhp(
+            pressure=pressure,
+            temperature=temperature,
+            primary_phase_mobility=primary_phase_mobility,
+            well_index=well_index,
+            primary_fluid=primary_fluid,
+            primary_formation_volume_factor=primary_formation_volume_factor
+            or formation_volume_factor,
+            allocation_fraction=allocation_fraction,
+            use_pseudo_pressure=use_pseudo_pressure,
+            primary_fluid_compressibility=primary_fluid_compressibility,
+            pvt_tables=pvt_tables,
+        )
+
+    def get_flow_rate(
+        self,
+        pressure: float,
+        temperature: float,
+        phase_mobility: float,
+        well_index: float,
+        fluid: WellFluidTcon,
+        formation_volume_factor: float,
+        allocation_fraction: float = 1.0,
+        is_active: bool = True,
+        use_pseudo_pressure: bool = False,
+        fluid_compressibility: typing.Optional[float] = None,
+        pvt_tables: typing.Optional[PVTTables] = None,
+        primary_phase_mobility: typing.Optional[float] = None,
+        primary_fluid: typing.Optional[WellFluid] = None,
+        primary_formation_volume_factor: typing.Optional[float] = None,
+        primary_fluid_compressibility: typing.Optional[float] = None,
+        **kwargs: typing.Any,
+    ) -> float:
+        """
+        Compute flow rate for a given phase.
+
+        The primary phase rate comes directly from the rate control. Secondary phase rates
+        are computed via Darcy's law at the BHP established by the primary phase, using
+        each secondary phase's own mobility and FVF.
+
+        :param primary_phase_mobility: Mobility of primary phase (required for secondary phases).
+        :param primary_fluid: Primary phase fluid object (required for secondary phases).
+        :param primary_formation_volume_factor: FVF of primary phase (required for secondary phases).
+        :param primary_fluid_compressibility: Compressibility of primary phase (required for secondary phases).
+        """
+        if _should_return_zero(
+            fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
+        ):
+            return 0.0
+
+        if fluid.phase == self.primary_phase:
+            return self.primary_control.get_flow_rate(
+                pressure=pressure,
+                temperature=temperature,
+                phase_mobility=phase_mobility,
+                well_index=well_index,
+                fluid=fluid,
+                formation_volume_factor=formation_volume_factor,
+                allocation_fraction=allocation_fraction,
+                is_active=is_active,
+                use_pseudo_pressure=use_pseudo_pressure,
+                fluid_compressibility=fluid_compressibility,
+                pvt_tables=pvt_tables,
+            )
+
+        if primary_phase_mobility is None or primary_fluid is None:
+            logger.warning(
+                f"Cannot compute flow rate for secondary phase {fluid.phase} - "
+                f"primary phase properties not provided. Returning 0."
+            )
+            return 0.0
+
+        bhp = self._compute_primary_bhp(
+            pressure=pressure,
+            temperature=temperature,
+            primary_phase_mobility=primary_phase_mobility,
+            well_index=well_index,
+            primary_fluid=primary_fluid,
+            primary_formation_volume_factor=primary_formation_volume_factor
+            or formation_volume_factor,
+            allocation_fraction=allocation_fraction,
+            use_pseudo_pressure=use_pseudo_pressure,
+            primary_fluid_compressibility=primary_fluid_compressibility,
+            pvt_tables=pvt_tables,
+        )
+
+        # Compute secondary phase rate at the primary-phase-derived BHP
+        if fluid.phase == FluidPhase.GAS:
+            use_pp, pp_table = _setup_gas_pseudo_pressure(
+                fluid=fluid,
+                pressure=pressure,
+                temperature=temperature,
+                use_pseudo_pressure=use_pseudo_pressure,
+                pvt_tables=pvt_tables,
+            )
+            avg_z = _compute_avg_z_factor(
+                pressure=pressure,
+                temperature=temperature,
+                gas_gravity=fluid.specific_gravity,
+                bottom_hole_pressure=bhp,
+            )
+            rate = compute_gas_well_rate(
+                well_index=well_index,
+                pressure=pressure,
+                temperature=temperature,
+                bottom_hole_pressure=bhp,
+                phase_mobility=phase_mobility,
+                use_pseudo_pressure=use_pp,
+                pseudo_pressure_table=pp_table,
+                average_compressibility_factor=avg_z,
+                formation_volume_factor=formation_volume_factor,
+            )
+        else:
+            rate = compute_oil_well_rate(
+                well_index=well_index,
+                pressure=pressure,
+                bottom_hole_pressure=bhp,
+                phase_mobility=phase_mobility,
+                fluid_compressibility=fluid_compressibility,
+            )
+
+        clamped = _apply_clamp(
+            rate=rate,
+            clamp=self.secondary_clamp,
+            pressure=pressure,
+            control_type="primary phase rate control (secondary)",
+        )
+        return clamped if clamped is not None else rate
+
+    def build_primary_phase_context(
+        self,
+        produced_fluids: typing.Sequence[WellFluid],
+        oil_mobility: float,
+        water_mobility: float,
+        gas_mobility: float,
+        oil_fvf: float,
+        water_fvf: float,
+        gas_fvf: float,
+        oil_compressibility: float,
+        water_compressibility: float,
+        gas_compressibility: float,
+    ) -> dict[str, typing.Any]:
+        """
+        Build a kwargs dict with primary phase cell properties for passing to
+        `get_flow_rate(...)` / `get_bottom_hole_pressure(...)`.
+
+        Call once per cell before iterating over produced fluids. The returned dict
+        can be unpacked as `**kwargs`.
+        """
+        primary_fluid = None
+        for fluid in produced_fluids:
+            if fluid.phase == self.primary_phase:
+                primary_fluid = fluid
+                break
+
+        if primary_fluid is None:
+            return {}
+
+        phase_props = {
+            FluidPhase.OIL: (oil_mobility, oil_fvf, oil_compressibility),
+            FluidPhase.GAS: (gas_mobility, gas_fvf, gas_compressibility),
+            FluidPhase.WATER: (water_mobility, water_fvf, water_compressibility),
+        }
+        mobility, fvf, compressibility = phase_props[self.primary_phase]
+        return {
+            "primary_phase_mobility": mobility,
+            "primary_fluid": primary_fluid,
+            "primary_formation_volume_factor": fvf,
+            "primary_fluid_compressibility": compressibility,
+        }
+
+    def __str__(self) -> str:
+        return f"Primary Phase Rate Control (primary={self.primary_phase.value}, control={self.primary_control})"
+
+
+@well_control
+@attrs.frozen
 class MultiPhaseRateControl(WellControl):
     """
     Multi-phase rate control for wells.
@@ -1142,6 +1449,7 @@ class MultiPhaseRateControl(WellControl):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """
         Compute flow rate based on fluid phase.
@@ -1176,6 +1484,7 @@ class MultiPhaseRateControl(WellControl):
                 use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
+                **kwargs,
             )
         elif fluid.phase == FluidPhase.GAS and self.gas_control is not None:
             return self.gas_control.get_flow_rate(
@@ -1190,6 +1499,7 @@ class MultiPhaseRateControl(WellControl):
                 use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
+                **kwargs,
             )
         elif fluid.phase == FluidPhase.WATER and self.water_control is not None:
             return self.water_control.get_flow_rate(
@@ -1204,6 +1514,7 @@ class MultiPhaseRateControl(WellControl):
                 use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
+                **kwargs,
             )
         return 0.0
 
@@ -1220,6 +1531,7 @@ class MultiPhaseRateControl(WellControl):
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
     ) -> float:
         """Delegate to appropriate phase control."""
         if fluid.phase == FluidPhase.OIL and self.oil_control is not None:
@@ -1235,6 +1547,7 @@ class MultiPhaseRateControl(WellControl):
                 use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
+                **kwargs,
             )
         elif fluid.phase == FluidPhase.GAS and self.gas_control is not None:
             return self.gas_control.get_bottom_hole_pressure(
@@ -1249,6 +1562,7 @@ class MultiPhaseRateControl(WellControl):
                 use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
+                **kwargs,
             )
         elif fluid.phase == FluidPhase.WATER and self.water_control is not None:
             return self.water_control.get_bottom_hole_pressure(
@@ -1263,6 +1577,7 @@ class MultiPhaseRateControl(WellControl):
                 use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=fluid_compressibility,
                 pvt_tables=pvt_tables,
+                **kwargs,
             )
         return pressure
 

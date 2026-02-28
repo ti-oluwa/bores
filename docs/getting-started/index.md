@@ -1,81 +1,45 @@
-# Getting Started with BORES
+# Getting Started
 
-Welcome to BORES! This guide will help you get up and running with reservoir simulation in Python.
+Welcome to BORES. This section walks you through everything you need to go from a fresh Python environment to a running reservoir simulation. Whether you are setting up BORES for the first time or refreshing your understanding of the framework's design, these three guides have you covered.
 
-## What You'll Learn
+---
 
 <div class="grid cards" markdown>
 
-- :material-download:{ .lg .middle } __Installation__
+-   :material-download-circle:{ .lg .middle } **Installation**
 
     ---
 
-    Install BORES and its dependencies
+    Set up your Python environment and install BORES along with its dependencies. Covers installation through both `uv` (recommended) and `pip`, optional packages for thermodynamics and visualization, and troubleshooting tips for common issues.
 
-    [:octicons-arrow-right-24: Install Now](installation.md)
+    [:octicons-arrow-right-24: Install BORES](installation.md)
 
-- :material-rocket-launch:{ .lg .middle } __Quick Start__
-
-    ---
-
-    Run your first simulation in 5 minutes
-
-    [:octicons-arrow-right-24: Get Started](quickstart.md)
-
-- :material-brain:{ .lg .middle } __Core Concepts__
+-   :material-rocket-launch:{ .lg .middle } **Quickstart**
 
     ---
 
-    Understand how BORES works
+    Build and run your first simulation in under 5 minutes. This hands-on tutorial walks through a complete workflow: defining a grid, building a reservoir model, configuring the simulation, running it, and inspecting results.
 
-    [:octicons-arrow-right-24: Learn Concepts](core-concepts.md)
+    [:octicons-arrow-right-24: Run your first simulation](quickstart.md)
+
+-   :material-book-open-variant:{ .lg .middle } **Core Concepts**
+
+    ---
+
+    Understand the foundational ideas behind BORES: the simulation pipeline, immutable data models, dimension generics, sign conventions, field units, precision control, time management, and serialization. Read this before diving into advanced features.
+
+    [:octicons-arrow-right-24: Learn the fundamentals](concepts.md)
 
 </div>
 
 ---
 
-## Prerequisites
+## Recommended Reading Order
 
-!!! tip "Python Knowledge"
-    You should have basic Python knowledge:
+If you are brand new to BORES, follow these pages in order:
 
-    - Variables and functions
-    - Lists and dictionaries
-    - Importing modules
+1. **Installation** - Get BORES installed and verify it works.
+2. **Quickstart** - Run a complete simulation end to end.
+3. **Core Concepts** - Build a mental model of how the framework is organized.
 
-    **Don't worry if you're new to Python!** BORES has a simple API that's easy to learn.
-
-### Recommended Background
-
-While not required, these will help you get more from BORES:
-
-- __Reservoir Engineering__: Understanding of fluid flow in porous media
-- __NumPy Basics__: Working with arrays (we'll teach you what you need)
-- __Basic Terminal/Command Line__: Running Python scripts
-
-!!! info "No Fortran/C++ Required!"
-    Unlike traditional simulators, BORES is pure Python. No compilation, no makefiles, just `pip install` and go!
-
----
-
-## Your Learning Path
-
-We recommend following this order:
-
-1. __[Installation](installation.md)__ - Get BORES installed (5 minutes)
-2. __[Quick Start](quickstart.md)__ - Run your first simulation (10 minutes)
-3. __[Core Concepts](core-concepts.md)__ - Understand the framework (15 minutes)
-4. __[Tutorials](../tutorials/index.md)__ - Build real simulations (1-2 hours)
-5. __[User Guide](../guides/index.md)__ - Master all features (reference)
-
----
-
-## Still Have Questions?
-
-- Check the [Glossary](../reference/glossary.md) for terminology
-- Browse [Examples](../examples/index.md) for complete working code
-- Ask on [GitHub Discussions](https://github.com/ti-oluwa/bores/discussions)
-
----
-
-__Ready?__ Let's [install BORES →](installation.md)
+After completing these three pages, you will be ready to explore the [User Guide](../user-guide/), [Tutorials](../tutorials/), and [API Reference](../api-reference/) sections.

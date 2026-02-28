@@ -27,6 +27,7 @@ from bores.types import (
 )
 from bores.utils import clip
 from bores.wells import Wells
+from bores.wells.controls import PrimaryPhaseRateControl
 
 __all__ = ["evolve_miscible_saturation", "evolve_saturation"]
 
@@ -1097,6 +1098,42 @@ def compute_well_rate_grids(
             cell_oil_production_rate = 0.0
             cell_gas_production_rate = 0.0
 
+            # Build primary phase context if using PrimaryPhaseRateControl
+            primary_phase_kwargs: dict = {}
+            if isinstance(production_well.control, PrimaryPhaseRateControl):
+                primary_phase_kwargs = (
+                    production_well.control.build_primary_phase_context(
+                        produced_fluids=production_well.produced_fluids,
+                        oil_mobility=typing.cast(
+                            float, oil_relative_mobility_grid[i, j, k]
+                        ),
+                        water_mobility=typing.cast(
+                            float, water_relative_mobility_grid[i, j, k]
+                        ),
+                        gas_mobility=typing.cast(
+                            float, gas_relative_mobility_grid[i, j, k]
+                        ),
+                        oil_fvf=typing.cast(
+                            float, oil_formation_volume_factor_grid[i, j, k]
+                        ),
+                        water_fvf=typing.cast(
+                            float, water_formation_volume_factor_grid[i, j, k]
+                        ),
+                        gas_fvf=typing.cast(
+                            float, gas_formation_volume_factor_grid[i, j, k]
+                        ),
+                        oil_compressibility=typing.cast(
+                            float, oil_compressibility_grid[i, j, k]
+                        ),
+                        water_compressibility=typing.cast(
+                            float, water_compressibility_grid[i, j, k]
+                        ),
+                        gas_compressibility=typing.cast(
+                            float, gas_compressibility_grid[i, j, k]
+                        ),
+                    )
+                )
+
             for produced_fluid in production_well.produced_fluids:
                 produced_phase = produced_fluid.phase
                 if produced_phase == FluidPhase.GAS:
@@ -1146,6 +1183,7 @@ def compute_well_rate_grids(
                     formation_volume_factor=phase_fvf,
                     allocation_fraction=allocation_fraction,
                     pvt_tables=config.pvt_tables,
+                    **primary_phase_kwargs,
                 )
                 if production_rate > 0.0 and config.warn_well_anomalies:
                     _warn_production_rate_is_positive(
@@ -2476,6 +2514,42 @@ def compute_miscible_well_rate_grids(
             cell_oil_production_rate = 0.0
             cell_gas_production_rate = 0.0
 
+            # Build primary phase context if using PrimaryPhaseRateControl
+            primary_phase_kwargs: dict = {}
+            if isinstance(production_well.control, PrimaryPhaseRateControl):
+                primary_phase_kwargs = (
+                    production_well.control.build_primary_phase_context(
+                        produced_fluids=production_well.produced_fluids,
+                        oil_mobility=typing.cast(
+                            float, oil_relative_mobility_grid[i, j, k]
+                        ),
+                        water_mobility=typing.cast(
+                            float, water_relative_mobility_grid[i, j, k]
+                        ),
+                        gas_mobility=typing.cast(
+                            float, gas_relative_mobility_grid[i, j, k]
+                        ),
+                        oil_fvf=typing.cast(
+                            float, oil_formation_volume_factor_grid[i, j, k]
+                        ),
+                        water_fvf=typing.cast(
+                            float, water_formation_volume_factor_grid[i, j, k]
+                        ),
+                        gas_fvf=typing.cast(
+                            float, gas_formation_volume_factor_grid[i, j, k]
+                        ),
+                        oil_compressibility=typing.cast(
+                            float, oil_compressibility_grid[i, j, k]
+                        ),
+                        water_compressibility=typing.cast(
+                            float, water_compressibility_grid[i, j, k]
+                        ),
+                        gas_compressibility=typing.cast(
+                            float, gas_compressibility_grid[i, j, k]
+                        ),
+                    )
+                )
+
             for produced_fluid in production_well.produced_fluids:
                 produced_phase = produced_fluid.phase
                 if produced_phase == FluidPhase.GAS:
@@ -2521,6 +2595,7 @@ def compute_miscible_well_rate_grids(
                     formation_volume_factor=fluid_formation_volume_factor,
                     allocation_fraction=allocation_fraction,
                     pvt_tables=config.pvt_tables,
+                    **primary_phase_kwargs,
                 )
 
                 if production_rate > 0.0 and config.warn_well_anomalies:

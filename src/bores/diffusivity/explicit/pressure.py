@@ -20,6 +20,7 @@ from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
 from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells import Wells
+from bores.wells.controls import PrimaryPhaseRateControl
 
 __all__ = ["evolve_pressure"]
 
@@ -855,6 +856,22 @@ def compute_well_rate_grid(
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
 
+            # Build primary phase context if using PrimaryPhaseRateControl
+            primary_phase_kwargs: dict = {}
+            if isinstance(well.control, PrimaryPhaseRateControl):
+                primary_phase_kwargs = well.control.build_primary_phase_context(
+                    produced_fluids=well.produced_fluids,
+                    oil_mobility=typing.cast(float, oil_relative_mobility_grid[i, j, k]),
+                    water_mobility=typing.cast(float, water_relative_mobility_grid[i, j, k]),
+                    gas_mobility=typing.cast(float, gas_relative_mobility_grid[i, j, k]),
+                    oil_fvf=typing.cast(float, oil_formation_volume_factor_grid[i, j, k]),
+                    water_fvf=typing.cast(float, water_formation_volume_factor_grid[i, j, k]),
+                    gas_fvf=typing.cast(float, gas_formation_volume_factor_grid[i, j, k]),
+                    oil_compressibility=typing.cast(float, oil_compressibility_grid[i, j, k]),
+                    water_compressibility=typing.cast(float, water_compressibility_grid[i, j, k]),
+                    gas_compressibility=typing.cast(float, gas_compressibility_grid[i, j, k]),
+                )
+
             for produced_fluid in well.produced_fluids:
                 produced_phase = produced_fluid.phase
 
@@ -906,6 +923,7 @@ def compute_well_rate_grid(
                     formation_volume_factor=phase_fvf,
                     allocation_fraction=allocation_fraction,
                     pvt_tables=config.pvt_tables,
+                    **primary_phase_kwargs,
                 )
 
                 # Check for backflow (positive production = injection)

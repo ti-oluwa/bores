@@ -31,6 +31,7 @@ from bores.types import (
     ThreeDimensions,
 )
 from bores.wells import Wells
+from bores.wells.controls import PrimaryPhaseRateControl
 
 logger = logging.getLogger(__name__)
 
@@ -1024,6 +1025,40 @@ def add_well_contributions(
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
 
+            # Build primary phase context if using PrimaryPhaseRateControl
+            primary_phase_kwargs: dict = {}
+            if isinstance(well.control, PrimaryPhaseRateControl):
+                primary_phase_kwargs = well.control.build_primary_phase_context(
+                    produced_fluids=well.produced_fluids,
+                    oil_mobility=typing.cast(
+                        float, oil_relative_mobility_grid[i, j, k]
+                    ),
+                    water_mobility=typing.cast(
+                        float, water_relative_mobility_grid[i, j, k]
+                    ),
+                    gas_mobility=typing.cast(
+                        float, gas_relative_mobility_grid[i, j, k]
+                    ),
+                    oil_fvf=typing.cast(
+                        float, oil_formation_volume_factor_grid[i, j, k]
+                    ),
+                    water_fvf=typing.cast(
+                        float, water_formation_volume_factor_grid[i, j, k]
+                    ),
+                    gas_fvf=typing.cast(
+                        float, gas_formation_volume_factor_grid[i, j, k]
+                    ),
+                    oil_compressibility=typing.cast(
+                        float, oil_compressibility_grid[i, j, k]
+                    ),
+                    water_compressibility=typing.cast(
+                        float, water_compressibility_grid[i, j, k]
+                    ),
+                    gas_compressibility=typing.cast(
+                        float, gas_compressibility_grid[i, j, k]
+                    ),
+                )
+
             for produced_fluid in well.produced_fluids:
                 produced_phase = produced_fluid.phase
 
@@ -1076,6 +1111,7 @@ def add_well_contributions(
                     use_pseudo_pressure=use_pseudo_pressure,
                     fluid_compressibility=phase_compressibility,
                     pvt_tables=config.pvt_tables,
+                    **primary_phase_kwargs,
                 )
 
                 # Check for backflow (positive production = injection)

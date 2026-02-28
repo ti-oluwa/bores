@@ -1913,7 +1913,7 @@ def build_pvt_table_data(
             assert gas_fvf_for_compressibility is not None
 
             # Iteration parameters
-            max_iterations = 5
+            max_iterations = 10
             convergence_tolerance = (
                 1e-7  # psi⁻¹ — max absolute change in Co between iterations
             )

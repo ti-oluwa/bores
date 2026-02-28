@@ -1,480 +1,344 @@
-# Tutorial 3: Water Injection
+# Waterflood Simulation
 
-Learn how to set up and optimize waterflooding for secondary oil recovery.
-
----
-
-## What You'll Learn
-
-In this tutorial, you will learn how to:
-
-- Add water injection wells to a reservoir model for secondary recovery
-- Configure injection controls with both rate targets and bottomhole pressure (BHP) constraints
-- Balance injection and production rates to maintain reservoir pressure (voidage replacement ratio)
-- Monitor water breakthrough time and water cut evolution during waterflooding
-- Analyze sweep efficiency to understand how effectively injected water contacts oil-bearing rock
-- Optimize well placement patterns (5-spot, inverted 9-spot) for maximum oil recovery
-
----
-
-## Prerequisites
-
-Complete [Tutorial 2: Building a 3D Reservoir Model](02-reservoir-model.md) first.
+Set up a complete waterflood with injection and production wells, track water breakthrough, and analyze oil recovery.
 
 ---
 
 ## Overview
 
-Waterflooding is the most common secondary recovery method. Injected water:
+Waterflooding is the most widely used secondary recovery technique in the oil industry. By injecting water into the reservoir, you maintain pressure (preventing the decline you saw in the [depletion tutorial](01-first-simulation.md)) and physically displace oil toward the production wells. The key engineering questions are: when does water break through at the producer? How much oil can you recover? How does the water cut evolve over time?
 
-- Maintains reservoir pressure
-- Displaces oil toward producers
-- Recovers 30-60% of original oil (vs 15-25% primary recovery)
+In this tutorial, you will set up a waterflood simulation with one injection well and one production well in opposite corners of the grid (a "corner-to-corner" pattern). You will track water breakthrough, water cut, oil recovery factor, and pressure maintenance. At the end, you will compare the waterflood results against the depletion case from the first tutorial to quantify the benefit of water injection.
 
-**Key challenge**: Optimize sweep efficiency (contact all oil-bearing rock)
+Waterflooding works because water is cheap, readily available (especially offshore), and displaces oil reasonably efficiently in many reservoir types. The injected water pushes a saturation front through the reservoir. Ahead of the front, oil saturation is high and water saturation is at connate levels. Behind the front, oil saturation has been reduced to the residual value and water saturation is high. The sharpness and stability of this front depend on the mobility ratio between water and oil.
 
 ---
 
-## Step 1: Load Depleted Model
+## Physical Setup
 
-Start from a depleted model (after primary production):
+We use a 15x15x3 reservoir with a water injector in corner (0, 0) and an oil producer in the opposite corner (14, 14). Both wells are perforated across all three layers.
+
+- **Grid**: 15x15x3 (675 cells)
+- **Cell size**: 80 ft x 80 ft, 20 ft thick per layer
+- **Porosity**: 20%
+- **Permeability**: 150 mD isotropic
+- **Initial pressure**: 3,000 psi
+- **Oil viscosity**: 2.0 cP
+- **Injection rate**: 400 STB/day water
+- **Production rate**: 400 STB/day (adaptive BHP control)
+
+!!! info "Mobility Ratio"
+
+    The mobility ratio $M = \lambda_w / \lambda_o$ controls sweep efficiency. Here, water viscosity (~0.5 cP at reservoir conditions) is much lower than oil viscosity (2.0 cP), giving an unfavorable mobility ratio ($M > 1$). This means the water front will be somewhat unstable, with water tending to finger through the oil rather than pushing it as a clean piston. Higher oil viscosity or lower water mobility would improve this ratio.
+
+---
+
+## Step 1 - Build the Reservoir Model
 
 ```python
 import bores
-from pathlib import Path
+import numpy as np
 
-# Load model from Tutorial 2 or primary depletion
-run = bores.Run.from_files(
-    model_path=Path("./primary_depletion/model.h5"),
-    config_path=Path("./primary_depletion/config.yaml"),
+bores.use_32bit_precision()
+
+grid_shape = (15, 15, 3)
+cell_dimension = (80.0, 80.0)
+
+# Property grids
+thickness = bores.build_uniform_grid(grid_shape, value=20.0)
+pressure = bores.build_uniform_grid(grid_shape, value=3000.0)
+porosity = bores.build_uniform_grid(grid_shape, value=0.20)
+temperature = bores.build_uniform_grid(grid_shape, value=180.0)
+oil_viscosity = bores.build_uniform_grid(grid_shape, value=2.0)
+bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)
+oil_sg = bores.build_uniform_grid(grid_shape, value=0.87)
+
+So = bores.build_uniform_grid(grid_shape, value=0.75)
+Sw = bores.build_uniform_grid(grid_shape, value=0.25)
+Sg = bores.build_uniform_grid(grid_shape, value=0.00)
+
+Sorw = bores.build_uniform_grid(grid_shape, value=0.22)
+Sorg = bores.build_uniform_grid(grid_shape, value=0.15)
+Sgr  = bores.build_uniform_grid(grid_shape, value=0.05)
+Swir = bores.build_uniform_grid(grid_shape, value=0.22)
+Swc  = bores.build_uniform_grid(grid_shape, value=0.22)
+
+perm_grid = bores.build_uniform_grid(grid_shape, value=150.0)
+permeability = bores.RockPermeability(x=perm_grid)
+
+model = bores.reservoir_model(
+    grid_shape=grid_shape,
+    cell_dimension=cell_dimension,
+    thickness_grid=thickness,
+    pressure_grid=pressure,
+    rock_compressibility=3e-6,
+    absolute_permeability=permeability,
+    porosity_grid=porosity,
+    temperature_grid=temperature,
+    water_saturation_grid=Sw,
+    gas_saturation_grid=Sg,
+    oil_saturation_grid=So,
+    oil_viscosity_grid=oil_viscosity,
+    oil_specific_gravity_grid=oil_sg,
+    oil_bubble_point_pressure_grid=bubble_point,
+    residual_oil_saturation_water_grid=Sorw,
+    residual_oil_saturation_gas_grid=Sorg,
+    residual_gas_saturation_grid=Sgr,
+    irreducible_water_saturation_grid=Swir,
+    connate_water_saturation_grid=Swc,
 )
-
-# Check current state
-print(f"Initial pressure: {run.config.model.fluid_properties.pressure_grid.mean():.1f} psi")
 ```
 
-!!! info "Starting Point"
-    We assume the reservoir has been depleted by primary production. Pressure has dropped and production rates are declining.
+The setup is similar to the first tutorial with a few differences. The oil viscosity is slightly higher (2.0 cP) to make the displacement dynamics more interesting. The residual oil saturation during waterflood (Sorw = 0.22) determines the maximum oil recovery: in the swept zone, oil saturation will drop to 22%, meaning up to 78% of the pore volume in the swept region is eventually occupied by water.
+
+Note that we pass only the x-direction permeability to `RockPermeability`. BORES automatically copies it to y and z, giving us isotropic permeability with less code.
 
 ---
 
-## Step 2: Design Injection Pattern
-
-Use a **5-spot pattern**: 4 corner injectors + 1 central producer.
+## Step 2 - Define the Injection Well
 
 ```python
-# Grid dimensions
-nx, ny, nz = run.config.model.grid_shape
-
-# Well locations
-injector_locations = [
-    (3, 3),      # Top-left
-    (3, nx-4),   # Top-right
-    (ny-4, 3),   # Bottom-left
-    (ny-4, nx-4),  # Bottom-right
-]
-
-producer_location = (nx//2, ny//2)  # Center
-
-print(f"Injector pattern: 4-spot corners")
-print(f"Producer location: Center ({producer_location})")
+injector = bores.injection_well(
+    well_name="INJ-1",
+    perforating_intervals=[((0, 0, 0), (0, 0, 2))],
+    radius=0.25,
+    control=bores.ConstantRateControl(target_rate=400.0),
+    injected_fluid=bores.InjectedFluid(
+        name="Water",
+        phase=bores.FluidPhase.WATER,
+        specific_gravity=1.0,
+        molecular_weight=18.015,
+    ),
+)
 ```
+
+The injection well is placed at grid corner (0, 0) and perforated from layer 0 to layer 2. The `ConstantRateControl` with `target_rate=400.0` (positive = injection) injects water at a constant 400 STB/day. We do not set a BHP limit on the injector in this example, though in practice you would want to limit injection pressure to avoid fracturing the formation.
+
+The `InjectedFluid` specifies that we are injecting water with standard properties. BORES uses the specific gravity and molecular weight to compute water density and viscosity at reservoir conditions using its internal correlations.
+
+!!! tip "Matching Injection and Production Rates"
+
+    In a voidage-replacement waterflood, you typically match the volumetric injection rate to the volumetric production rate. This maintains reservoir pressure at approximately the initial level. If injection exceeds production, pressure rises. If production exceeds injection, pressure declines despite the water support.
 
 ---
 
-## Step 3: Create Water Injection Wells
+## Step 3 - Define the Production Well
 
 ```python
-# Injection control (rate-based with BHP limit)
-injection_clamp = bores.InjectionClamp()
-injection_control = bores.AdaptiveBHPRateControl(
-    target_rate=400,  # STB/day per injector
-    target_phase="water",
-    bhp_limit=3500,  # psi (below fracture pressure)
-    clamp=injection_clamp,
-)
-
-# Perforate all oil-bearing layers (layers 2-5)
-injection_perfs = [((i, j, 1), (i, j, 5))]  # Layers 2-6 (0-indexed)
-
-# Create injectors
-injectors = []
-for idx, (i, j) in enumerate(injector_locations, start=1):
-    injector = bores.injection_well(
-        well_name=f"WI-{idx}",
-        perforating_intervals=[((i, j, 1), (i, j, 5))],
-        radius=0.3542,  # 8.5" wellbore
-        control=injection_control,
-        injected_fluid=bores.InjectedFluid(
-            name="Water",
-            phase=bores.FluidPhase.WATER,
-            specific_gravity=1.05,  # Slightly saline
-            molecular_weight=18.015,
-        ),
-        is_active=True,
-        skin_factor=0.0,  # No damage (new well)
-    )
-    injectors.append(injector)
-
-print(f"Created {len(injectors)} water injection wells")
-```
-
-!!! warning "BHP Limit"
-    Set BHP limit below **fracture pressure** to avoid:
-
-    - Hydraulic fracturing
-    - Channeling (water bypasses oil)
-    - Formation damage
-
----
-
-## Step 4: Update Production Well
-
-Increase production capacity to handle water production:
-
-```python
-# Higher water rate target (expect water breakthrough)
-production_clamp = bores.ProductionClamp()
-control = bores.MultiPhaseRateControl(
-    oil_control=bores.AdaptiveBHPRateControl(
-        target_rate=-200,  # STB/day (increased from 150)
-        target_phase="oil",
-        bhp_limit=800,  # psi
-        clamp=production_clamp,
-    ),
-    gas_control=bores.AdaptiveBHPRateControl(
-        target_rate=-300,  # MCF/day
-        target_phase="gas",
-        bhp_limit=800,
-        clamp=production_clamp,
-    ),
-    water_control=bores.AdaptiveBHPRateControl(
-        target_rate=-1500,  # STB/day (high for water production)
-        target_phase="water",
-        bhp_limit=800,
-        clamp=production_clamp,
-    ),
-)
-
-# Update existing producer or create new one
 producer = bores.production_well(
-    well_name="P-1",
-    perforating_intervals=[((producer_location[0], producer_location[1], 2),
-                            (producer_location[0], producer_location[1], 5))],
-    radius=0.3542,
-    control=control,
-    produced_fluids=(
-        bores.ProducedFluid(name="Oil", phase=bores.FluidPhase.OIL,
-                           specific_gravity=0.85, molecular_weight=180.0),
-        bores.ProducedFluid(name="Gas", phase=bores.FluidPhase.GAS,
-                           specific_gravity=0.65, molecular_weight=16.04),
-        bores.ProducedFluid(name="Water", phase=bores.FluidPhase.WATER,
-                           specific_gravity=1.05, molecular_weight=18.015),
+    well_name="PROD-1",
+    perforating_intervals=[((14, 14, 0), (14, 14, 2))],
+    radius=0.25,
+    control=bores.PrimaryPhaseRateControl(
+        primary_phase=bores.FluidPhase.OIL,
+        primary_control=bores.AdaptiveBHPRateControl(
+            target_rate=-400.0,
+            target_phase="oil",
+            bhp_limit=800.0,
+        ),
+        secondary_clamp=bores.ProductionClamp(),
     ),
-    skin_factor=2.5,
-    is_active=True,
+    produced_fluids=[
+        bores.ProducedFluid(
+            name="Oil", phase=bores.FluidPhase.OIL,
+            specific_gravity=0.87, molecular_weight=200.0,
+        ),
+        bores.ProducedFluid(
+            name="Water", phase=bores.FluidPhase.WATER,
+            specific_gravity=1.0, molecular_weight=18.015,
+        ),
+    ],
 )
-
-wells = bores.wells_(injectors=injectors, producers=[producer])
 ```
+
+The producer sits in the opposite corner at (14, 14). We use `PrimaryPhaseRateControl` with oil as the primary phase and a target rate of -400 STB/day. The simulator computes the BHP needed to deliver that oil rate, and water flows naturally at whatever rate corresponds to that BHP. The `bhp_limit=800.0` prevents the BHP from dropping below 800 psi. The `ProductionClamp` prevents any accidental backflow of water into the reservoir.
+
+Notice that the `produced_fluids` list includes both oil and water. Before water breakthrough, the producer will mainly produce oil. After breakthrough, an increasing fraction of the produced fluid will be water. Because we use `PrimaryPhaseRateControl`, the oil rate stays at the target while the water rate grows with increasing water cut.
 
 ---
 
-## Step 5: Calculate Voidage Replacement Ratio
-
-Ensure injection balances production (VRR ≈ 1.0 for pressure maintenance):
+## Step 4 - Group Wells and Configure
 
 ```python
-# Total injection
-total_injection = len(injectors) * 400  # STB/day
+wells = bores.wells_(injectors=[injector], producers=[producer])
 
-# Expected production (approximate)
-expected_oil = 200  # STB/day
-expected_water = 200  # STB/day (initial, will increase)
-expected_gas = 300 * 1000 / 5.615  # Convert MCF to barrels (approx)
-
-total_production = expected_oil + expected_water + expected_gas
-
-# Voidage replacement ratio
-vrr = total_injection / total_production
-print(f"Target VRR: {vrr:.2f}")
-print(f"Total injection: {total_injection} STB/day")
-print(f"Expected production: {total_production:.0f} res barrels/day")
-```
-
-!!! tip "VRR Guidelines"
-    - **VRR < 1.0**: Under-injection (pressure declines)
-    - **VRR = 1.0**: Balanced (pressure stable)
-    - **VRR > 1.0**: Over-injection (pressure increases)
-
-    For waterflooding, target VRR = 1.0 - 1.2
-
----
-
-## Step 6: Configure Simulation
-
-```python
-# Timer for 2 years of waterflooding
-timer = bores.Timer(
-    initial_step_size=bores.Time(days=2.0),
-    max_step_size=bores.Time(days=10.0),
-    min_step_size=bores.Time(hours=12.0),
-    simulation_time=bores.Time(days=2 * bores.c.DAYS_PER_YEAR),  # 2 years
-    max_cfl_number=0.9,
+rock_fluid = bores.RockFluidTables(
+    relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+        water_exponent=2.5,
+        oil_exponent=2.0,
+        gas_exponent=2.0,
+    ),
+    capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(),
 )
 
-# Update config
-run.config = run.config.with_updates(
+config = bores.Config(
+    timer=bores.Timer(
+        initial_step_size=bores.Time(days=1),
+        max_step_size=bores.Time(days=10),
+        min_step_size=bores.Time(hours=1),
+        simulation_time=bores.Time(days=1095),  # 3 years
+    ),
+    rock_fluid_tables=rock_fluid,
     wells=wells,
-    timer=timer,
-)
-
-# Save setup
-setup_dir = Path("./tutorial_03_waterflood")
-setup_dir.mkdir(exist_ok=True)
-run.to_file(setup_dir / "run.h5")
-```
-
----
-
-## Step 7: Execute Simulation
-
-```python
-# Storage
-store = bores.ZarrStore(setup_dir / "results.zarr")
-
-# Stream execution
-stream = bores.StateStream(
-    run(),
-    store=store,
-    batch_size=20,
-    background_io=True,
-)
-
-print("Starting waterflood simulation...")
-with stream:
-    for state in stream:
-        if state.step % 50 == 0:
-            progress = stream.progress()
-            time_days = state.time / 86400
-            avg_pressure = state.model.fluid_properties.pressure_grid.mean()
-            print(f"Day {time_days:4.0f}: P_avg = {avg_pressure:6.1f} psi, "
-                  f"Saved {progress['saved_count']} states")
-
-print("Simulation complete!")
-```
-
----
-
-## Step 8: Analyze Results
-
-### Production History
-
-```python
-# Load results
-states = list(store.load(bores.ModelState))
-analyst = bores.ModelAnalyst(states)
-
-# Oil and water production
-import matplotlib.pyplot as plt
-
-steps = []
-oil_rates = []
-water_rates = []
-water_cuts = []
-
-for step in range(0, analyst.max_step, 10):
-    rates = analyst.instantaneous_production_rates(step)
-    state = analyst.get_state(step)
-    time_days = state.time / 86400
-
-    steps.append(time_days)
-    oil_rates.append(rates.oil_rate)
-    water_rates.append(rates.water_rate)
-    water_cuts.append(rates.water_cut * 100)  # Convert to %
-
-# Plot production
-fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-
-# Rates
-axes[0].plot(steps, oil_rates, 'g-', linewidth=2, label='Oil')
-axes[0].plot(steps, water_rates, 'b--', linewidth=2, label='Water')
-axes[0].set_ylabel('Rate (STB/day)')
-axes[0].set_title('Production Rates')
-axes[0].legend()
-axes[0].grid(True, alpha=0.3)
-
-# Water cut
-axes[1].plot(steps, water_cuts, 'r-', linewidth=2)
-axes[1].axhline(y=50, color='orange', linestyle='--', alpha=0.7, label='50% WC')
-axes[1].axhline(y=90, color='red', linestyle='--', alpha=0.7, label='90% WC (Economic Limit)')
-axes[1].set_xlabel('Time (days)')
-axes[1].set_ylabel('Water Cut (%)')
-axes[1].set_title('Water Cut Evolution')
-axes[1].legend()
-axes[1].grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.show()
-```
-
-### Recovery Factors
-
-```python
-# Final recovery
-print(f"\nRecovery Factors:")
-print(f"  Oil RF: {analyst.oil_recovery_factor:.2%}")
-print(f"  Cumulative oil: {analyst.cumulative_oil_produced:,.0f} STB")
-
-# Voidage replacement ratio (injection volume / production volume at reservoir conditions)
-vrr_actual = analyst.voidage_replacement_ratio(step=-1)
-print(f"\nActual VRR: {vrr_actual:.2f}")
-
-# Sweep efficiency
-sweep = analyst.sweep_efficiency_analysis(step=-1, displacing_phase="water")
-print(f"\nSweep Efficiency:")
-print(f"  Volumetric sweep: {sweep.volumetric_sweep_efficiency:.2%}")
-print(f"  Displacement efficiency: {sweep.displacement_efficiency:.2%}")
-print(f"  Areal sweep: {sweep.areal_sweep_efficiency:.2%}")
-```
-
-### Water Saturation Maps
-
-```python
-# Initial and final water saturation
-initial_state = analyst.get_state(0)
-final_state = analyst.get_state(-1)
-
-sw_initial = initial_state.model.fluid_properties.saturation_history.water_saturations[-1]
-sw_final = final_state.model.fluid_properties.saturation_history.water_saturations[-1]
-
-# Plot middle layer
-layer = nz // 2
-
-fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-im1 = axes[0].imshow(sw_initial[:, :, layer].T, origin='lower', cmap='Blues', vmin=0, vmax=1)
-axes[0].set_title('Initial Water Saturation')
-axes[0].set_xlabel('X')
-axes[0].set_ylabel('Y')
-plt.colorbar(im1, ax=axes[0], label='Sw')
-
-# Mark wells
-for i, j in injector_locations:
-    axes[0].plot(i, j, 'rs', markersize=10, label='Injector' if (i,j) == injector_locations[0] else '')
-axes[0].plot(producer_location[0], producer_location[1], 'go', markersize=10, label='Producer')
-
-im2 = axes[1].imshow(sw_final[:, :, layer].T, origin='lower', cmap='Blues', vmin=0, vmax=1)
-axes[1].set_title('Final Water Saturation (Water Flood)')
-axes[1].set_xlabel('X')
-axes[1].set_ylabel('Y')
-plt.colorbar(im2, ax=axes[1], label='Sw')
-
-# Mark wells
-for i, j in injector_locations:
-    axes[1].plot(i, j, 'rs', markersize=10)
-axes[1].plot(producer_location[0], producer_location[1], 'go', markersize=10)
-
-axes[0].legend()
-plt.tight_layout()
-plt.show()
-```
-
----
-
-## Optimization Tips
-
-### 1. Adjust Injection Rates
-
-If water cuts too high:
-
-```python
-# Reduce injection rates
-new_control = bores.AdaptiveBHPRateControl(
-    target_rate=300,  # Reduced from 400
-    target_phase="water",
-    bhp_limit=3500,
+    scheme="impes",
 )
 ```
 
-### 2. Pattern Modification
+We set the water Corey exponent to 2.5 (slightly higher than oil's 2.0), which makes the water relative permeability curve steeper. This is physically reasonable because water in a water-wet rock needs to occupy more pore space before it can flow efficiently.
 
-Convert to **inverted 9-spot** (more injectors):
+The simulation runs for 3 years (1,095 days), which is enough time to observe water breakthrough, the transition to high water cut, and the plateau in recovery factor.
+
+---
+
+## Step 5 - Run the Simulation
 
 ```python
-# Add 4 edge injectors
-additional_locations = [
-    (nx//2, 3),      # Top edge
-    (nx//2, ny-4),   # Bottom edge
-    (3, ny//2),      # Left edge
-    (nx-4, ny//2),   # Right edge
-]
+states = list(bores.run(model, config))
+final = states[-1]
+print(f"Completed {final.step} steps in {final.time_in_days:.1f} days")
 ```
 
-### 3. Water Quality
+---
 
-Reduce injectivity loss:
+## Step 6 - Analyze Water Breakthrough
+
+Water breakthrough is the moment when injected water first arrives at the production well. Before breakthrough, the producer makes essentially dry oil. After breakthrough, water cut increases rapidly.
 
 ```python
-injected_fluid=bores.InjectedFluid(
-    name="Filtered Water",
-    phase=bores.FluidPhase.WATER,
-    specific_gravity=1.02,  # Lower salinity
-    molecular_weight=18.015,
+time_days = np.array([s.time_in_days for s in states])
+
+# Water saturation at the producer location (14, 14, center layer)
+Sw_at_producer = np.array([
+    s.model.fluid_properties.water_saturation_grid[14, 14, 1] for s in states
+])
+
+# Detect breakthrough: first time Sw exceeds initial connate value significantly
+breakthrough_mask = Sw_at_producer > 0.30
+if np.any(breakthrough_mask):
+    bt_index = np.argmax(breakthrough_mask)
+    print(f"Water breakthrough at approximately {time_days[bt_index]:.0f} days")
+else:
+    print("Water has not broken through during the simulation period")
+```
+
+The timing of breakthrough depends on the distance between injector and producer, the injection rate, the pore volume between them, and the mobility ratio. In an ideal piston-like displacement, breakthrough would occur when one pore volume of water has been injected. In reality, the unfavorable mobility ratio causes early breakthrough because water fingers through the oil.
+
+---
+
+## Step 7 - Plot Water Cut and Recovery
+
+```python
+# Average saturations over time
+avg_So = np.array([
+    s.model.fluid_properties.oil_saturation_grid.mean() for s in states
+])
+avg_Sw = np.array([
+    s.model.fluid_properties.water_saturation_grid.mean() for s in states
+])
+
+# Water cut: fraction of total production that is water
+# Approximate using average saturation change
+initial_So = 0.75
+oil_recovered_fraction = (initial_So - avg_So) / (initial_So - 0.22)  # Normalize by movable oil
+
+fig = bores.make_series_plot(
+    data={
+        "Oil Saturation": np.column_stack([time_days, avg_So]),
+        "Water Saturation": np.column_stack([time_days, avg_Sw]),
+    },
+    title="Average Saturations During Waterflood",
+    x_label="Time (days)",
+    y_label="Saturation (fraction)",
 )
-
-# Also reduce skin factor
-skin_factor=0.0  # Well stimulated/no damage
+fig.show()
 ```
 
----
+You should see water saturation gradually increasing from the initial connate value (0.25) as the flood front progresses through the reservoir. Oil saturation decreases correspondingly. After breakthrough, the rate of change accelerates because water is now taking a shortcut through the swept zone to the producer.
 
-## Common Issues
+### Recovery Factor
 
-### Water Breakthrough Too Early
+```python
+fig = bores.make_series_plot(
+    data=np.column_stack([time_days, oil_recovered_fraction]),
+    title="Oil Recovery Factor (Waterflood)",
+    x_label="Time (days)",
+    y_label="Recovery Factor (fraction)",
+)
+fig.show()
+```
 
-**Cause**: High permeability streaks, poor vertical sweep
-
-**Solutions**:
-- Reduce injection rates
-- Add polymer to water (increase viscosity)
-- Use conformance control (future feature)
-
-### Pressure Too High
-
-**Cause**: Over-injection (VRR > 1.5)
-
-**Solutions**:
-- Reduce injection rates
-- Add more producers
-- Lower BHP limit
-
-### Low Oil Recovery
-
-**Cause**: Poor sweep efficiency
-
-**Solutions**:
-- Optimize well placement
-- Increase pattern density (more wells)
-- Check for vertical barriers (low vertical permeability)
+The recovery factor curve is the primary metric for evaluating a waterflood. You should see rapid initial recovery as the flood front sweeps through the reservoir, a change in slope around breakthrough time (when water starts being produced instead of displacing oil), and a gradual approach toward the ultimate recovery limit.
 
 ---
 
-## What You Learned
+## Step 8 - Pressure Maintenance
 
-In this tutorial, you successfully:
+```python
+avg_pressure = np.array([
+    s.model.fluid_properties.pressure_grid.mean() for s in states
+])
 
-- Designed a 5-spot waterflood pattern with 4 corner injectors and 1 central producer for optimal sweep efficiency
-- Configured water injection wells with adaptive BHP/rate controls that maintain pressure below fracture pressure
-- Calculated and monitored voidage replacement ratio (VRR) to balance injection and production rates for pressure maintenance
-- Tracked water breakthrough time and monitored water cut evolution throughout the waterflood
-- Analyzed sweep efficiency metrics including volumetric, areal, and displacement efficiency
-- Visualized saturation changes over time using 2D maps and time-series plots
+fig = bores.make_series_plot(
+    data=np.column_stack([time_days, avg_pressure]),
+    title="Average Reservoir Pressure (Waterflood)",
+    x_label="Time (days)",
+    y_label="Pressure (psi)",
+)
+fig.show()
+```
+
+Unlike the depletion case from Tutorial 1, where pressure declined continuously, the waterflood should maintain pressure close to the initial value (3,000 psi) because the injected water replaces the produced fluid volume. You may see slight pressure fluctuations as the flood front moves through the reservoir and the simulator adjusts well rates.
+
+!!! note "Pressure vs Depletion"
+
+    Compare this pressure plot with the depletion result from [Your First Simulation](01-first-simulation.md). The difference is dramatic: waterflooding maintains pressure near the initial value, while depletion allows continuous decline. This pressure support is the primary benefit of waterflooding, enabling higher production rates for longer periods.
+
+---
+
+## Step 9 - Visualize the Water Front
+
+```python
+viz = bores.plotly3d.DataVisualizer()
+
+# Visualize water saturation at a few time steps
+for state in [states[len(states) // 4], states[len(states) // 2], states[-1]]:
+    fig = viz.make_plot(
+        source=state,
+        property="water-saturation",
+        plot_type="volume",
+        title=f"Water Saturation at Day {state.time_in_days:.0f}",
+    )
+    fig.show()
+```
+
+These 3D visualizations show the water saturation front advancing from the injector corner (0, 0) toward the producer corner (14, 14). You should observe the front spreading diagonally across the reservoir. The front may not be perfectly sharp due to numerical dispersion and the unfavorable mobility ratio.
+
+---
+
+## Discussion
+
+The waterflood results illustrate several important principles of secondary recovery. First, water injection dramatically improves recovery compared to primary depletion. The depletion case from Tutorial 1 recovered oil only through pressure decline and solution gas drive, while the waterflood physically displaces oil by pushing it toward the producer.
+
+Second, the timing and sharpness of water breakthrough depend on the mobility ratio. With our oil viscosity of 2.0 cP and water viscosity around 0.5 cP, the mobility ratio is approximately 4:1 (unfavorable). This means water moves about 4 times faster than oil at the same saturation, leading to early breakthrough and a gradual increase in water cut rather than a sharp transition.
+
+Third, pressure maintenance is a major advantage of waterflooding. By keeping reservoir pressure above the bubble point, we avoid the complications of free gas (gas coning, reduced oil mobility) that plague depletion operations. This is why waterflooding is typically initiated early in field life, before significant pressure decline.
+
+---
+
+## Key Takeaways
+
+1. **Water injection** maintains reservoir pressure and displaces oil, yielding significantly higher recovery than primary depletion.
+
+2. **`InjectedFluid` with `phase=FluidPhase.WATER`** configures a water injection well. The positive `target_rate` follows BORES's sign convention (positive = injection).
+
+3. **Water breakthrough** occurs when injected water first reaches the producer. After breakthrough, water cut increases and oil production rate declines.
+
+4. **Mobility ratio** ($M = \lambda_w / \lambda_o$) controls sweep efficiency. Higher oil viscosity or lower Corey exponents for water improve the displacement.
+
+5. **3D visualization** of the saturation front helps you understand how the flood progresses through the reservoir and identify sweep inefficiencies.
 
 ---
 
 ## Next Steps
 
-- **[Tutorial 4: Gas Injection](04-gas-injection.md)** - Pressure maintenance with gas
-- **[Wells & Controls Guide](../guides/wells-and-controls.md)** - Advanced well configuration
-- **[Waterflood Pattern Example](../examples/waterflood-pattern.md)** - Complete production example
+In the [next tutorial](04-gas-injection.md), you will replace the water injector with a gas injector and observe how gas injection differs from waterflooding: gravity override, higher gas mobility, and different displacement characteristics.
