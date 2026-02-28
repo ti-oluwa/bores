@@ -168,7 +168,7 @@ def _compute_elevation_downward(
             + thickness_grid[:, :, k] / 2
         )
 
-    return elevation_grid  # type: ignore
+    return elevation_grid + datum # type: ignore
 
 
 @numba.njit(cache=True)
@@ -196,12 +196,13 @@ def _compute_elevation_upward(
             + thickness_grid[:, :, k] / 2
         )
 
-    return elevation_grid  # type: ignore
+    return elevation_grid + datum  # type: ignore
 
 
 def _build_elevation_grid(
     thickness_grid: NDimensionalGrid[NDimension],
     direction: typing.Literal["downward", "upward"] = "downward",
+    datum: float = 0.0
 ) -> NDimensionalGrid[NDimension]:
     """
     Convert a cell thickness (height) grid into an absolute elevation grid (cell center z-coordinates).
@@ -221,12 +222,13 @@ def _build_elevation_grid(
     dtype = get_dtype()
 
     if direction == "downward":
-        return _compute_elevation_downward(thickness_grid, dtype=dtype)
-    return _compute_elevation_upward(thickness_grid, dtype=dtype)
+        return _compute_elevation_downward(thickness_grid, dtype=dtype, datum=datum)
+    return _compute_elevation_upward(thickness_grid, dtype=dtype, datum=datum)
 
 
 def build_elevation_grid(
     thickness_grid: NDimensionalGrid[NDimension],
+    datum: float = 0.0
 ) -> NDimensionalGrid[NDimension]:
     """
     Public wrapper for building an elevation grid from a thickness grid.
@@ -236,7 +238,7 @@ def build_elevation_grid(
     :param thickness_grid: N-dimensional numpy array representing the thickness of each cell in the reservoir (ft).
     :return: N-dimensional numpy array representing the elevation of each cell in the reservoir (ft).
     """
-    return _build_elevation_grid(thickness_grid, direction="upward")
+    return _build_elevation_grid(thickness_grid, direction="upward", datum=datum)
 
 
 elevation_grid = build_elevation_grid  # Alias for convenience
@@ -244,6 +246,7 @@ elevation_grid = build_elevation_grid  # Alias for convenience
 
 def build_depth_grid(
     thickness_grid: NDimensionalGrid[NDimension],
+    datum: float = 0.0
 ) -> NDimensionalGrid[NDimension]:
     """
     Public wrapper for building a downward depth grid from a thickness grid.
@@ -253,7 +256,7 @@ def build_depth_grid(
     :param thickness_grid: N-dimensional numpy array representing the thickness of each cell in the reservoir (ft).
     :return: N-dimensional numpy array representing the depth of each cell in the reservoir (ft).
     """
-    return _build_elevation_grid(thickness_grid, direction="downward")
+    return _build_elevation_grid(thickness_grid, direction="downward", datum=datum))
 
 
 depth_grid = build_depth_grid  # Alias for convenience
