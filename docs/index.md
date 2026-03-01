@@ -1,4 +1,4 @@
-# BORES - Black-Oil Reservoir Engineering Simulation
+# BORES - Black-Oil REservoir Simulator
 
 BORES is a 3D three-phase black-oil reservoir modelling and simulation framework written in Python. It provides a Pythonic API for constructing reservoir models, defining wells and boundary conditions, running multiphase flow simulations, and analyzing results. BORES targets petroleum engineers, researchers, and students who need a transparent, scriptable alternative to closed-source commercial simulators.
 
@@ -31,17 +31,25 @@ temperature = bores.build_uniform_grid(grid_shape, value=180.0)      # deg F
 oil_viscosity = bores.build_uniform_grid(grid_shape, value=1.5)      # cP
 bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)    # psi
 
-# Saturations (must sum to 1.0)
-So = bores.build_uniform_grid(grid_shape, value=0.75)
-Sw = bores.build_uniform_grid(grid_shape, value=0.25)
-Sg = bores.build_uniform_grid(grid_shape, value=0.00)
-
 # Residual and irreducible saturations
 Sorw = bores.build_uniform_grid(grid_shape, value=0.20)
 Sorg = bores.build_uniform_grid(grid_shape, value=0.15)
 Sgr = bores.build_uniform_grid(grid_shape, value=0.05)
 Swir = bores.build_uniform_grid(grid_shape, value=0.20)
 Swc = bores.build_uniform_grid(grid_shape, value=0.20)
+
+# Build depth grid and compute initial saturations from fluid contacts
+depth = bores.build_depth_grid(thickness, datum=5000.0)  # Top at 5000 ft
+Sw, So, Sg = bores.build_saturation_grids(
+    depth_grid=depth,
+    gas_oil_contact=4999.0,      # Above reservoir (no gas cap)
+    oil_water_contact=5100.0,    # Below reservoir (all oil zone)
+    connate_water_saturation_grid=Swc,
+    residual_oil_saturation_water_grid=Sorw,
+    residual_oil_saturation_gas_grid=Sorg,
+    residual_gas_saturation_grid=Sgr,
+    porosity_grid=porosity,
+)
 
 # Isotropic permeability: 100 mD
 perm_grid = bores.build_uniform_grid(grid_shape, value=100.0)

@@ -138,6 +138,38 @@ relperm_ow = bores.BrooksCoreyThreePhaseRelPermModel(
 
 Most conventional sandstone reservoirs are water-wet or mixed-wet. Carbonate reservoirs are more commonly oil-wet or mixed-wet. If you are unsure, start with water-wet, which is the industry default.
 
+### Mixed-Wet Systems
+
+Many real reservoirs exhibit mixed wettability, where some pore surfaces are water-wet and others are oil-wet. This occurs naturally when crude oil contacts the rock surface over geological time: the larger pores that were originally oil-filled become oil-wet, while smaller pores that retained water films remain water-wet. Mixed-wet rock typically produces distinctive relative permeability curves that fall between the pure water-wet and oil-wet end members, often with relatively high mobility for both phases at intermediate saturations.
+
+The `BrooksCoreyThreePhaseRelPermModel` in BORES currently supports `WATER_WET` and `OIL_WET` wettability settings. It does not have a direct `MIXED_WET` mode for relative permeability. However, you can approximate mixed-wet relative permeability behavior through careful selection of Corey exponents. Mixed-wet systems typically have characteristics that lie between the two end members:
+
+- **Lower water exponents** (1.5 to 2.5) compared to strongly water-wet systems, because oil-wet pores provide easier pathways for water
+- **Lower oil exponents** (1.5 to 2.0) compared to strongly oil-wet systems, because water-wet pores keep some oil mobile
+- **Crossover point near $S_w = 0.5$**, between the high crossover of water-wet and low crossover of oil-wet
+
+```python
+import bores
+
+# Approximate mixed-wet behavior using tuned exponents
+relperm_mixed = bores.BrooksCoreyThreePhaseRelPermModel(
+    irreducible_water_saturation=0.20,
+    residual_oil_saturation_water=0.28,
+    residual_oil_saturation_gas=0.18,
+    residual_gas_saturation=0.05,
+    water_exponent=2.0,     # Lower than typical water-wet (2.5-3.0)
+    oil_exponent=1.8,       # Lower than typical oil-wet (2.0-2.5)
+    gas_exponent=2.0,
+    wettability=bores.Wettability.WATER_WET,
+)
+```
+
+If you have laboratory SCAL data from mixed-wet core plugs, the best approach is to use a `ThreePhaseRelPermTable` with the measured data directly. Tabular data can reproduce the exact curve shapes measured in the lab, including the subtle features characteristic of mixed-wet rock (gradual crossover, relatively high endpoint permeabilities for both phases, and S-shaped curve segments) that analytical models cannot easily capture.
+
+!!! tip "Mixed-Wet Capillary Pressure"
+
+    While the relative permeability model approximates mixed-wet behavior through exponent tuning, the capillary pressure models in BORES do support a direct `MIXED_WET` wettability mode with a `mixed_wet_water_fraction` parameter. See [Capillary Pressure](capillary-pressure.md) for details on configuring mixed-wet capillary pressure curves, which can produce the characteristic sign change at intermediate saturations.
+
 ---
 
 ## Three-Phase Mixing Rules
@@ -415,36 +447,138 @@ Both analytical models and tabular data are `RockFluidTables`-compatible and ser
 
 ## Visualizing Relative Permeability Curves
 
-Understanding what your relative permeability curves look like before running a simulation is critical for quality assurance. You can compute and plot the curves using NumPy and BORES visualization:
+Understanding what your relative permeability curves look like before running a simulation is critical for quality assurance. The best way to do this is to create the actual model you plan to use and call it directly across a saturation sweep. This ensures the plotted curves are exactly what the simulator will use.
+
+### Water-Oil Curves
 
 ```python
 import bores
 import numpy as np
 
-# Compute water-oil curves
-Sw = np.linspace(0.25, 0.75, 50)  # Swc to 1 - Sorw
-Swn = (Sw - 0.25) / (1.0 - 0.25 - 0.25)  # Normalized
-krw = Swn ** 2.5
-kro = (1.0 - Swn) ** 2.0
+# Create the model
+relperm = bores.BrooksCoreyThreePhaseRelPermModel(
+    irreducible_water_saturation=0.25,
+    residual_oil_saturation_water=0.25,
+    residual_oil_saturation_gas=0.15,
+    residual_gas_saturation=0.05,
+    water_exponent=2.5,
+    oil_exponent=2.0,
+    gas_exponent=2.0,
+)
+
+# Sweep water saturation across the mobile range (no free gas)
+Sw_values = np.linspace(0.25, 0.75, 50)
+krw_values = np.zeros_like(Sw_values)
+kro_values = np.zeros_like(Sw_values)
+
+for i, sw in enumerate(Sw_values):
+    so = 1.0 - sw  # No free gas: So = 1 - Sw
+    result = relperm.get_relative_permeabilities(
+        water_saturation=sw, oil_saturation=so, gas_saturation=0.0,
+    )
+    krw_values[i] = result["water"]
+    kro_values[i] = result["oil"]
 
 # Plot with BORES visualization
-data = {
-    "Water Saturation": Sw,
-    "krw": krw,
-    "kro": kro,
-}
 fig = bores.make_series_plot(
-    data=data,
-    plot_type="line",
+    data={
+        "krw": np.column_stack([Sw_values, krw_values]),
+        "kro": np.column_stack([Sw_values, kro_values]),
+    },
+    title="Brooks-Corey Water-Oil Relative Permeability",
     x_label="Water Saturation (fraction)",
     y_label="Relative Permeability",
-    title="Brooks-Corey Water-Oil Curves",
 )
 fig.show()
-# Output: [PLACEHOLDER: Insert relperm_curves.png]
+# Output: [PLACEHOLDER: Insert relperm_water_oil_curves.png]
 ```
 
 This visualization lets you verify that the curves match your expectations: endpoint values are correct, curvature is reasonable, and the crossover point is where you expect it. If the curves look wrong, adjust the exponents and endpoints before running the simulation.
+
+### Gas-Oil Curves
+
+You can also plot the gas-oil relative permeability curves by sweeping gas saturation while keeping water at connate:
+
+```python
+# Sweep gas saturation (water at connate)
+Sg_values = np.linspace(0.0, 0.55, 50)
+krg_values = np.zeros_like(Sg_values)
+kro_g_values = np.zeros_like(Sg_values)
+
+for i, sg in enumerate(Sg_values):
+    so = 1.0 - 0.25 - sg  # Sw = Swc = 0.25
+    result = relperm.get_relative_permeabilities(
+        water_saturation=0.25, oil_saturation=so, gas_saturation=sg,
+    )
+    krg_values[i] = result["gas"]
+    kro_g_values[i] = result["oil"]
+
+fig = bores.make_series_plot(
+    data={
+        "krg": np.column_stack([Sg_values, krg_values]),
+        "kro": np.column_stack([Sg_values, kro_g_values]),
+    },
+    title="Brooks-Corey Gas-Oil Relative Permeability",
+    x_label="Gas Saturation (fraction)",
+    y_label="Relative Permeability",
+)
+fig.show()
+# Output: [PLACEHOLDER: Insert relperm_gas_oil_curves.png]
+```
+
+### Comparing Tabular and Analytical Curves
+
+If you have both a tabular model from lab data and an analytical model, you can plot them together to assess how well the analytical fit matches the measurements:
+
+```python
+# Analytical model
+relperm_bc = bores.BrooksCoreyThreePhaseRelPermModel(
+    irreducible_water_saturation=0.20,
+    residual_oil_saturation_water=0.25,
+    water_exponent=2.5,
+    oil_exponent=2.0,
+)
+
+# Tabular model from lab data
+ow_table = bores.TwoPhaseRelPermTable(
+    wetting_phase=bores.FluidPhase.WATER,
+    non_wetting_phase=bores.FluidPhase.OIL,
+    wetting_phase_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
+    wetting_phase_relative_permeability=np.array([0.0, 0.02, 0.08, 0.20, 0.38, 0.62, 0.80]),
+    non_wetting_phase_relative_permeability=np.array([1.0, 0.70, 0.42, 0.20, 0.07, 0.01, 0.0]),
+)
+
+# Evaluate both across the same saturation range
+Sw_range = np.linspace(0.20, 0.75, 50)
+krw_bc = np.zeros_like(Sw_range)
+kro_bc = np.zeros_like(Sw_range)
+
+for i, sw in enumerate(Sw_range):
+    result = relperm_bc.get_relative_permeabilities(
+        water_saturation=sw, oil_saturation=1.0 - sw, gas_saturation=0.0,
+    )
+    krw_bc[i] = result["water"]
+    kro_bc[i] = result["oil"]
+
+krw_tab = ow_table.get_wetting_phase_relative_permeability(Sw_range)
+kro_tab = ow_table.get_non_wetting_phase_relative_permeability(Sw_range)
+
+fig = bores.make_series_plot(
+    data={
+        "krw (Brooks-Corey)": np.column_stack([Sw_range, krw_bc]),
+        "kro (Brooks-Corey)": np.column_stack([Sw_range, kro_bc]),
+        "krw (Lab Data)": np.column_stack([Sw_range, krw_tab]),
+        "kro (Lab Data)": np.column_stack([Sw_range, kro_tab]),
+    },
+    title="Analytical vs. Tabular Relative Permeability",
+    x_label="Water Saturation (fraction)",
+    y_label="Relative Permeability",
+)
+fig.show()
+# Output: [PLACEHOLDER: Insert relperm_comparison.png]
+```
+
+This kind of comparison is essential for calibration. If the analytical and tabular curves diverge significantly, you should either adjust the Corey exponents to improve the fit or use the tabular data directly for the simulation.
 
 ---
 

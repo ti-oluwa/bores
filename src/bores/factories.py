@@ -216,6 +216,7 @@ def reservoir_model(
     fractures: typing.Optional[typing.Iterable[Fracture]] = None,
     dip_angle: float = 0.0,
     dip_azimuth: float = 0.0,
+    datum_depth: typing.Optional[float] = None,
     reservoir_gas: typing.Optional[str] = None,
     pvt_tables: typing.Optional[PVTTables] = None,
 ) -> ReservoirModel[NDimension]:
@@ -277,6 +278,7 @@ def reservoir_model(
     :param fractures: Iterable of fractures to be applied to the reservoir model, optional.
     :param reservoir_gas: Name of the reservoir gas, defaults to `RESERVOIR_GAS_NAME`. Can also be the name of the gas injected into the reservoir.
     :param pvt_tables: PVT tables for fluid properties, optional.
+    :param datum_depth: Reference depth for reservoir model. Basically the reservoir top depth (below sea level)
     :return: The constructed N-Dimensional reservoir model with fluid and rock properties.
     """
     if not 2 <= len(grid_shape) <= 3:
@@ -918,6 +920,7 @@ def reservoir_model(
         saturation_history=saturation_history,
         dip_angle=dip_angle,
         dip_azimuth=dip_azimuth,
+        datum_depth=datum_depth,
     )
     if fractures is not None and len(model.grid_shape) == 3:
         return apply_fractures(model, *fractures)  # type: ignore[return-value]

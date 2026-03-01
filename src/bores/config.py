@@ -160,7 +160,7 @@ class Config(
     residual_gas_drainage_ratio: float = 0.5
     """Ratio to compute gas drainage residual from imbibition value."""
 
-    max_oil_saturation_change: float = 0.5
+    max_oil_saturation_change: float = 0.2
     """
     Maximum allowable oil saturation change (absolute, fractional) per time step.
 
@@ -169,7 +169,7 @@ class Config(
     step is reduced or rejected.
     """
     max_water_saturation_change: float = attrs.field(  # type: ignore
-        default=0.4, validator=attrs.validators.ge(0)
+        default=0.2, validator=attrs.validators.ge(0)
     )
     """
     Maximum allowable water saturation change (absolute, fractional) per time step.
@@ -179,7 +179,7 @@ class Config(
     step is reduced or rejected.
     """
     max_gas_saturation_change: float = attrs.field(  # type: ignore
-        default=0.85, validator=attrs.validators.ge(0)
+        default=0.1, validator=attrs.validators.ge(0)
     )
     """
     Maximum allowable gas saturation change (absolute, fractional) per time step.
@@ -224,7 +224,27 @@ class Config(
 
     Note: Larger changes can cause density/viscosity jumps and well control issues.
     """
-    use_constant_saturation_pressure: bool = False
+    freeze_saturation_pressure: bool = False
+    """
+    If True, keeps oil bubble point pressure (Pb) constant at its initial value throughout the simulation.
+
+    You would mosttimes want this set to True, if you are not modelling complex conditions like 
+    miscible injection, Waterflooding, etc., to adhere to standard black-oil model assumptions.
+
+    This is appropriate for:
+    - Natural depletion with no compositional changes
+    - Waterflooding where oil composition remains constant
+    - Simplified black-oil models without compositional tracking
+    If False (default), Pb is recomputed each timestep based on current solution GOR.
+
+    **Properties affected when Pb is frozen:**
+    - Bubble point pressure (Pb) - directly frozen
+    - Solution GOR (Rs) - computed using frozen Pb as reference
+    - Oil FVF (Bo) - uses frozen Pb for undersaturated calculations
+    - Oil compressibility (Co) - switches at frozen Pb
+    - Oil viscosity (μo) - indirectly through Rs
+    - Oil density (ρo) - indirectly through Rs and Bo
+    """
 
     _lock: threading.Lock = attrs.field(
         factory=threading.Lock, init=False, repr=False, hash=False

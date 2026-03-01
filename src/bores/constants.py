@@ -522,6 +522,11 @@ DEFAULT_CONSTANTS: typing.Dict[str, typing.Union[typing.Any, Constant]] = {
         description="Default water salinity in parts per million (ppm)",
         unit="ppm",
     ),
+    "MIN_OIL_ZONE_THICKNESS": Constant(
+        value=5,
+        description="Minimum oil zone thickness below which a warning is raised to notify that the oil zone is too thin",
+        unit="ft",
+    ),
 }
 
 

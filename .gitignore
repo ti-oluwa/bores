@@ -21,3 +21,4 @@ CLAUDE.md
 .claude/
 site/
 benchmarks/runs/
+.pytest_cache/

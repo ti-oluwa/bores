@@ -75,15 +75,25 @@ oil_viscosity = bores.build_uniform_grid(grid_shape, value=2.0)
 bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)
 oil_sg = bores.build_uniform_grid(grid_shape, value=0.87)
 
-So = bores.build_uniform_grid(grid_shape, value=0.75)
-Sw = bores.build_uniform_grid(grid_shape, value=0.25)
-Sg = bores.build_uniform_grid(grid_shape, value=0.00)
-
 Sorw = bores.build_uniform_grid(grid_shape, value=0.22)
 Sorg = bores.build_uniform_grid(grid_shape, value=0.15)
 Sgr  = bores.build_uniform_grid(grid_shape, value=0.05)
 Swir = bores.build_uniform_grid(grid_shape, value=0.22)
 Swc  = bores.build_uniform_grid(grid_shape, value=0.22)
+
+# Build initial saturations from fluid contacts
+depth = bores.build_depth_grid(thickness, datum=5000.0)
+
+Sw, So, Sg = bores.build_saturation_grids(
+    depth_grid=depth,
+    gas_oil_contact=4900.0,       # GOC above reservoir (no initial gas cap)
+    oil_water_contact=5100.0,     # OWC near reservoir bottom
+    connate_water_saturation_grid=Swc,
+    residual_oil_saturation_water_grid=Sorw,
+    residual_oil_saturation_gas_grid=Sorg,
+    residual_gas_saturation_grid=Sgr,
+    porosity_grid=porosity,
+)
 
 perm_grid = bores.build_uniform_grid(grid_shape, value=150.0)
 permeability = bores.RockPermeability(x=perm_grid)
@@ -410,4 +420,4 @@ Across these five tutorials, you have progressed from a simple depletion study t
 4. **[Gas Injection](04-gas-injection.md)** - Immiscible gas displacement, gravity override
 5. **Miscible Gas Flooding** (this tutorial) - Todd-Longstaff miscible displacement with CO2
 
-You now have the foundational skills to set up, run, and analyze a wide range of reservoir simulation studies with BORES. For deeper exploration of specific topics, consult the [User Guide](../user-guide/) for detailed coverage of wells, boundary conditions, PVT models, and solver configuration, or the [API Reference](../api-reference/) for complete documentation of every class and function.
+You now have the foundational skills to set up, run, and analyze a wide range of reservoir simulation studies with BORES. For deeper exploration of specific topics, consult the [User Guide](../user-guide/index.md) for detailed coverage of wells, boundary conditions, PVT models, and solver configuration, or the [API Reference](../api-reference/index.md) for complete documentation of every class and function.

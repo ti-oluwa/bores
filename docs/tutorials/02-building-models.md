@@ -116,22 +116,29 @@ oil_viscosity = bores.build_uniform_grid(grid_shape, value=1.2)     # cP
 bubble_point = bores.build_uniform_grid(grid_shape, value=2800.0)   # psi
 oil_sg = bores.build_uniform_grid(grid_shape, value=0.82)           # ~40 deg API
 
-# Saturations
-So = bores.build_uniform_grid(grid_shape, value=0.72)
-Sw = bores.build_uniform_grid(grid_shape, value=0.28)
-Sg = bores.build_uniform_grid(grid_shape, value=0.00)
-
 # Residual saturations
 Sorw = bores.build_uniform_grid(grid_shape, value=0.20)
 Sorg = bores.build_uniform_grid(grid_shape, value=0.15)
 Sgr  = bores.build_uniform_grid(grid_shape, value=0.05)
 Swir = bores.build_uniform_grid(grid_shape, value=0.25)
 Swc  = bores.build_uniform_grid(grid_shape, value=0.25)
+
+# Build initial saturations from fluid contacts
+depth = bores.build_depth_grid(thickness, datum=5000.0)
+
+Sw, So, Sg = bores.build_saturation_grids(
+    depth_grid=depth,
+    gas_oil_contact=4900.0,       # GOC above reservoir (no initial gas cap)
+    oil_water_contact=5120.0,     # OWC below reservoir
+    connate_water_saturation_grid=Swc,
+    residual_oil_saturation_water_grid=Sorw,
+    residual_oil_saturation_gas_grid=Sorg,
+    residual_gas_saturation_grid=Sgr,
+    porosity_grid=porosity,
+)
 ```
 
-For this tutorial, we keep some properties uniform to focus on the model-building aspects. In a real study, you might also layer the initial saturations (deeper layers may have different water saturation) or use spatially varying temperature (geothermal gradient).
-
-The slightly higher connate water saturation (28%) compared to the first tutorial reflects the fact that finer-grained layers tend to hold more water due to stronger capillary forces.
+For this tutorial, we keep some properties uniform to focus on the model-building aspects. The `build_saturation_grids()` function computes physically consistent saturations from fluid contact depths, ensuring that $S_o + S_w + S_g = 1.0$ in every cell. Here we place the GOC above the reservoir (no gas cap) and the OWC below, so most cells are in the oil zone with connate water. In a real study, you might also use spatially varying temperature (geothermal gradient) or place the contacts within the reservoir to create initial gas caps or water legs.
 
 ---
 

@@ -303,6 +303,7 @@ class ReservoirModel(
         "saturation_history": SaturationHistory,
         "dip_angle": float,
         "dip_azimuth": float,
+        "datum_depth": typing.Optional[float],
     },
 ):
     """Models a reservoir in N-dimensional space for simulation."""
@@ -317,6 +318,7 @@ class ReservoirModel(
         saturation_history: SaturationHistory[NDimension],
         dip_angle: float = 0.0,
         dip_azimuth: float = 0.0,
+        datum_depth: typing.Optional[float] = 0.0,
     ) -> None:
         """
         Initialize the reservoir model.
@@ -329,15 +331,19 @@ class ReservoirModel(
         :param saturation_history: Saturation history or lazy loader
         :param dip_angle: Dip angle of the reservoir in degrees (0 = horizontal, 90 = vertical)
         :param dip_azimuth: Dip azimuth of the reservoir in degrees (0 = North, 90 = East, 180 = South, 270 = West)
+        :param datum_depth: Reference depth for reservoir model. Basically the reservoir top depth (below sea level)
         """
         if not (0.0 <= dip_angle <= 90.0):
             raise ValidationError(
-                f"dip_angle must be between 0.0 and 90.0, got {dip_angle}"
+                f"`dip_angle` must be between 0.0 and 90.0, got {dip_angle}"
             )
         if not (0.0 <= dip_azimuth < 360.0):
             raise ValidationError(
-                f"dip_azimuth must be between 0.0 and 360.0, got {dip_azimuth}"
+                f"`dip_azimuth` must be between 0.0 and 360.0, got {dip_azimuth}"
             )
+
+        if datum_depth is not None and datum_depth < 0:
+            raise ValidationError("`datum_depth` cannot be assigned a negative value")
 
         self.grid_shape = grid_shape
         self.cell_dimension = cell_dimension
@@ -347,6 +353,7 @@ class ReservoirModel(
         self.saturation_history = saturation_history
         self.dip_angle = dip_angle
         self.dip_azimuth = dip_azimuth
+        self.datum_depth = datum_depth
 
     @property
     def dimensions(self) -> int:
@@ -403,7 +410,18 @@ class ReservoirModel(
         elevation = model.get_elevation_grid(apply_dip=True)
         ```
         """
-        base_elevation_grid = build_elevation_grid(self.thickness_grid)
+        if self.datum_depth is None:
+            datum_elevation = 0.0
+        else:
+            # `datum_depth` is the depth of the top of the reservoir (positive)
+            # We need the elevation of the bottom of the reservoir (negative)
+            # Bottom elevation = -(top_depth + total_thickness)
+            total_thickness = np.max(np.sum(self.thickness_grid, axis=2))
+            datum_elevation = -(self.datum_depth + total_thickness)
+
+        base_elevation_grid = build_elevation_grid(
+            self.thickness_grid, datum=datum_elevation
+        )
         # If no dip is requested or dip angle is zero, return flat grid
         if not apply_dip or self.dip_angle == 0.0:
             return base_elevation_grid
@@ -436,7 +454,9 @@ class ReservoirModel(
         depth = model.get_depth_grid(apply_dip=True)
         ```
         """
-        base_depth_grid = build_depth_grid(self.thickness_grid)
+        base_depth_grid = build_depth_grid(
+            self.thickness_grid, datum=self.datum_depth or 0.0
+        )
         # If no dip is requested or dip angle is zero, return flat grid
         if not apply_dip or self.dip_angle == 0.0:
             return base_depth_grid

@@ -192,7 +192,7 @@ for state in sim_run:
 
     For large models, consider using BORES streaming utilities (`bores.streams`) to pipe results to disk (HDF5, Zarr, or pickle) instead of holding them all in memory.
 
-## The ModelState Object
+## The `ModelState` Object
 
 Each yielded `ModelState` contains a complete snapshot of the simulation at that point in time. Here are the key attributes you will use most often:
 
@@ -262,4 +262,4 @@ The pressure equation at each IMPES timestep requires solving a sparse linear sy
 !!! danger "Direct Solver Warning"
     Avoid using `pressure_solver="direct"` for grids larger than about 50,000 cells. The direct solver (sparse LU factorization) has $O(n^{1.5})$ to $O(n^2)$ memory scaling, and BORES will warn you about estimated memory usage for large systems. Iterative solvers with good preconditioners are almost always faster and more memory-efficient for reservoir simulation problems.
 
-For a comprehensive guide to solver and preconditioner selection, including performance benchmarks and tuning advice, see the [Solvers and Preconditioners](../guides/solvers.md) guide.
+For a comprehensive guide to solver and preconditioner selection, including performance benchmarks and tuning advice, see the [Solvers and Preconditioners](../user-guide/simulation/solvers.md) guide.

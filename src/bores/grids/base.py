@@ -80,7 +80,7 @@ uniform_grid = build_uniform_grid  # Alias for convenience
 def build_layered_grid(
     grid_shape: NDimension,
     layer_values: ArrayLike[float],
-    orientation: Orientation,
+    orientation: typing.Union[Orientation, typing.Literal["x", "y", "z"]],
 ) -> NDimensionalGrid[NDimension]:
     """
     Constructs a N-Dimensional layered grid with specified layer values.
@@ -98,6 +98,9 @@ def build_layered_grid(
     if len(layer_values) < 1:
         raise ValidationError("At least one layer value must be provided.")
 
+    orientation = (
+        Orientation(orientation) if isinstance(orientation, str) else orientation
+    )
     dtype = get_dtype()
     layered_grid = build_uniform_grid(grid_shape=grid_shape, value=0.0)
     if orientation == Orientation.X:  # Layering along x-axis
@@ -154,6 +157,7 @@ def _compute_elevation_downward(
 
     :param thickness_grid: 3D array of cell thicknesses (ft)
     :param dtype: NumPy dtype for array allocation
+    :param datum: Reference elevation/depth for the bottom/top of the grid (ft).
     :return: 3D elevation grid (ft)
     """
     _, _, nz = thickness_grid.shape
@@ -168,7 +172,7 @@ def _compute_elevation_downward(
             + thickness_grid[:, :, k] / 2
         )
 
-    return elevation_grid + datum # type: ignore
+    return elevation_grid + datum  # type: ignore
 
 
 @numba.njit(cache=True)
@@ -182,6 +186,7 @@ def _compute_elevation_upward(
 
     :param thickness_grid: 3D array of cell thicknesses (ft)
     :param dtype: NumPy dtype for array allocation
+    :param datum: Reference elevation/depth for the bottom/top of the grid (ft).
     :return: 3D elevation grid (ft)
     """
     _, _, nz = thickness_grid.shape
@@ -202,7 +207,7 @@ def _compute_elevation_upward(
 def _build_elevation_grid(
     thickness_grid: NDimensionalGrid[NDimension],
     direction: typing.Literal["downward", "upward"] = "downward",
-    datum: float = 0.0
+    datum: float = 0.0,
 ) -> NDimensionalGrid[NDimension]:
     """
     Convert a cell thickness (height) grid into an absolute elevation grid (cell center z-coordinates).
@@ -214,6 +219,7 @@ def _build_elevation_grid(
     :param direction: Direction to generate the elevation grid.
         Can be "downward" (from top to bottom) or "upward" (from bottom to top).
         "downward" basically gives a depth grid from the top of the reservoir.
+    :param datum: Reference elevation/depth for the bottom/top of the grid (ft).
     :return: N-dimensional numpy array representing the elevation of each cell in the reservoir (ft).
     """
     if direction not in {"downward", "upward"}:
@@ -227,16 +233,50 @@ def _build_elevation_grid(
 
 
 def build_elevation_grid(
-    thickness_grid: NDimensionalGrid[NDimension],
-    datum: float = 0.0
+    thickness_grid: NDimensionalGrid[NDimension], datum: float = 0.0
 ) -> NDimensionalGrid[NDimension]:
     """
-    Public wrapper for building an elevation grid from a thickness grid.
+    Build an upward elevation grid from a thickness grid.
 
-    Elevation is measured from base level upward.
+    Elevation is measured upward from a datum level, where positive elevation
+    means above the datum. The datum typically represents:
+    - Sea level (datum = 0)
+    - Base of reservoir (datum = base elevation)
+    - Reference surface (datum = reference elevation)
 
-    :param thickness_grid: N-dimensional numpy array representing the thickness of each cell in the reservoir (ft).
-    :return: N-dimensional numpy array representing the elevation of each cell in the reservoir (ft).
+    :param thickness_grid: N-dimensional numpy array representing the thickness
+        of each cell in the reservoir (ft).
+    :param datum: Reference elevation for the bottom of the grid (ft). Elevation of the bottom surface of the grid.
+        - datum = 0: Bottom layer starts at elevation 0 (e.g., sea level)
+        - datum > 0: Bottom layer starts above the reference (e.g., above sea level)
+        - datum < 0: Bottom layer starts below the reference (e.g., subsea)
+        Default is 0.0 (bottom layer at reference level).
+        - Negative if bottom is subsea (most common)
+        - Positive if bottom is above sea level
+        - Zero if bottom is exactly at sea level
+    :return: N-dimensional numpy array representing the elevation of each cell
+        center in the reservoir (ft), measured upward from datum.
+
+    Example:
+    ```python
+    # Reservoir from -2000 to -1000 ft (subsea)
+    thickness = np.full((10, 10, 20), 50.0)  # 20 layers, 50 ft each
+
+    # Datum at base of reservoir
+    elev_grid = build_elevation_grid(thickness, datum=-2000.0)
+    # elev_grid[0,0,-1] = -1975.0 ft (center of bottom 50-ft layer)
+    # elev_grid[0,0,0] = -1025.0 ft  (center of top layer)
+
+    # Datum at sea level (bottom at -1000 ft from top)
+    elev_grid = build_elevation_grid(thickness, datum=-1000.0)
+    # elev_grid[0,0,-1] = -975.0 ft
+    # elev_grid[0,0,0] = -25.0 ft
+    ```
+
+    Notes:
+        - Elevation increases upward (k=-1 is lowest, k=0 is highest)
+        - For depth (downward-positive), use `build_depth_grid()` instead
+        - Datum represents the elevation of the BOTTOM of the grid
     """
     return _build_elevation_grid(thickness_grid, direction="upward", datum=datum)
 
@@ -245,18 +285,51 @@ elevation_grid = build_elevation_grid  # Alias for convenience
 
 
 def build_depth_grid(
-    thickness_grid: NDimensionalGrid[NDimension],
-    datum: float = 0.0
+    thickness_grid: NDimensionalGrid[NDimension], datum: float = 0.0
 ) -> NDimensionalGrid[NDimension]:
     """
-    Public wrapper for building a downward depth grid from a thickness grid.
+    Build a downward depth grid from a thickness grid.
 
-    Depth is measured from top level downward.
+    Depth is measured downward from a datum level, where positive depth means
+    below the datum. The datum typically represents:
+    - Sea level (datum = 0)
+    - Ground surface (datum = surface elevation)
+    - Top of reservoir (datum = top depth)
 
-    :param thickness_grid: N-dimensional numpy array representing the thickness of each cell in the reservoir (ft).
-    :return: N-dimensional numpy array representing the depth of each cell in the reservoir (ft).
+    :param thickness_grid: N-dimensional numpy array representing the thickness
+        of each cell in the reservoir (ft).
+    :param datum: Reference depth for the top of the grid (ft). Depth of the top surface of the grid.
+        - datum = 0: Top layer starts at depth 0 (e.g., sea level)
+        - datum > 0: Top layer starts below the reference (e.g., subsea depth)
+        - datum < 0: Top layer starts above the reference (e.g., above sea level)
+        Default is 0.0 (top layer at reference level).
+        - Always positive (depth increases downward)
+        - datum = 1000.0 means top is at 1000 ft depth
+    :return: N-dimensional numpy array representing the depth of each cell
+        center in the reservoir (ft), measured downward from datum.
+
+    Example:
+    ```python
+    # Reservoir 1000-2000 ft subsea depth
+    thickness = np.full((10, 10, 20), 50.0)  # 20 layers, 50 ft each
+
+    # Option 1: Datum at sea level, specify top depth
+    depth_grid = build_depth_grid(thickness, datum=1000.0)
+    # depth_grid[0,0,0] = 1025.0 ft  (center of first 50-ft layer)
+    # depth_grid[0,0,-1] = 1975.0 ft (center of last layer)
+
+    # Option 2: Datum at top of reservoir
+    depth_grid = build_depth_grid(thickness, datum=0.0)
+    # depth_grid[0,0,0] = 25.0 ft  (relative to top)
+    # depth_grid[0,0,-1] = 975.0 ft
+    ```
+
+    Notes:
+        - Depth increases downward (k=0 is shallowest, k=-1 is deepest)
+        - For elevation (upward-positive), use `build_elevation_grid()` instead
+        - Datum represents the depth/elevation of the TOP of the grid
     """
-    return _build_elevation_grid(thickness_grid, direction="downward", datum=datum))
+    return _build_elevation_grid(thickness_grid, direction="downward", datum=datum)
 
 
 depth_grid = build_depth_grid  # Alias for convenience
@@ -403,11 +476,9 @@ def apply_structural_dip(
     dy_component = np.cos(dip_azimuth_radians)  # Positive = North
     tan_dip_angle = np.tan(dip_angle_radians)
 
-    # Group parameters for cleaner function calls
     grid_dimensions = (nx, ny)
     dip_components = (dx_component, dy_component, tan_dip_angle)
 
-    # Apply dip using njitted helper functions
     if elevation_direction == "upward":
         return _apply_dip_upward(
             dipped_elevation_grid=dipped_elevation_grid,
@@ -1032,9 +1103,9 @@ def flatten_multilayer_grid_to_surface(
     ```
 
     Notes:
-        - For permeability, consider using directional averaging instead of simple flattening
-        - NaN values are handled appropriately if ignore_nan=True
-        - Weighted mean normalizes weights automatically (no need to pre-normalize)
+    - For permeability, consider using directional averaging instead of simple flattening
+    - NaN values are handled appropriately if ignore_nan=True
+    - Weighted mean normalizes weights automatically (no need to pre-normalize)
     """
     if multilayer_grid.ndim != 3:
         raise ValidationError(

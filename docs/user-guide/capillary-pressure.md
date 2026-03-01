@@ -482,34 +482,103 @@ Both analytical models and tabular data are serializable. When you save a `Confi
 
 ## Visualizing Capillary Pressure Curves
 
-Visualizing your capillary pressure curves before running a simulation is essential for verifying that the model matches your physical expectations. You can compute and plot curves using NumPy and BORES visualization.
+Visualizing your capillary pressure curves before running a simulation is essential for verifying that the model matches your physical expectations. The best approach is to create the actual model you plan to use and call it directly across a saturation sweep. This ensures the plotted curves are exactly what the simulator will use.
+
+### Oil-Water Capillary Pressure
 
 ```python
 import bores
 import numpy as np
 
-# Compute Brooks-Corey capillary pressure curve
-Sw = np.linspace(0.25, 0.75, 100)
-Se = (Sw - 0.25) / (1.0 - 0.25 - 0.25)  # Normalized to mobile range
-Se = np.clip(Se, 0.01, 1.0)              # Avoid division by zero
-Pc = 5.0 * Se ** (-1.0 / 2.5)            # Pd=5 psi, lambda=2.5
+# Create the model
+capillary = bores.BrooksCoreyCapillaryPressureModel(
+    irreducible_water_saturation=0.25,
+    residual_oil_saturation_water=0.25,
+    residual_oil_saturation_gas=0.15,
+    residual_gas_saturation=0.05,
+    oil_water_entry_pressure_water_wet=5.0,
+    oil_water_pore_size_distribution_index_water_wet=2.5,
+    gas_oil_entry_pressure=1.5,
+    gas_oil_pore_size_distribution_index=2.0,
+)
 
-data = {
-    "Water Saturation": Sw,
-    "Pcow (psi)": Pc,
-}
+# Sweep water saturation across the mobile range (no free gas)
+Sw_values = np.linspace(0.26, 0.75, 100)  # Slightly above Swc to avoid singularity
+pcow_values = np.zeros_like(Sw_values)
+
+for i, sw in enumerate(Sw_values):
+    so = 1.0 - sw  # No free gas
+    result = capillary.get_capillary_pressures(
+        water_saturation=sw, oil_saturation=so, gas_saturation=0.0,
+    )
+    pcow_values[i] = result["oil_water"]
+
 fig = bores.make_series_plot(
-    data=data,
-    plot_type="line",
+    data=np.column_stack([Sw_values, pcow_values]),
+    title="Brooks-Corey Oil-Water Capillary Pressure",
     x_label="Water Saturation (fraction)",
     y_label="Capillary Pressure (psi)",
-    title="Brooks-Corey Oil-Water Capillary Pressure",
 )
 fig.show()
 # Output: [PLACEHOLDER: Insert capillary_pressure_curve.png]
 ```
 
 This plot should show capillary pressure decreasing from a high value at low water saturation (near residual) toward zero as water saturation approaches the maximum mobile value. If the curve shows unexpected shapes (negative values in a water-wet system, or unreasonably high pressures), check your entry pressure and pore size distribution index.
+
+### Comparing Models
+
+You can plot multiple capillary pressure models together to compare their behavior. This is useful when deciding between Brooks-Corey and Van Genuchten, or when evaluating how different wettability settings affect the curves:
+
+```python
+import bores
+import numpy as np
+
+# Brooks-Corey (water-wet)
+bc_ww = bores.BrooksCoreyCapillaryPressureModel(
+    irreducible_water_saturation=0.25,
+    residual_oil_saturation_water=0.25,
+    oil_water_entry_pressure_water_wet=5.0,
+    oil_water_pore_size_distribution_index_water_wet=2.5,
+)
+
+# Van Genuchten (water-wet)
+vg_ww = bores.VanGenuchtenCapillaryPressureModel(
+    irreducible_water_saturation=0.25,
+    residual_oil_saturation_water=0.25,
+    oil_water_alpha_water_wet=0.2,
+    oil_water_n_water_wet=2.5,
+)
+
+# Evaluate both across the same saturation range
+Sw_range = np.linspace(0.26, 0.74, 80)
+pcow_bc = np.zeros_like(Sw_range)
+pcow_vg = np.zeros_like(Sw_range)
+
+for i, sw in enumerate(Sw_range):
+    so = 1.0 - sw
+    result_bc = bc_ww.get_capillary_pressures(
+        water_saturation=sw, oil_saturation=so, gas_saturation=0.0,
+    )
+    result_vg = vg_ww.get_capillary_pressures(
+        water_saturation=sw, oil_saturation=so, gas_saturation=0.0,
+    )
+    pcow_bc[i] = result_bc["oil_water"]
+    pcow_vg[i] = result_vg["oil_water"]
+
+fig = bores.make_series_plot(
+    data={
+        "Brooks-Corey": np.column_stack([Sw_range, pcow_bc]),
+        "Van Genuchten": np.column_stack([Sw_range, pcow_vg]),
+    },
+    title="Capillary Pressure Model Comparison",
+    x_label="Water Saturation (fraction)",
+    y_label="Capillary Pressure (psi)",
+)
+fig.show()
+# Output: [PLACEHOLDER: Insert capillary_pressure_comparison.png]
+```
+
+You should see that both models produce similar general shapes (high Pc at low Sw, low Pc at high Sw), but the Van Genuchten curve is smoother near the residual saturation where Brooks-Corey approaches infinity. This smoother behavior is why Van Genuchten is sometimes preferred for numerical stability.
 
 ---
 

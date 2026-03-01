@@ -36,7 +36,7 @@ def update_pvt_grids(
     wells: Wells[ThreeDimensions],
     miscibility_model: MiscibilityModel,
     pvt_tables: typing.Optional[PVTTables] = None,
-    use_constant_saturation_pressure: bool = False,
+    freeze_saturation_pressure: bool = False,
 ) -> FluidProperties[ThreeDimensions]:
     """
     Updates PVT fluid properties grids using the current pressure and temperature values.
@@ -105,6 +105,21 @@ def update_pvt_grids(
     :param wells: Current wells configuration (used for fluid type information).
     :param miscibility_model: The miscibility model used in the simulation.
     :param pvt_tables: PVT table for property lookups (if None, correlations are used).
+    :param freeze_saturation_pressure: If True, keeps oil bubble point pressure (Pb)
+        constant at its current value throughout the simulation. This is appropriate for:
+        - Natural depletion with no compositional changes
+        - Waterflooding where oil composition remains constant
+        - Simplified black-oil models without compositional tracking
+        If False (default), Pb is recomputed each timestep based on current solution GOR.
+
+        **Properties affected when Pb is frozen:**
+        - Bubble point pressure (Pb) - directly frozen
+        - Solution GOR (Rs) - computed using frozen Pb as reference
+        - Oil FVF (Bo) - uses frozen Pb for undersaturated calculations
+        - Oil compressibility (Co) - switches at frozen Pb
+        - Oil viscosity (μo) - indirectly through Rs
+        - Oil density (ρo) - indirectly through Rs and Bo
+
     :return: Updated FluidProperties object with recalculated gas, water, and oil properties.
     """
     pressure_grid = fluid_properties.pressure_grid
@@ -250,12 +265,20 @@ def update_pvt_grids(
 
     if pvt_tables is None:
         # Step 1: Compute New bubble point using Current Rs
-        new_oil_bubble_point_pressure_grid = build_oil_bubble_point_pressure_grid(
-            gas_gravity_grid=fluid_properties.gas_gravity_grid,
-            oil_api_gravity_grid=fluid_properties.oil_api_gravity_grid,
-            temperature_grid=temperature_grid,
-            solution_gas_to_oil_ratio_grid=fluid_properties.solution_gas_to_oil_ratio_grid,
-        )
+        if freeze_saturation_pressure:
+            # Keep current bubble point constant
+            new_oil_bubble_point_pressure_grid = (
+                fluid_properties.oil_bubble_point_pressure_grid
+            )
+        else:
+            # Recompute bubble point using current Rs
+            new_oil_bubble_point_pressure_grid = build_oil_bubble_point_pressure_grid(
+                gas_gravity_grid=fluid_properties.gas_gravity_grid,
+                oil_api_gravity_grid=fluid_properties.oil_api_gravity_grid,
+                temperature_grid=temperature_grid,
+                solution_gas_to_oil_ratio_grid=fluid_properties.solution_gas_to_oil_ratio_grid,
+            )
+
         # Step 2: Compute Rs at New bubble point
         gor_at_bubble_point_pressure_grid = build_solution_gas_to_oil_ratio_grid(
             pressure_grid=new_oil_bubble_point_pressure_grid,  # New bubble point here
@@ -316,10 +339,17 @@ def update_pvt_grids(
         )
     else:
         # Step 1: Compute New bubble point using Current Rs
-        new_oil_bubble_point_pressure_grid = pvt_tables.oil_bubble_point_pressure(
-            temperature=temperature_grid,
-            solution_gor=fluid_properties.solution_gas_to_oil_ratio_grid,
-        )
+        if freeze_saturation_pressure:
+            # Keep current bubble point constant
+            new_oil_bubble_point_pressure_grid = (
+                fluid_properties.oil_bubble_point_pressure_grid
+            )
+        else:
+            # Recompute from tables
+            new_oil_bubble_point_pressure_grid = pvt_tables.oil_bubble_point_pressure(
+                temperature=temperature_grid,
+                solution_gor=fluid_properties.solution_gas_to_oil_ratio_grid,
+            )
 
         # Step 2: Compute New Rs at current pressure
         new_solution_gas_to_oil_ratio_grid = pvt_tables.solution_gas_to_oil_ratio(

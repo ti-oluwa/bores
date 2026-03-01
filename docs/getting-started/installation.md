@@ -19,8 +19,8 @@ BORES depends on several scientific Python packages that will be installed autom
 | numpy | Array operations and linear algebra |
 | scipy | Sparse matrix solvers and numerical methods |
 | numba | JIT compilation for performance-critical functions |
-| attrs / cattrs | Immutable data models and serialization |
-| h5py / zarr | HDF5 and Zarr storage backends |
+| attrs / cattrs | Data models and serialization |
+| h5py / zarr / orjson | HDF5, Zarr, and JSON storage backends |
 | plotly | Visualization (series, maps, 3D volumes) |
 
 ---
@@ -38,7 +38,7 @@ BORES depends on several scientific Python packages that will be installed autom
     Then install BORES:
 
     ```bash
-    uv pip install bores-framework
+    uv add bores-framework
     ```
 
     If you are working from a cloned copy of the BORES repository, you can install it in development mode:

@@ -75,7 +75,7 @@ Swc  = bores.build_uniform_grid(grid_shape, value=0.20)  # Connate water
 
 # Build initial saturations from fluid contacts
 # Depth grid: top of reservoir at 5000 ft, 20 ft per layer
-depth = bores.depth_grid(grid_shape, top_depth=5000.0, thickness_grid=thickness)
+depth = bores.depth_grid(thickness_grid=thickness, datum=5000.0)
 
 Sw, So, Sg = bores.build_saturation_grids(
     depth_grid=depth,

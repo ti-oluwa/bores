@@ -18,22 +18,19 @@ The User Guide provides detailed documentation for every major subsystem in BORE
 | [Well Schedules](wells/schedules.md) | Time-dependent well events, predicates, and actions |
 | [Well Patterns](wells/patterns.md) | Common well placement patterns for waterfloods and EOR |
 | **Simulation** | |
-| [Running Simulations](simulation/running.md) | The bores.run() function, iterating over results, early stopping |
-| [Time Stepping](simulation/timestepping.md) | Timer class, adaptive control, CFL conditions, ramp-up |
+| [Time Stepping](simulation/timestep-control.md) | Timer class, adaptive control, CFL conditions, ramp-up |
 | [Solvers](simulation/solvers.md) | Pressure solvers, preconditioners, CachedPreconditionerFactory |
-| [Streaming and Storage](simulation/streaming.md) | StateStream, storage backends, replay |
-| [Post-Processing](simulation/post-processing.md) | Analysis utilities, recovery factors, production profiles |
+| [Streaming and Storage](advanced/states-streams.md) | StateStream, storage backends, replay |
 | **Advanced** | |
 | [Boundary Conditions](advanced/boundary-conditions.md) | No-flow, constant pressure, periodic, Carter-Tracy aquifer |
-| [Faults and Fractures](advanced/faults-fractures.md) | Transmissibility modifiers, fault definitions |
+| [Faults and Fractures](advanced/fractures.md) | Transmissibility modifiers, fault definitions |
 | [PVT Tables](advanced/pvt-tables.md) | Tabular PVT as alternative to correlations |
+| [Simulation Analysis](advanced/model-analysis.md) | Analysis utilities, recovery factors, production profiles |
 | [Serialization](advanced/serialization.md) | Saving/loading models, custom type registration |
-| [Miscible Flooding](advanced/miscible-flooding.md) | Todd-Longstaff model, MMP, mixing parameter |
-| [Performance](advanced/performance.md) | Numba JIT, precision control, grid coarsening |
-| [Events System](advanced/events.md) | Custom event predicates and actions |
+| [Miscible Flooding](advanced/miscibility.md) | Todd-Longstaff model, MMP, mixing parameter |
 | [Configuration](config.md) | Complete Config class reference |
 | [Constants](constants.md) | Physical constants and the Constants class |
 
 !!! tip "Where to Start"
 
-    If you completed the [Tutorials](../tutorials/), start with the sections most relevant to your current project. The sections on wells, relative permeability, and simulation controls are the most commonly referenced.
+    If you completed the [Tutorials](../tutorials/index.md), start with the sections most relevant to your current project. The sections on wells, relative permeability, and simulation controls are the most commonly referenced.

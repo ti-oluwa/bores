@@ -14,8 +14,8 @@ theme:
   palette:
     # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
-      primary: slate
-      accent: cyan
+      primary: teal
+      accent: amber
       toggle:
         icon: material/brightness-auto
         name: Switch to light mode
@@ -23,8 +23,8 @@ theme:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: slate
-      accent: cyan
+      primary: teal
+      accent: amber
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
@@ -32,8 +32,8 @@ theme:
     # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: slate
-      accent: cyan
+      primary: teal
+      accent: amber
       toggle:
         icon: material/brightness-4
         name: Switch to system preference
@@ -185,6 +185,7 @@ nav:
       - Boundary Conditions: user-guide/advanced/boundary-conditions.md
       - Aquifer Modeling: user-guide/advanced/aquifers.md
       - States & Streams: user-guide/advanced/states-streams.md
+      - Model Analysis: user-guide/advanced/model-analysis.md
       - Serialization: user-guide/advanced/serialization.md
     - Configuration: user-guide/config.md
     - Constants: user-guide/constants.md

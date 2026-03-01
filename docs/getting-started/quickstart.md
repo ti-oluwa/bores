@@ -52,17 +52,29 @@ temperature = bores.build_uniform_grid(grid_shape, value=180.0)     # deg F
 oil_viscosity = bores.build_uniform_grid(grid_shape, value=1.5)     # cP
 bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)   # psi
 
-# Initial saturations - must sum to 1.0 in every cell
-So = bores.build_uniform_grid(grid_shape, value=0.75)   # Oil
-Sw = bores.build_uniform_grid(grid_shape, value=0.25)   # Water (at connate)
-Sg = bores.build_uniform_grid(grid_shape, value=0.00)   # Gas (undersaturated)
-
 # Residual and irreducible saturations
 Sorw = bores.build_uniform_grid(grid_shape, value=0.20)  # Residual oil (waterflood)
 Sorg = bores.build_uniform_grid(grid_shape, value=0.15)  # Residual oil (gas flood)
 Sgr  = bores.build_uniform_grid(grid_shape, value=0.05)  # Residual gas
 Swir = bores.build_uniform_grid(grid_shape, value=0.20)  # Irreducible water
 Swc  = bores.build_uniform_grid(grid_shape, value=0.20)  # Connate water
+
+# Build depth grid from thickness and a datum (top of reservoir at 5000 ft)
+depth = bores.build_depth_grid(thickness, datum=5000.0)
+
+# Build initial saturations from fluid contact depths.
+# Place GOC above the reservoir and OWC below it so all cells
+# are in the oil zone (undersaturated, no initial gas cap).
+Sw, So, Sg = bores.build_saturation_grids(
+    depth_grid=depth,
+    gas_oil_contact=4999.0,      # Above reservoir top (no gas cap)
+    oil_water_contact=5100.0,    # Below reservoir base (all oil zone)
+    connate_water_saturation_grid=Swc,
+    residual_oil_saturation_water_grid=Sorw,
+    residual_oil_saturation_gas_grid=Sorg,
+    residual_gas_saturation_grid=Sgr,
+    porosity_grid=porosity,
+)
 
 # Oil specific gravity (needed for PVT correlations)
 oil_sg = bores.build_uniform_grid(grid_shape, value=0.85)  # ~35 deg API
@@ -215,9 +227,17 @@ If you are working on a problem where numerical accuracy is critical, for exampl
 
 Every cell in the reservoir grid needs a set of physical properties: pressure, temperature, porosity, permeability, saturations, and so on. The `bores.build_uniform_grid()` helper creates a NumPy array of the specified shape filled with a single value. In a real study, you would typically load heterogeneous property distributions from geological models or well log data.
 
-The saturations in every cell must satisfy the constraint $S_o + S_w + S_g = 1.0$. This is a fundamental requirement of the black-oil formulation: pore space is always completely filled with some combination of oil, water, and gas. If your saturations do not sum to exactly 1.0, the `reservoir_model()` factory will normalize them automatically and issue a warning.
-
 Residual saturations define the minimum amount of each phase that remains trapped in the rock after displacement. These values control the maximum recovery you can achieve and directly influence the shape of relative permeability curves. The irreducible water saturation (`Swir`) is the minimum water saturation achievable by oil drainage, while the connate water saturation (`Swc`) represents the initial water present when the reservoir was formed.
+
+### Building Saturation Grids
+
+The `bores.build_saturation_grids()` function creates physically realistic initial saturation distributions from fluid contact depths. You provide a depth grid (built from `bores.build_depth_grid()`), the gas-oil contact (GOC) and oil-water contact (OWC) depths, and the residual saturation grids. The function divides the reservoir into three zones based on depth:
+
+- **Gas cap** (above GOC): Gas has displaced oil, leaving residual oil to gas displacement ($S_{org}$) and connate water ($S_{wc}$).
+- **Oil zone** (between GOC and OWC): Original oil accumulation with connate water and residual gas ($S_{gr}$).
+- **Water zone** (below OWC): Water has displaced oil, leaving residual oil to water displacement ($S_{orw}$).
+
+In this example, the GOC is placed above the reservoir top and the OWC below the reservoir base. This means all cells fall in the oil zone, which is the correct initialization for an undersaturated reservoir with no gas cap and no aquifer. The resulting saturations satisfy the constraint $S_o + S_w + S_g = 1.0$ in every cell automatically. You can also enable smooth capillary transition zones at the contacts by passing `use_transition_zones=True`.
 
 ### The `reservoir_model()` Factory
 
@@ -283,7 +303,7 @@ with bores.StateStream(states=bores.run(model, config), store=store) as stream:
             print(f"Step {state.step}: P_avg = {state.model.fluid_properties.pressure_grid.mean():.1f} psi")
 ```
 
-`StateStream` supports several storage backends including `ZarrStore`, `HDF5Store`, and `JSONStore`. Zarr is recommended for large simulations because it supports chunked, compressed storage and is efficient for both writing and later analysis.
+`StateStream` currently supports two storage backends `ZarrStore` and `HDF5Store`. Zarr is recommended for large simulations because it supports chunked, compressed storage and is efficient for both writing and later analysis.
 
 ---
 
@@ -341,6 +361,6 @@ fig.show()
 You now have a working simulation and a basic understanding of the BORES workflow. Here are the recommended next steps:
 
 - **[Core Concepts](concepts.md)** - Understand the design principles behind BORES: immutable models, factory functions, generics, and the sign convention.
-- **[User Guide](../user-guide/)** - Deep dives into wells, boundary conditions, PVT correlations, relative permeability models, and solver configuration.
-- **[Tutorials](../tutorials/)** - Step-by-step walkthroughs of common workflows: depletion studies, waterflooding, gas injection, history matching, and more.
-- **[API Reference](../api-reference/)** - Complete documentation of every class, function, and parameter in the BORES package.
+- **[User Guide](../user-guide/index.md)** - Deep dives into wells, boundary conditions, PVT correlations, relative permeability models, and solver configuration.
+- **[Tutorials](../tutorials/index.md)** - Step-by-step walkthroughs of common workflows: depletion studies, waterflooding, gas injection, history matching, and more.
+- **[API Reference](../api-reference/index.md)** - Complete documentation of every class, function, and parameter in the BORES package.

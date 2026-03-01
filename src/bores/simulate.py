@@ -394,6 +394,7 @@ def _run_impes_step(
         wells=wells,
         miscibility_model=miscibility_model,
         pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
 
     # Recompute relative mobility grids with updated fluid properties
@@ -893,6 +894,7 @@ def _run_explicit_step(
         wells=wells,
         miscibility_model=miscibility_model,
         pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
     # Update residual saturation grids based on new saturations
     padded_rock_properties, padded_saturation_history = (
@@ -1159,6 +1161,7 @@ def run(
             wells=wells,
             miscibility_model=miscibility_model,
             pvt_tables=config.pvt_tables,
+            freeze_saturation_pressure=config.freeze_saturation_pressure,
         )
 
         # Unpad the fluid properties back to the original grid shape for model state snapshots
@@ -1293,6 +1296,7 @@ def run(
                             wells=wells,
                             miscibility_model=miscibility_model,
                             pvt_tables=config.pvt_tables,
+                            freeze_saturation_pressure=config.freeze_saturation_pressure,
                         )
                         logger.debug("PVT fluid properties updated")
 

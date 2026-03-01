@@ -150,7 +150,7 @@ co2_miscible = bores.InjectedFluid(
 
 The `minimum_miscibility_pressure` (MMP) is the pressure above which the injected gas develops first-contact or multi-contact miscibility with the reservoir oil. Below the MMP, the gas displaces oil immiscibly with high residual oil saturation. Above the MMP, the displacement approaches piston-like efficiency with near-zero residual oil.
 
-The `todd_longstaff_omega` parameter controls the degree of mixing between solvent and oil at the sub-grid scale. A value of 1.0 means complete mixing (the solvent and oil are fully miscible within each grid cell), while 0.0 means no mixing (the fluids remain segregated). The default value of 0.67 is the most commonly used in industry. See [Miscible Flooding](../advanced/miscible-flooding.md) for detailed physics.
+The `todd_longstaff_omega` parameter controls the degree of mixing between solvent and oil at the sub-grid scale. A value of 1.0 means complete mixing (the solvent and oil are fully miscible within each grid cell), while 0.0 means no mixing (the fluids remain segregated). The default value of 0.67 is the most commonly used in industry. See [Miscible Flooding](../advanced/miscibility.md) for detailed physics.
 
 The `miscibility_transition_width` controls the pressure range over which miscibility transitions from immiscible to fully miscible. BORES uses a smooth hyperbolic tangent transition centered at the MMP, with the width controlling how abrupt the transition is. A width of 0 gives a sharp step change; values of 300-500 psi give a gradual transition that is more numerically stable.
 

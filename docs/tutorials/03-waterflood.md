@@ -53,15 +53,25 @@ oil_viscosity = bores.build_uniform_grid(grid_shape, value=2.0)
 bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)
 oil_sg = bores.build_uniform_grid(grid_shape, value=0.87)
 
-So = bores.build_uniform_grid(grid_shape, value=0.75)
-Sw = bores.build_uniform_grid(grid_shape, value=0.25)
-Sg = bores.build_uniform_grid(grid_shape, value=0.00)
-
 Sorw = bores.build_uniform_grid(grid_shape, value=0.22)
 Sorg = bores.build_uniform_grid(grid_shape, value=0.15)
 Sgr  = bores.build_uniform_grid(grid_shape, value=0.05)
 Swir = bores.build_uniform_grid(grid_shape, value=0.22)
 Swc  = bores.build_uniform_grid(grid_shape, value=0.22)
+
+# Build initial saturations from fluid contacts
+depth = bores.build_depth_grid(thickness, datum=5000.0)
+
+Sw, So, Sg = bores.build_saturation_grids(
+    depth_grid=depth,
+    gas_oil_contact=4900.0,       # GOC above reservoir (no initial gas cap)
+    oil_water_contact=5100.0,     # OWC near reservoir bottom
+    connate_water_saturation_grid=Swc,
+    residual_oil_saturation_water_grid=Sorw,
+    residual_oil_saturation_gas_grid=Sorg,
+    residual_gas_saturation_grid=Sgr,
+    porosity_grid=porosity,
+)
 
 perm_grid = bores.build_uniform_grid(grid_shape, value=150.0)
 permeability = bores.RockPermeability(x=perm_grid)
@@ -90,6 +100,8 @@ model = bores.reservoir_model(
 ```
 
 The setup is similar to the first tutorial with a few differences. The oil viscosity is slightly higher (2.0 cP) to make the displacement dynamics more interesting. The residual oil saturation during waterflood (Sorw = 0.22) determines the maximum oil recovery: in the swept zone, oil saturation will drop to 22%, meaning up to 78% of the pore volume in the swept region is eventually occupied by water.
+
+We use `build_saturation_grids()` to compute physically consistent initial saturations from the fluid contact depths. The GOC is placed above the reservoir (no gas cap) and the OWC near the bottom, giving us an oil-filled reservoir with connate water. This approach ensures $S_o + S_w + S_g = 1.0$ in every cell and uses the correct residual saturations for each zone.
 
 Note that we pass only the x-direction permeability to `RockPermeability`. BORES automatically copies it to y and z, giving us isotropic permeability with less code.
 

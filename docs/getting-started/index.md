@@ -6,7 +6,7 @@ Welcome to BORES. This section walks you through everything you need to go from 
 
 <div class="grid cards" markdown>
 
--   :material-download-circle:{ .lg .middle } **Installation**
+- :material-download-circle:{ .lg .middle } **Installation**
 
     ---
 
@@ -14,7 +14,7 @@ Welcome to BORES. This section walks you through everything you need to go from 
 
     [:octicons-arrow-right-24: Install BORES](installation.md)
 
--   :material-rocket-launch:{ .lg .middle } **Quickstart**
+- :material-rocket-launch:{ .lg .middle } **Quickstart**
 
     ---
 
@@ -22,7 +22,7 @@ Welcome to BORES. This section walks you through everything you need to go from 
 
     [:octicons-arrow-right-24: Run your first simulation](quickstart.md)
 
--   :material-book-open-variant:{ .lg .middle } **Core Concepts**
+- :material-book-open-variant:{ .lg .middle } **Core Concepts**
 
     ---
 
@@ -42,4 +42,4 @@ If you are brand new to BORES, follow these pages in order:
 2. **Quickstart** - Run a complete simulation end to end.
 3. **Core Concepts** - Build a mental model of how the framework is organized.
 
-After completing these three pages, you will be ready to explore the [User Guide](../user-guide/), [Tutorials](../tutorials/), and [API Reference](../api-reference/) sections.
+After completing these three pages, you will be ready to explore the [User Guide](../user-guide/index.md), [Tutorials](../tutorials/index.md), and [API Reference](../api-reference/index.md) sections.

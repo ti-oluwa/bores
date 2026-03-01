@@ -16,13 +16,13 @@ In the first stage, you construct a `ReservoirModel` by defining the grid geomet
 
 In the second stage, you create a `Config` object that specifies how the simulation should run: the time stepping strategy, the evolution scheme, well definitions, boundary conditions, solver settings, and convergence tolerances. The config is also immutable, ensuring that your simulation parameters are locked in before the run begins.
 
-The third stage is the simulation run itself. `bores.run(model, config)` returns a generator that yields `ModelState` snapshots at each output interval. The generator-based design means computation happens lazily - the simulator only advances when you request the next state. The fourth stage, state streaming, optionally pipes these states to a storage backend (Zarr, HDF5, or JSON) as they are produced, keeping memory usage bounded. The fifth stage is post-simulation analysis, where you compute recovery factors, plot production profiles, track saturation fronts, and extract engineering insights from the stored states.
+The third stage is the simulation run itself. `bores.run(model, config)` returns a generator that yields `ModelState` snapshots at each output interval. The generator-based design means computation happens lazily - the simulator only advances when you request the next state. The fourth stage, state streaming, optionally pipes these states to a storage backend (Zarr or HDF5) as they are produced, keeping memory usage bounded. The fifth stage is post-simulation analysis, where you compute recovery factors, plot production profiles, track saturation fronts, and extract engineering insights from the stored states.
 
 ```mermaid
 flowchart LR
-    A["Model\nConstruction"] --> B["Configuration"]
-    B --> C["Simulation\nRun"]
-    C --> D["State\nStreaming"]
+    A["Model Construction"] --> B["Configuration"]
+    B --> C["Simulation Run"]
+    C --> D["State Streaming"]
     D --> E["Analysis"]
 
     style A fill:#4CAF50,color:#fff,stroke:#388E3C
@@ -40,7 +40,7 @@ flowchart LR
 
 ## Immutable Data Models
 
-BORES represents all reservoir data using immutable (frozen) classes built with the [attrs](https://www.attrs.org/) library. The core model classes - `ReservoirModel`, `FluidProperties`, `RockProperties`, `SaturationHistory`, and `Config` - are all frozen. Once created, their fields cannot be changed in place.
+BORES represents *almost* all reservoir data using immutable (frozen) classes built with the [attrs](https://www.attrs.org/) library. The core model classes - `ReservoirModel`, `FluidProperties`, `RockProperties`, `SaturationHistory`, and `Config` - are all frozen. Once created, their fields cannot be changed in place.
 
 Immutability matters deeply in simulation software. When you pass a `ReservoirModel` to `bores.run()`, the simulator works on internal copies of the data. Your original model object remains untouched, so you can safely reuse it for parameter sweeps, what-if scenarios, or debugging. There is no hidden state mutation that could silently corrupt your baseline.
 
@@ -117,7 +117,7 @@ model = bores.reservoir_model(
 
 !!! info "Override Any Property"
 
-    If you have measured data or equation-of-state results for a specific property (for example, gas compressibility factor from lab PVT analysis), pass it directly to `reservoir_model()` as the corresponding `_grid` parameter. The factory will use your value instead of computing it from correlations.
+    If you have measured data or equation-of-state results for a specific property (for example, gas compressibility factor from lab PVT analysis), pass it directly to `reservoir_model()` as the corresponding `*_grid` parameter. The factory will use your value instead of computing it from correlations.
 
 ---
 
@@ -359,6 +359,6 @@ config = bores.Config(
 
 With these concepts in hand, you are ready to explore the rest of BORES:
 
-- **[User Guide](../user-guide/)** - Detailed coverage of wells, boundary conditions, PVT correlations, relative permeability models, solvers, and time stepping strategies.
-- **[Tutorials](../tutorials/)** - End-to-end walkthroughs of common reservoir simulation workflows.
-- **[API Reference](../api-reference/)** - Complete documentation of every class, function, and parameter.
+- **[User Guide](../user-guide/index.md)** - Detailed coverage of wells, boundary conditions, PVT correlations, relative permeability models, solvers, and time stepping strategies.
+- **[Tutorials](../tutorials/index.md)** - End-to-end walkthroughs of common reservoir simulation workflows.
+- **[API Reference](../api-reference/index.md)** - Complete documentation of every class, function, and parameter.

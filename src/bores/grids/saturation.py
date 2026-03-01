@@ -4,6 +4,7 @@ import warnings
 import numpy as np
 
 from bores._precision import get_dtype
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import NDimension, NDimensionalGrid
 
@@ -29,66 +30,231 @@ def build_saturation_grids(
     NDimensionalGrid[NDimension],
 ]:
     """
-    Build 3-phase (Sw, So, Sg) saturation grids from fluid contact depths.
+    Build three-phase saturation grids from fluid contact depths and reservoir properties.
 
-    Supports capillary-pressure-like transitions where saturation gradients
-    follow a power-law profile, producing more realistic blending than
-    linear interpolation.
+    Creates physically realistic water, oil, and gas saturation distributions based on:
+    - Fluid contact depths (gas-oil contact, oil-water contact)
+    - Residual saturations appropriate to each zone
+    - Optional capillary transition zones for smooth saturation gradients
 
-    **Physical Basis:**
-    This implementation accounts for the fact that residual oil saturation depends
+    This function properly accounts for the fact that residual oil saturation depends
     on the displacing fluid:
-    - Gas cap: Uses Sor_gas (residual oil when gas displaces oil)
-    - Water zone: Uses Sor_water (residual oil when water displaces oil)
-    - Oil zone: Contains mobile oil with connate water and residual gas
+    - **Gas cap zone**: Uses Sor_gas (typically 0.10-0.25) - gas displaces oil efficiently
+    - **Water zone**: Uses Sor_water (typically 0.20-0.35) - water leaves more residual oil
+    - **Oil zone**: Contains mobile oil with connate water and residual gas
 
-    **Zones (sharp):**
-      - Above GOC → gas cap (gas + residual oil to gas + connate water)
-      - Between GOC and OWC → oil zone (oil + connate water + residual gas)
-      - Below OWC → water zone (water + residual oil to water + no gas)
+    ### Reservoir Zonation
 
-    **Zones (with capillary transition):**
-      - Gas-oil and oil-water interfaces vary smoothly based on
-        `transition_curvature_exponent`.
+    ### Sharp Contacts (use_transition_zones=False):
+    ```markdown
+        ┌─────────────────────────────────────┐
+        │   GAS CAP (depth < GOC)            │  Sg = 1 - Sor_gas - Swc
+        │   Sg + So + Sw = 1.0               │  So = Sor_gas
+        │   Gas has displaced oil            │  Sw = Swc
+        ├─────────────────────────────────────┤ ← Gas-Oil Contact (GOC)
+        │   OIL ZONE (GOC ≤ depth < OWC)    │  So = 1 - Swc - Sgr
+        │   So + Sw + Sg = 1.0               │  Sw = Swc
+        │   Original accumulation            │  Sg = Sgr
+        ├─────────────────────────────────────┤ ← Oil-Water Contact (OWC)
+        │   WATER ZONE (depth ≥ OWC)        │  Sw = 1 - Sor_water
+        │   Sw + So + Sg = 1.0               │  So = Sor_water
+        │   Water has displaced oil          │  Sg = 0
+        └─────────────────────────────────────┘
+    ```
 
-      - Small exponents (< 1) → more abrupt change.
-      - Larger exponents (> 1) → smoother, curved transition.
+    ### Transition Zones (use_transition_zones=True):
+    ```markdown
+        ┌─────────────────────────────────────┐
+        │   GAS CAP                          │  Pure gas zone
+        │   (depth < GOC - h_go/2)           │
+        ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+        │   GAS-OIL TRANSITION               │  Smooth blend:
+        │   (GOC - h_go/2 to GOC + h_go/2)   │  Sg: high → low
+        │                                     │  So: low → high
+        ├─────────────────────────────────────┤ ← Gas-Oil Contact (GOC)
+        │   OIL ZONE                         │  Pure oil zone
+        │   (GOC + h_go/2 to OWC - h_ow/2)   │
+        ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+        │   OIL-WATER TRANSITION             │  Smooth blend:
+        │   (OWC - h_ow/2 to OWC + h_ow/2)   │  Sw: low → high
+        │                                     │  So: high → low
+        ├─────────────────────────────────────┤ ← Oil-Water Contact (OWC)
+        │   WATER ZONE                       │  Pure water zone
+        │   (depth > OWC + h_ow/2)           │
+        └─────────────────────────────────────┘
+    ```
 
-    Example
+    ### Transition Zone Physics
 
+    The optional transition zones mimic capillary pressure effects without explicit
+    capillary pressure calculations. Saturation blending uses a power-law profile:
+
+    ```LaTex
+    $$w(z) = \left(\frac{z - z_{top}}{h_{transition}}\right)^{n}$$
+    ```
+
+    Where:
+    - $w$ = blending weight (0 at top, 1 at bottom)
+    - $z$ = depth within transition zone
+    - $h_{transition}$ = transition zone thickness
+    - $n$ = curvature exponent (controls profile shape)
+
+    **Curvature exponent effects:**
+    - n < 1: Sharper transition (approaching sharp contact)
+    - n = 1: Linear interpolation
+    - n = 2: Smooth, S-curved transition (recommended, realistic)
+    - n > 3: Very gradual transition (may be unrealistic)
+
+    ### Typical Parameter Values
+
+    **Water-wet sandstone reservoir:**
+    - Swc = 0.20-0.30 (connate water saturation)
+    - Sor_water = 0.25-0.35 (residual oil to water displacement)
+    - Sor_gas = 0.10-0.20 (residual oil to gas displacement)
+    - Sgr = 0.03-0.08 (residual gas saturation)
+    - GOC-OWC separation = 50-500 ft (typical oil column)
+    - Transition thickness = 5-20 ft (if used)
+
+    **Oil-wet carbonate reservoir:**
+    - Swc = 0.15-0.25 (lower connate water)
+    - Sor_water = 0.35-0.45 (higher residual oil)
+    - Sor_gas = 0.15-0.30 (higher residual oil to gas)
+    - Sgr = 0.05-0.10 (residual gas)
+
+    :param depth_grid: Grid of cell-center depths (ft). Depth increases downward,
+        where k=0 is the shallowest (top) layer and k=-1 is the deepest (bottom) layer.
+        Shape: (nx, ny, nz).
+    :param gas_oil_contact: Gas-oil contact depth (ft). Cells at depths less than this
+        value are in the gas cap. Must be less than oil_water_contact.
+    :param oil_water_contact: Oil-water contact depth (ft). Cells at depths greater than
+        or equal to this value are in the water zone. Must be greater than gas_oil_contact.
+    :param connate_water_saturation_grid: Connate (irreducible) water saturation for each
+        cell (fraction, 0-1). This is the minimum water saturation that remains in the
+        pore space even in the presence of hydrocarbons. Typical: 0.15-0.30.
+        Shape: (nx, ny, nz).
+    :param residual_oil_saturation_water_grid: Residual oil saturation when oil is
+        displaced by water (fraction, 0-1). This is the oil that remains trapped after
+        water imbibition. Higher in oil-wet systems. Typical: 0.20-0.35 (water-wet),
+        0.35-0.45 (oil-wet). Shape: (nx, ny, nz).
+    :param residual_oil_saturation_gas_grid: Residual oil saturation when oil is
+        displaced by gas (fraction, 0-1). This is the oil that remains trapped after
+        gas drainage. Typically lower than Sor_water due to favorable mobility ratio
+        and wettability. Typical: 0.10-0.25. Shape: (nx, ny, nz).
+    :param residual_gas_saturation_grid: Residual (trapped) gas saturation in the oil
+        zone (fraction, 0-1). This is solution gas that has come out of solution but
+        cannot flow. Typical: 0.03-0.08. Shape: (nx, ny, nz).
+    :param porosity_grid: Porosity for each cell (fraction, 0-1). Used to identify
+        active cells: cells with porosity <= 0 or NaN are considered inactive and
+        set to zero saturation for all phases. Shape: (nx, ny, nz).
+    :param use_transition_zones: If True, create smooth capillary-like transitions at
+        fluid contacts. If False, use sharp (discontinuous) contacts. Default: False.
+    :param gas_oil_transition_thickness: Thickness of the gas-oil transition zone (ft).
+        The transition is centered on the GOC and extends ±thickness/2 around it.
+        Only used if use_transition_zones=True. Typical: 5-20 ft. Default: 5.0.
+    :param oil_water_transition_thickness: Thickness of the oil-water transition zone (ft).
+        The transition is centered on the OWC and extends ±thickness/2 around it.
+        Only used if use_transition_zones=True. Typical: 5-20 ft. Default: 5.0.
+    :param transition_curvature_exponent: Power-law exponent controlling the shape of
+        saturation gradients in transition zones (dimensionless). Higher values produce
+        smoother, more realistic S-curves. Typical: 1.5-3.0. Default: 2.0.
+        Only used if use_transition_zones=True.
+
+    :return: Tuple of (water_saturation, oil_saturation, gas_saturation) grids, each
+        with shape (nx, ny, nz). All three saturations sum to exactly 1.0 in active cells
+        (where porosity > 0) and are 0.0 in inactive cells.
+
+    :raises ValidationError: If inputs are invalid:
+        - GOC >= OWC (contacts in wrong order)
+        - Array shapes don't match
+        - Saturation values outside [0, 1]
+        - Physically impossible combinations (e.g., Swc + Sor > 1.0)
+        - Transition zones overlap
+        - Transition parameters are non-positive
+
+    :warns UserWarning: If potentially problematic but not invalid:
+        - Sor_gas > Sor_water (unusual wettability)
+        - Oil column very thin (< 1 ft between transitions)
+
+    Example:
     ```python
-    # Typical values for a water-wet sandstone reservoir
-    thickness = np.ones((10, 5, 5)) * 10.0  # 10 ft per layer
-    swc = np.full_like(thickness, 0.25)     # 25% connate water
-    sor_w = np.full_like(thickness, 0.30)   # 30% residual oil to water
-    sor_g = np.full_like(thickness, 0.15)   # 15% residual oil to gas
-    sgr = np.full_like(thickness, 0.05)     # 5% residual gas
-    porosity = np.full_like(thickness, 0.22)
+    import numpy as np
+    from bores import build_depth_grid, build_saturation_grids
+
+    # Create a 50x50x30 reservoir grid (30 layers, 10 ft each)
+    nx, ny, nz = 50, 50, 30
+    thickness = np.full((nx, ny, nz), 10.0)
+    depth = build_depth_grid(thickness, datum=1000.0)  # Top at 1000 ft depth
+
+    # Define reservoir properties (water-wet sandstone)
+    porosity = np.full((nx, ny, nz), 0.22)  # 22% porosity
+    swc = np.full((nx, ny, nz), 0.25)       # 25% connate water
+    sor_w = np.full((nx, ny, nz), 0.30)     # 30% residual oil to water
+    sor_g = np.full((nx, ny, nz), 0.15)     # 15% residual oil to gas
+    sgr = np.full((nx, ny, nz), 0.05)       # 5% residual gas
+
+    # Fluid contacts: GOC at 1100 ft, OWC at 1200 ft (100 ft oil column)
+    goc = 1100.0
+    owc = 1200.0
+
+    # Sharp contacts (discontinuous)
     sw, so, sg = build_saturation_grids(
-        thickness, goc=1500, owc=1700,
-        swc, sor_w, sor_g, sgr, porosity
+        depth_grid=depth,
+        gas_oil_contact=goc,
+        oil_water_contact=owc,
+        connate_water_saturation_grid=swc,
+        residual_oil_saturation_water_grid=sor_w,
+        residual_oil_saturation_gas_grid=sor_g,
+        residual_gas_saturation_grid=sgr,
+        porosity_grid=porosity,
+        use_transition_zones=False
+    )
+
+    # Verify saturation constraint
+    assert np.allclose(sw + so + sg, 1.0, where=porosity > 0)
+
+    # With capillary transition zones (smooth gradients)
+    sw, so, sg = build_saturation_grids(
+        depth_grid=depth,
+        gas_oil_contact=goc,
+        oil_water_contact=owc,
+        connate_water_saturation_grid=swc,
+        residual_oil_saturation_water_grid=sor_w,
+        residual_oil_saturation_gas_grid=sor_g,
+        residual_gas_saturation_grid=sgr,
+        porosity_grid=porosity,
+        use_transition_zones=True,
+        gas_oil_transition_thickness=10.0,
+        oil_water_transition_thickness=15.0,
+        transition_curvature_exponent=2.0
     )
     ```
 
-    :param depth_grid: Depth grid for each cell (ft).
-    :param gas_oil_contact: Depth separating gas and oil (ft).
-    :param oil_water_contact: Depth separating oil and water (ft).
-    :param connate_water_saturation_grid: Connate water saturation (Swc) - immobile water.
-    :param residual_oil_saturation_water_grid: Residual oil saturation when displaced by water (Sor_w).
-        Typically 0.20-0.35 for water-wet systems.
-    :param residual_oil_saturation_gas_grid: Residual oil saturation when displaced by gas (Sor_g).
-        Typically 0.10-0.25, usually lower than Sor_w.
-    :param residual_gas_saturation_grid: Residual gas saturation (Sgr) - immobile gas.
-    :param porosity_grid: Porosity array used to mask inactive cells.
-    :param use_transition_zones: Enable smooth blending (default: False).
-    :param gas_oil_transition_thickness: Thickness of gas-oil transition zone (ft).
-    :param oil_water_transition_thickness: Thickness of oil-water transition zone (ft).
-    :param transition_curvature_exponent: Controls nonlinearity of saturation gradient.
-        Higher values yield smoother transitions (default: 2.0).
-    :return: Tuple of (water_saturation, oil_saturation, gas_saturation) grids.
-    :raises ValidationError: If contact depths are invalid or transitions overlap.
+    Notes:
+        - Depth increases downward: smaller depth = shallower (top), larger depth = deeper (bottom)
+        - Gas cap: depth < GOC (shallowest zone, uses Sor_gas)
+        - Oil zone: GOC ≤ depth < OWC (middle zone, uses Sgr)
+        - Water zone: depth ≥ OWC (deepest zone, uses Sor_water)
+        - Inactive cells (porosity ≤ 0 or NaN) have zero saturation for all phases
+        - All saturations are normalized to sum to exactly 1.0 in active cells
+        - For heterogeneous reservoirs, provide spatially varying property grids
+        - Transition zones should not overlap: ensure (OWC - OWC) > (h_go + h_ow)/2
+
+    See Also:
+        - `build_depth_grid()`: Create depth grid from layer thicknesses
+        - `build_elevation_grid()`: Create elevation grid (upward-positive)
+        - Relative permeability models: Define how saturations affect flow
+
+    References:
+        - Craig, F. F. (1971). "The Reservoir Engineering Aspects of Waterflooding."
+            Society of Petroleum Engineers. (Residual saturations)
+        - Lake, L. W. (1989). "Enhanced Oil Recovery." Prentice Hall.
+            (Wettability effects on Sor)
+        - Leverett, M. C. (1941). "Capillary Behavior in Porous Solids."
+            Transactions of the AIME, 142(01), 152-169. (Transition zones)
     """
-    # Input validation
+    # Identify active cells based on porosity
+    # If porosity is NaN or <= 0, cell is inactive
+    active_mask = np.isfinite(porosity_grid) & (porosity_grid > 0)
     _validate_inputs(
         depth_grid=depth_grid,
         gas_oil_contact=gas_oil_contact,
@@ -102,9 +268,9 @@ def build_saturation_grids(
         gas_oil_transition_thickness=gas_oil_transition_thickness,
         oil_water_transition_thickness=oil_water_transition_thickness,
         transition_curvature_exponent=transition_curvature_exponent,
+        active=active_mask,
     )
 
-    # Initialize saturation arrays
     dtype = get_dtype()
     water_saturation = np.zeros_like(depth_grid, dtype=dtype)
     oil_saturation = np.zeros_like(depth_grid, dtype=dtype)
@@ -114,9 +280,6 @@ def build_saturation_grids(
     oil_saturation = typing.cast(NDimensionalGrid[NDimension], oil_saturation)
     gas_saturation = typing.cast(NDimensionalGrid[NDimension], gas_saturation)
 
-    # Identify active cells based on porosity
-    # If porosity is NaN or <= 0, cell is inactive
-    active_mask = np.isfinite(porosity_grid) & (porosity_grid > 0)
     if not use_transition_zones:
         water_saturation, oil_saturation, gas_saturation = _build_sharp_contacts(
             depth_grid=depth_grid,
@@ -172,6 +335,7 @@ def _validate_inputs(
     gas_oil_transition_thickness: float,
     oil_water_transition_thickness: float,
     transition_curvature_exponent: float,
+    active: np.typing.NDArray,
 ) -> None:
     """
     Validate all input parameters for saturation grid building.
@@ -197,6 +361,7 @@ def _validate_inputs(
     :param gas_oil_transition_thickness: Gas-oil transition zone thickness (ft).
     :param oil_water_transition_thickness: Oil-water transition zone thickness (ft).
     :param transition_curvature_exponent: Transition curvature exponent (dimensionless).
+    :param active: Boolean mask indicating active cells.
     :raises ValidationError: If any validation check fails.
     :raises UserWarning: If oil column is very thin (< 1.0 ft) or Sor_g > Sor_w.
     """
@@ -220,19 +385,26 @@ def _validate_inputs(
         raise ValidationError("All grid arrays must have the same shape.")
 
     # Check saturation ranges
-    if np.any((connate_water_saturation < 0) | (connate_water_saturation > 1)):
+    if np.any(
+        (connate_water_saturation[active] < 0) | (connate_water_saturation[active] > 1)
+    ):
         raise ValidationError("Connate water saturation must be in [0, 1].")
     if np.any(
-        (residual_oil_saturation_water < 0) | (residual_oil_saturation_water > 1)
+        (residual_oil_saturation_water[active] < 0)
+        | (residual_oil_saturation_water[active] > 1)
     ):
         raise ValidationError("Residual oil saturation (water) must be in [0, 1].")
-    if np.any((residual_oil_saturation_gas < 0) | (residual_oil_saturation_gas > 1)):
+    if np.any(
+        (residual_oil_saturation_gas[active] < 0)
+        | (residual_oil_saturation_gas[active] > 1)
+    ):
         raise ValidationError("Residual oil saturation (gas) must be in [0, 1].")
-    if np.any((residual_gas_saturation < 0) | (residual_gas_saturation > 1)):
+    if np.any(
+        (residual_gas_saturation[active] < 0) | (residual_gas_saturation[active] > 1)
+    ):
         raise ValidationError("Residual gas saturation must be in [0, 1].")
 
     # Check for physically impossible saturation combinations
-    active = np.isfinite(porosity) & (porosity > 0)
     if np.any(
         (connate_water_saturation[active] + residual_oil_saturation_gas[active]) > 1.0
     ):
@@ -262,6 +434,14 @@ def _validate_inputs(
             UserWarning,
         )
 
+    oil_column_thickness = oil_water_contact - gas_oil_contact
+    if oil_column_thickness < c.MIN_OIL_ZONE_THICKNESS:
+        warnings.warn(
+            f"Oil column is very thin ({oil_column_thickness:.2f} ft). "
+            "Verify contact depths are correct.",
+            UserWarning,
+        )
+
     # Check transition zone parameters
     if use_transitions:
         if gas_oil_transition_thickness <= 0 or oil_water_transition_thickness <= 0:
@@ -285,7 +465,7 @@ def _validate_inputs(
         oil_column_thickness = oil_water_contact_top - gas_oil_contact_bottom
         if oil_column_thickness < 1.0:
             warnings.warn(
-                f"Oil column between transitions is very thin ({oil_column_thickness:.2f} units). "
+                f"Oil column between transitions is very thin ({oil_column_thickness:.2f} units(ft)). "
                 "Consider reducing transition thicknesses.",
                 UserWarning,
             )
@@ -454,7 +634,7 @@ def _build_transition_zones(
     oil_water_contact_top = oil_water_contact - oil_water_transition_thickness / 2
     oil_water_contact_bottom = oil_water_contact + oil_water_transition_thickness / 2
 
-    # Gas cap (above GOC transition) - uses Sor_gas
+    # Gas cap (shallower than GOC transition) - uses Sor_gas
     gas_cap = (depth_grid < gas_oil_contact_top) & active
     gas_saturation[gas_cap] = (
         1.0 - residual_oil_saturation_gas[gas_cap] - connate_water_saturation[gas_cap]
@@ -472,6 +652,8 @@ def _build_transition_zones(
         frac = (
             depth_grid[gas_oil_zone] - gas_oil_contact_top
         ) / gas_oil_transition_thickness
+        # Clip frac to avoid numerical issues
+        frac = np.clip(frac, 0.0, 1.0)
         weight = np.power(frac, transition_curvature_exponent)
 
         # Gas: from (1 - Sor_gas - Swc) to Sgr
@@ -517,6 +699,8 @@ def _build_transition_zones(
         frac = (
             depth_grid[oil_water_zone] - oil_water_contact_top
         ) / oil_water_transition_thickness
+        # Clip frac to avoid numerical issues
+        frac = np.clip(frac, 0.0, 1.0)
         weight = np.power(frac, transition_curvature_exponent)
 
         # Water: from Swc to (1 - Sor_water)
@@ -537,7 +721,7 @@ def _build_transition_zones(
             1 - weight
         )
 
-    # Water zone (below OWC transition) - uses Sor_water
+    # Water zone (deeper than OWC transition) - uses Sor_water
     water_zone = (depth_grid > oil_water_contact_bottom) & active
     water_saturation[water_zone] = 1.0 - residual_oil_saturation_water[water_zone]
     oil_saturation[water_zone] = residual_oil_saturation_water[water_zone]

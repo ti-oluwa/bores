@@ -92,7 +92,7 @@ def setup_3d_model():
     goc_depth = 8060.0
     owc_depth = 8220.0
 
-    depth_grid = bores.depth_grid(thickness_grid)
+    depth_grid = bores.depth_grid(thickness_grid, datum=reservoir_top_depth)
     # Apply structural dip
     depth_grid = bores.apply_structural_dip(
         elevation_grid=depth_grid,
@@ -104,8 +104,8 @@ def setup_3d_model():
     water_saturation_grid, oil_saturation_grid, gas_saturation_grid = (
         bores.build_saturation_grids(
             depth_grid=depth_grid,
-            gas_oil_contact=goc_depth - reservoir_top_depth,  # 50 ft below top
-            oil_water_contact=owc_depth - reservoir_top_depth,  # 150 ft below top
+            gas_oil_contact=goc_depth,
+            oil_water_contact=owc_depth,
             connate_water_saturation_grid=connate_water_saturation_grid,
             residual_oil_saturation_water_grid=residual_oil_saturation_water_grid,
             residual_oil_saturation_gas_grid=residual_oil_saturation_gas_grid,
@@ -233,6 +233,7 @@ def setup_3d_model():
         reservoir_gas="methane",
         dip_angle=dip_angle,
         dip_azimuth=dip_azimuth,
+        datum_depth=reservoir_top_depth,
         pvt_tables=pvt_tables,
     )
 

@@ -258,7 +258,7 @@ fig.show()
 # Output: [PLACEHOLDER: Insert porosity_grid_check.png]
 ```
 
-The 3D visualizer supports several plot types including `"volume"` (default, shows all cells as colored blocks), `"isosurface"` (shows surfaces of constant property value), and `"slice"` (shows a cross-section through the grid). For a complete guide to the visualization system, see the [Visualization](../visualization/) section.
+The 3D visualizer supports several plot types including `"volume"` (default, shows all cells as colored blocks), `"isosurface"` (shows surfaces of constant property value), and `"slice"` (shows a cross-section through the grid). For a complete guide to the visualization system, see the [Visualization](../visualization/index.md) section.
 
 !!! danger "Always Visualize Before Running"
 
