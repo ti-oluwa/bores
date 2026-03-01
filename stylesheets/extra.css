@@ -1,0 +1,28 @@
+:root {
+  --md-code-fg-color: #e6edf3;
+  --md-code-bg-color: #0d1117;
+}
+
+/* Better code block styling */
+.highlight pre {
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+/* Admonition customization */
+.admonition {
+  border-radius: 0.5rem;
+  margin: 1.5rem 0;
+}
+
+/* Table styling */
+table {
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+/* Math equations */
+.arithmatex {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
