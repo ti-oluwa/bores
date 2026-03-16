@@ -868,7 +868,7 @@ class GifExporter:
 
 
 class Mp4Exporter:
-    """Export animation frames as an MP4 video (requires ffmpeg)."""
+    """Export animation frames as an MP4 video (requires `ffmpeg`)."""
 
     def __init__(
         self,
@@ -887,7 +887,11 @@ class Mp4Exporter:
 
     def write(self, frames: typing.List[np.typing.NDArray], fps: float) -> None:
         writer = imageio.get_writer(
-            self.path, fps=fps, codec=self.codec, quality=self.quality
+            self.path,
+            format="FFMPEG",  # type: ignore
+            fps=fps,
+            codec=self.codec,
+            quality=self.quality,
         )
         for frame in frames:
             writer.append_data(frame)

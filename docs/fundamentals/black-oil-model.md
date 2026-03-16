@@ -1,3 +1,15 @@
+---
+title: The Black-Oil Model - BORES Fundamentals
+description: Complete guide to the black-oil reservoir simulation model. Understand three-phase flow, PVT properties, solution GOR, formation volume factors, and bubble point pressure.
+tags:
+  - fundamentals
+  - petroleum-engineering
+  - black-oil
+  - reservoir-simulation
+keywords: black-oil model, reservoir simulation fundamentals, PVT properties, solution GOR, formation volume factor, bubble point pressure, three-phase flow, undersaturated oil
+author: ti-oluwa
+---
+
 # The Black-Oil Model
 
 ## What Is the Black-Oil Model?

@@ -6,7 +6,7 @@ import typing
 import attrs
 import numba
 import numpy as np
-from scipy.sparse import coo_matrix, lil_matrix
+from scipy.sparse import coo_matrix
 
 from bores._precision import get_dtype
 from bores.config import Config
@@ -1068,12 +1068,19 @@ def compute_well_contributions(
             typing.Tuple[typing.Tuple[int, int, int, int], float]
         ] = []
         total_well_index = 0.0
+        grid_dims = (
+            cell_count_x - 2 * pad_width,
+            cell_count_y - 2 * pad_width,
+            cell_count_z - 2 * pad_width,
+        )
         for interval_start, interval_end in well.perforating_intervals:
             for i, j, k in itertools.product(
                 range(interval_start[0] + pad_width, interval_end[0] + pad_width + 1),
                 range(interval_start[1] + pad_width, interval_end[1] + pad_width + 1),
                 range(interval_start[2] + pad_width, interval_end[2] + pad_width + 1),
             ):
+                # Actual grid location (without ghost cell offset)
+                actual_location = (i - pad_width, j - pad_width, k - pad_width)
                 well_index = well.get_well_index(
                     interval_thickness=(
                         cell_size_x,
@@ -1086,6 +1093,11 @@ def compute_well_contributions(
                         absolute_permeability.z[i, j, k],
                     ),
                     skin_factor=well.skin_factor,
+                    well_location=actual_location,
+                    grid_dimensions=grid_dims,
+                    boundary_condition=config.boundary_conditions["pressure"]
+                    if config.boundary_conditions
+                    else None,
                 )
                 well_index_cache.append(((i, j, k, _to_1D_index(i, j, k)), well_index))
                 total_well_index += well_index
@@ -1203,12 +1215,19 @@ def compute_well_contributions(
         # First pass: cache well indices
         well_index_cache = []
         total_well_index = 0.0
+        grid_dims = (
+            cell_count_x - 2 * pad_width,
+            cell_count_y - 2 * pad_width,
+            cell_count_z - 2 * pad_width,
+        )
         for interval_start, interval_end in well.perforating_intervals:
             for i, j, k in itertools.product(
                 range(interval_start[0] + pad_width, interval_end[0] + pad_width + 1),
                 range(interval_start[1] + pad_width, interval_end[1] + pad_width + 1),
                 range(interval_start[2] + pad_width, interval_end[2] + pad_width + 1),
             ):
+                # Actual grid location (without ghost cell offset)
+                actual_location = (i - pad_width, j - pad_width, k - pad_width)
                 well_index = well.get_well_index(
                     interval_thickness=(
                         cell_size_x,
@@ -1221,6 +1240,11 @@ def compute_well_contributions(
                         absolute_permeability.z[i, j, k],
                     ),
                     skin_factor=well.skin_factor,
+                    well_location=actual_location,
+                    grid_dimensions=grid_dims,
+                    boundary_condition=config.boundary_conditions["pressure"]
+                    if config.boundary_conditions
+                    else None,
                 )
                 well_index_cache.append(((i, j, k, _to_1D_index(i, j, k)), well_index))
                 total_well_index += well_index
@@ -1538,22 +1562,28 @@ Capillary pressure driven flow term (if multiphase):
         For each direction:
             [(λ_w * ∇P_cow) + (λ_g * ∇P_cgo)] * A / (Δx, Δy, Δz)
 
-Gravity driven segregation (only in effect in the z-direction):
+Gravity driven segregation (in effect in all directions; dominant in z, non-zero in x/y for dipping reservoirs):
+
+    For each face between cell and neighbour:
+
+    gravity_potential_phase = (harmonic_ρ_phase * g/gc * ∆elevation) / 144   [psi]
 
     total_gravity_flow = (
-            [λ_w * (upwind_ρ_w * g * ∆z) / 144] 
-            + [λ_g * (upwind_ρ_g * g * ∆z) / 144] 
-            + [λ_o * (upwind_ρ_o * g * ∆z) / 144]
-    ) * A / Δz
+            [λ_w * (harmonic_ρ_w * g/gc * ∆elevation) / 144]
+            + [λ_o * (harmonic_ρ_o * g/gc * ∆elevation) / 144]
+            + [λ_g * (harmonic_ρ_g * g/gc * ∆elevation) / 144]
+    ) * A / ΔL
 
-    Where;
-    g is the gravitational acceleration (32.174 ft/s²),
-    upwind_ρ_w, upwind_ρ_g, upwind_ρ_o are the densities of water, gas, and oil
+    Where:
+    g/gc = 32.174 / 32.174 = 1.0 (dimensionless in consistent imperial units),
+    ∆elevation = elevation_neighbour - elevation_current (ft),
+    harmonic_ρ_w, harmonic_ρ_o, harmonic_ρ_g are harmonic mean densities at the face (lbm/ft³),
+    144 converts lbf/ft² to psi.
 
 This results in a 7-point stencil sparse matrix (in 3D) for solving A·pⁿ⁺¹ = b.
 
 Notes:
-    - Harmonic averaging is used for λ at cell interfaces
+    - Harmonic averaging is used for both λ and ρ at cell interfaces
     - Capillary pressure is optional but included via ∇P_cow and ∇P_cgo terms
     - The system is solved each time step to advance pressure implicitly
 """

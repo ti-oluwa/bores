@@ -1,3 +1,15 @@
+---
+title: Performance Optimization - BORES Best Practices
+description: Optimize BORES reservoir simulation performance. Learn precision settings, grid sizing, solver configuration, preconditioner caching, and memory management techniques.
+tags:
+  - guide
+  - advanced
+  - performance
+  - reservoir-simulation
+keywords: reservoir simulation performance, BORES optimization, solver performance, preconditioner caching, memory management, numerical precision, float32 vs float64
+author: ti-oluwa
+---
+
 # Performance
 
 ## Overview

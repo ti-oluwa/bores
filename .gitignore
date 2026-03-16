@@ -12,7 +12,6 @@ wheels/
 __marimo__/
 .ruff_cache__/
 .mypy_cache/
-WELL_VISUALIZATION_GUIDE.md
 scenarios/**/
 .ruff_cache/
 CLAUDE.md
@@ -23,3 +22,4 @@ benchmarks/runs
 videos/
 *.gif
 *.png
+SEQUENTIAL_IMPLICIT_PLAN.md

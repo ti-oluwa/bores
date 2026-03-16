@@ -86,7 +86,7 @@ def boundary_function(
     ```
 
     :param func: The function to register.
-    :param name: Optional custom name for registration. Uses __name__ if not provided.
+    :param name: Optional custom name for registration. Uses `__name__` if not provided.
     :param override: If True, allows overriding existing registrations.
     :return: The registered function or a decorator.
     """

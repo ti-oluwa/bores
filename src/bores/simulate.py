@@ -1,4 +1,4 @@
-"""Run a simulation workflow on a 3-Dimensional reservoir model."""
+"""Run a simulation workflow on a multi-dimensional reservoir model."""
 
 import copy
 import logging
@@ -30,10 +30,7 @@ from bores.grids.base import (
     pad_grid,
     unpad_grid,
 )
-from bores.grids.boundary_conditions import (
-    apply_boundary_conditions,
-    mirror_neighbour_cells,
-)
+from bores.grids.boundary_conditions import apply_boundary_conditions
 from bores.grids.pvt import (
     build_three_phase_relative_mobilities_grids,
     build_three_phase_relative_permeabilities_grids,
@@ -413,6 +410,9 @@ def _run_impes_step(
     old_oil_formation_volume_factor_grid = (
         padded_fluid_properties.oil_formation_volume_factor_grid.copy()
     )
+    # Save pre-flash saturations to detect flash-induced saturation changes
+    old_oil_saturation_grid = padded_fluid_properties.oil_saturation_grid.copy()
+    old_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
 
     padded_fluid_properties = update_pvt_grids(
         fluid_properties=padded_fluid_properties,
@@ -431,6 +431,55 @@ def _run_impes_step(
         old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
     )
+
+    # Check flash-induced saturation changes before proceeding to saturation solver.
+    # If the liberation flash itself violates the saturation change limits, reject
+    # the step immediately, as there's no point running the full saturation solver.
+    flash_gas_sat_change = float(
+        np.max(
+            np.abs(
+                padded_fluid_properties.gas_saturation_grid - old_gas_saturation_grid
+            )
+        )
+    )
+    flash_oil_sat_change = float(
+        np.max(
+            np.abs(
+                padded_fluid_properties.oil_saturation_grid - old_oil_saturation_grid
+            )
+        )
+    )
+    flash_sat_check = _check_saturation_changes(
+        max_oil_saturation_change=flash_oil_sat_change,
+        max_water_saturation_change=0.0,
+        max_gas_saturation_change=flash_gas_sat_change,
+        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
+        max_allowed_water_saturation_change=config.max_water_saturation_change,
+        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+    )
+    if flash_sat_check.violated:
+        message = (
+            f"Solution gas liberation flash at time step {time_step} violated "
+            f"saturation change limits: {flash_sat_check.message}"
+        )
+        logger.debug(message)
+        return StepResult(
+            oil_injection_grid=padded_zeros_grid,
+            water_injection_grid=padded_zeros_grid,
+            gas_injection_grid=padded_zeros_grid,
+            oil_production_grid=padded_zeros_grid,
+            water_production_grid=padded_zeros_grid,
+            gas_production_grid=padded_zeros_grid,
+            fluid_properties=padded_fluid_properties,
+            rock_properties=padded_rock_properties,
+            saturation_history=padded_saturation_history,
+            success=False,
+            message=message,
+            timer_kwargs={
+                "max_saturation_change": flash_sat_check.max_phase_saturation_change,
+                "max_allowed_saturation_change": flash_sat_check.max_allowed_phase_saturation_change,
+            },
+        )
 
     # Rebuild relative permeability grids from post-flash saturations.
     # This ensures cells with newly liberated gas get krg > 0 for transport.
@@ -653,6 +702,336 @@ def _run_impes_step(
     )
 
 
+def _run_sequential_implicit_step(
+    time_step: int,
+    padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
+    cell_dimension: typing.Tuple[float, float],
+    padded_thickness_grid: NDimensionalGrid[ThreeDimensions],
+    padded_elevation_grid: NDimensionalGrid[ThreeDimensions],
+    time_step_size: float,
+    padded_rock_properties: RockProperties[ThreeDimensions],
+    padded_fluid_properties: FluidProperties[ThreeDimensions],
+    padded_saturation_history: SaturationHistory[ThreeDimensions],
+    padded_relperm_grids: RelPermGrids[ThreeDimensions],
+    padded_relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
+    padded_capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
+    wells: Wells[ThreeDimensions],
+    miscibility_model: MiscibilityModel,
+    config: Config,
+    pad_width: int = 1,
+) -> StepResult[ThreeDimensions]:
+    """
+    Execute one time step using Sequential Implicit (SI) scheme.
+
+    Pressure is solved implicitly (same as IMPES), then saturation is solved
+    implicitly using Newton-Raphson iteration. This eliminates the CFL
+    stability constraint on saturation transport, allowing larger timesteps.
+
+    The flow mirrors _run_impes_step exactly except step 6 (saturation)
+    uses implicit.evolve_saturation instead of explicit.evolve_saturation.
+    """
+    # Save old pressure grid before implicit solve (needed for PVT volume correction)
+    old_pressure_grid = padded_fluid_properties.pressure_grid.copy()
+
+    logger.debug("Evolving pressure (implicit)...")
+    pressure_result = implicit.evolve_pressure(
+        cell_dimension=cell_dimension,
+        thickness_grid=padded_thickness_grid,
+        elevation_grid=padded_elevation_grid,
+        time_step=time_step,
+        time_step_size=time_step_size,
+        rock_properties=padded_rock_properties,
+        fluid_properties=padded_fluid_properties,
+        relative_mobility_grids=padded_relative_mobility_grids,
+        capillary_pressure_grids=padded_capillary_pressure_grids,
+        wells=wells,
+        config=config,
+        pad_width=pad_width,
+    )
+    if not pressure_result.success:
+        logger.error(
+            f"Implicit pressure evolution failed at time step {time_step}: \n{pressure_result.message}"
+        )
+        return StepResult(
+            oil_injection_grid=padded_zeros_grid,
+            water_injection_grid=padded_zeros_grid,
+            gas_injection_grid=padded_zeros_grid,
+            oil_production_grid=padded_zeros_grid,
+            water_production_grid=padded_zeros_grid,
+            gas_production_grid=padded_zeros_grid,
+            fluid_properties=padded_fluid_properties,
+            rock_properties=padded_rock_properties,
+            saturation_history=padded_saturation_history,
+            success=False,
+            message=pressure_result.message,
+        )
+
+    pressure_solution = pressure_result.value
+    padded_pressure_grid = pressure_solution.pressure_grid
+    max_pressure_change = pressure_solution.max_pressure_change
+    max_allowed_pressure_change = config.max_pressure_change
+    if max_pressure_change > max_allowed_pressure_change:
+        message = (
+            f"Pressure change {max_pressure_change:.6f} psi "
+            f"exceeded maximum allowed {max_allowed_pressure_change:.6f} psi "
+            f"at time step {time_step}."
+        )
+        logger.error(message)
+        return StepResult(
+            oil_injection_grid=padded_zeros_grid,
+            water_injection_grid=padded_zeros_grid,
+            gas_injection_grid=padded_zeros_grid,
+            oil_production_grid=padded_zeros_grid,
+            water_production_grid=padded_zeros_grid,
+            gas_production_grid=padded_zeros_grid,
+            fluid_properties=padded_fluid_properties,
+            rock_properties=padded_rock_properties,
+            saturation_history=padded_saturation_history,
+            success=False,
+            message=message,
+            timer_kwargs={
+                "max_pressure_change": max_pressure_change,
+                "max_allowed_pressure_change": max_allowed_pressure_change,
+            },
+        )
+
+    # Check for any out-of-range pressures
+    pressure_validation_result = _validate_pressure_range(
+        padded_pressure_grid=padded_pressure_grid,
+        time_step=time_step,
+        padded_zeros_grid=padded_zeros_grid,
+        padded_fluid_properties=padded_fluid_properties,
+        padded_rock_properties=padded_rock_properties,
+        padded_saturation_history=padded_saturation_history,
+    )
+    if pressure_validation_result is not None:
+        return pressure_validation_result
+
+    dtype = get_dtype()
+    padded_pressure_grid = clip(
+        padded_pressure_grid, c.MINIMUM_VALID_PRESSURE, c.MAXIMUM_VALID_PRESSURE
+    ).astype(dtype, copy=False)
+
+    padded_fluid_properties = attrs.evolve(
+        padded_fluid_properties, pressure_grid=padded_pressure_grid
+    )
+
+    # PVT update at new pressure
+    logger.debug("Updating PVT fluid properties for saturation evolution")
+    old_solution_gas_to_oil_ratio_grid = (
+        padded_fluid_properties.solution_gas_to_oil_ratio_grid.copy()
+    )
+    old_oil_formation_volume_factor_grid = (
+        padded_fluid_properties.oil_formation_volume_factor_grid.copy()
+    )
+    # Save pre-flash saturations to detect flash-induced saturation changes
+    old_oil_saturation_grid = padded_fluid_properties.oil_saturation_grid.copy()
+    old_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
+
+    padded_fluid_properties = update_pvt_grids(
+        fluid_properties=padded_fluid_properties,
+        wells=wells,
+        miscibility_model=miscibility_model,
+        pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
+    )
+
+    # Solution gas liberation flash
+    padded_fluid_properties = apply_solution_gas_liberation(
+        fluid_properties=padded_fluid_properties,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+        old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+    )
+
+    # Check flash-induced saturation changes before proceeding to saturation solver.
+    # If the liberation flash itself violates the saturation change limits, reject
+    # the step immediately, as there's no point running the full saturation solver.
+    flash_gas_sat_change = float(
+        np.max(
+            np.abs(
+                padded_fluid_properties.gas_saturation_grid - old_gas_saturation_grid
+            )
+        )
+    )
+    flash_oil_sat_change = float(
+        np.max(
+            np.abs(
+                padded_fluid_properties.oil_saturation_grid - old_oil_saturation_grid
+            )
+        )
+    )
+    flash_sat_check = _check_saturation_changes(
+        max_oil_saturation_change=flash_oil_sat_change,
+        max_water_saturation_change=0.0,
+        max_gas_saturation_change=flash_gas_sat_change,
+        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
+        max_allowed_water_saturation_change=config.max_water_saturation_change,
+        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+    )
+    if flash_sat_check.violated:
+        message = (
+            f"Solution gas liberation flash at time step {time_step} violated "
+            f"saturation change limits: {flash_sat_check.message}"
+        )
+        logger.debug(message)
+        return StepResult(
+            oil_injection_grid=padded_zeros_grid,
+            water_injection_grid=padded_zeros_grid,
+            gas_injection_grid=padded_zeros_grid,
+            oil_production_grid=padded_zeros_grid,
+            water_production_grid=padded_zeros_grid,
+            gas_production_grid=padded_zeros_grid,
+            fluid_properties=padded_fluid_properties,
+            rock_properties=padded_rock_properties,
+            saturation_history=padded_saturation_history,
+            success=False,
+            message=message,
+            timer_kwargs={
+                "max_saturation_change": flash_sat_check.max_phase_saturation_change,
+                "max_allowed_saturation_change": flash_sat_check.max_allowed_phase_saturation_change,
+            },
+        )
+
+    logger.debug("Evolving saturation (implicit, Newton-Raphson)...")
+    pressure_change_grid = padded_pressure_grid - old_pressure_grid
+
+    saturation_result = implicit.evolve_saturation(
+        cell_dimension=cell_dimension,
+        thickness_grid=padded_thickness_grid,
+        elevation_grid=padded_elevation_grid,
+        time_step=time_step,
+        time_step_size=time_step_size,
+        rock_properties=padded_rock_properties,
+        fluid_properties=padded_fluid_properties,
+        wells=wells,
+        config=config,
+        pressure_change_grid=pressure_change_grid,
+        pad_width=pad_width,
+        max_newton_iterations=config.max_newton_iterations,
+        newton_tolerance=config.newton_tolerance,
+        line_search_max_cuts=config.line_search_max_cuts,
+        max_saturation_step=config.max_saturation_step,
+        saturation_convergence_tolerance=config.newton_saturation_change_tolerance,
+    )
+    saturation_solution = saturation_result.value
+    saturation_change_result = _check_saturation_changes(
+        max_oil_saturation_change=saturation_solution.max_oil_saturation_change,
+        max_water_saturation_change=saturation_solution.max_water_saturation_change,
+        max_gas_saturation_change=saturation_solution.max_gas_saturation_change,
+        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
+        max_allowed_water_saturation_change=config.max_water_saturation_change,
+        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+    )
+    timer_kwargs = {
+        "max_pressure_change": max_pressure_change,
+        "max_allowed_pressure_change": max_allowed_pressure_change,
+        "max_saturation_change": saturation_change_result.max_phase_saturation_change
+        or None,
+        "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
+        or None,
+        "newton_iterations": saturation_solution.newton_iterations,
+    }
+
+    if not saturation_result.success:
+        logger.error(
+            f"Implicit saturation evolution failed at time step {time_step}: \n{saturation_result.message}"
+        )
+        return StepResult(
+            oil_injection_grid=padded_zeros_grid,
+            water_injection_grid=padded_zeros_grid,
+            gas_injection_grid=padded_zeros_grid,
+            oil_production_grid=padded_zeros_grid,
+            water_production_grid=padded_zeros_grid,
+            gas_production_grid=padded_zeros_grid,
+            fluid_properties=padded_fluid_properties,
+            rock_properties=padded_rock_properties,
+            saturation_history=padded_saturation_history,
+            success=False,
+            message=saturation_result.message,
+            timer_kwargs=timer_kwargs,
+        )
+
+    if saturation_change_result.violated:
+        message = f"""
+        At time step {time_step}, saturation change limits were violated:
+        {saturation_change_result.message}
+
+        Oil saturation change: {saturation_solution.max_oil_saturation_change:.6f},
+        Water saturation change: {saturation_solution.max_water_saturation_change:.6f},
+        Gas saturation change: {saturation_solution.max_gas_saturation_change:.6f}.
+        """
+        logger.debug(message)
+        return StepResult(
+            oil_injection_grid=padded_zeros_grid,
+            water_injection_grid=padded_zeros_grid,
+            gas_injection_grid=padded_zeros_grid,
+            oil_production_grid=padded_zeros_grid,
+            water_production_grid=padded_zeros_grid,
+            gas_production_grid=padded_zeros_grid,
+            fluid_properties=padded_fluid_properties,
+            rock_properties=padded_rock_properties,
+            saturation_history=padded_saturation_history,
+            success=False,
+            message=message,
+            timer_kwargs=timer_kwargs,
+        )
+
+    # Update fluid properties with new saturations
+    logger.debug("Updating fluid properties with new saturation grids...")
+    padded_water_saturation_grid = saturation_solution.water_saturation_grid.astype(
+        dtype, copy=False
+    )
+    padded_oil_saturation_grid = saturation_solution.oil_saturation_grid.astype(
+        dtype, copy=False
+    )
+    padded_gas_saturation_grid = saturation_solution.gas_saturation_grid.astype(
+        dtype, copy=False
+    )
+    padded_fluid_properties = attrs.evolve(
+        padded_fluid_properties,
+        water_saturation_grid=padded_water_saturation_grid,
+        oil_saturation_grid=padded_oil_saturation_grid,
+        gas_saturation_grid=padded_gas_saturation_grid,
+    )
+
+    if config.normalize_saturations:
+        normalize_saturations(
+            oil_saturation_grid=padded_fluid_properties.oil_saturation_grid,
+            water_saturation_grid=padded_fluid_properties.water_saturation_grid,
+            gas_saturation_grid=padded_fluid_properties.gas_saturation_grid,
+            saturation_epsilon=c.SATURATION_EPSILON,
+        )
+
+    # Update residual saturations
+    padded_rock_properties, padded_saturation_history = (
+        update_residual_saturation_grids(
+            rock_properties=padded_rock_properties,
+            saturation_history=padded_saturation_history,
+            water_saturation_grid=padded_fluid_properties.water_saturation_grid,
+            gas_saturation_grid=padded_fluid_properties.gas_saturation_grid,
+            residual_oil_drainage_ratio_water_flood=config.residual_oil_drainage_ratio_water_flood,
+            residual_oil_drainage_ratio_gas_flood=config.residual_oil_drainage_ratio_gas_flood,
+            residual_gas_drainage_ratio=config.residual_gas_drainage_ratio,
+        )
+    )
+
+    logger.debug("Sequential implicit step completed!")
+    return StepResult(
+        oil_injection_grid=padded_zeros_grid,
+        water_injection_grid=padded_zeros_grid,
+        gas_injection_grid=padded_zeros_grid,
+        oil_production_grid=padded_zeros_grid,
+        water_production_grid=padded_zeros_grid,
+        gas_production_grid=padded_zeros_grid,
+        fluid_properties=padded_fluid_properties,
+        rock_properties=padded_rock_properties,
+        saturation_history=padded_saturation_history,
+        success=True,
+        message=saturation_result.message,
+        timer_kwargs=timer_kwargs,
+    )
+
+
 def _run_explicit_step(
     time_step: int,
     padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
@@ -808,6 +1187,7 @@ def _run_explicit_step(
 
     # Saturation evolution (explicit)
     logger.debug("Evolving saturation (explicit)...")
+
     # Build zeros grids to track production and injection at each time step
     oil_injection_grid = padded_zeros_grid.copy()
     water_injection_grid = padded_zeros_grid.copy()
@@ -851,6 +1231,7 @@ def _run_explicit_step(
         pad_width=pad_width,
     )
     saturation_solution = saturation_result.value
+
     saturation_change_result = _check_saturation_changes(
         max_oil_saturation_change=saturation_solution.max_oil_saturation_change,
         max_water_saturation_change=saturation_solution.max_water_saturation_change,
@@ -974,6 +1355,9 @@ def _run_explicit_step(
     old_oil_formation_volume_factor_grid = (
         padded_fluid_properties.oil_formation_volume_factor_grid.copy()
     )
+    # Save pre-flash saturations to detect flash-induced saturation changes
+    old_oil_saturation_grid = padded_fluid_properties.oil_saturation_grid.copy()
+    old_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
 
     padded_fluid_properties = update_pvt_grids(
         fluid_properties=padded_fluid_properties,
@@ -992,6 +1376,54 @@ def _run_explicit_step(
         old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
     )
+
+    # Check flash-induced saturation changes so the next timestep doesn't
+    # inherit a large uncontrolled saturation jump from the liberation flash.
+    flash_gas_sat_change = float(
+        np.max(
+            np.abs(
+                padded_fluid_properties.gas_saturation_grid - old_gas_saturation_grid
+            )
+        )
+    )
+    flash_oil_sat_change = float(
+        np.max(
+            np.abs(
+                padded_fluid_properties.oil_saturation_grid - old_oil_saturation_grid
+            )
+        )
+    )
+    flash_sat_check = _check_saturation_changes(
+        max_oil_saturation_change=flash_oil_sat_change,
+        max_water_saturation_change=0.0,
+        max_gas_saturation_change=flash_gas_sat_change,
+        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
+        max_allowed_water_saturation_change=config.max_water_saturation_change,
+        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+    )
+    if flash_sat_check.violated:
+        message = (
+            f"Solution gas liberation flash at time step {time_step} violated "
+            f"saturation change limits: {flash_sat_check.message}"
+        )
+        logger.debug(message)
+        return StepResult(
+            oil_injection_grid=oil_injection_grid,
+            water_injection_grid=water_injection_grid,
+            gas_injection_grid=gas_injection_grid,
+            oil_production_grid=oil_production_grid,
+            water_production_grid=water_production_grid,
+            gas_production_grid=gas_production_grid,
+            fluid_properties=padded_fluid_properties,
+            rock_properties=padded_rock_properties,
+            saturation_history=padded_saturation_history,
+            success=False,
+            message=message,
+            timer_kwargs={
+                "max_saturation_change": flash_sat_check.max_phase_saturation_change,
+                "max_allowed_saturation_change": flash_sat_check.max_allowed_phase_saturation_change,
+            },
+        )
 
     # Update residual saturation grids based on new saturations
     padded_rock_properties, padded_saturation_history = (
@@ -1232,12 +1664,10 @@ def run(
         padded_saturation_history = model.saturation_history.pad(pad_width=pad_width)
         thickness_grid = model.thickness_grid
         padded_thickness_grid = pad_grid(thickness_grid, pad_width=pad_width)
-        padded_thickness_grid = mirror_neighbour_cells(padded_thickness_grid)
         elevation_grid = model.get_elevation_grid(
             apply_dip=not config.disable_structural_dip
         )
         padded_elevation_grid = pad_grid(elevation_grid, pad_width=pad_width)
-        padded_elevation_grid = mirror_neighbour_cells(padded_elevation_grid)
 
         # Apply boundary conditions to relevant padded grids
         logger.debug("Applying boundary conditions to initial padded grids")
@@ -1471,6 +1901,25 @@ def run(
 
                 if scheme == "impes":
                     result = _run_impes_step(
+                        time_step=new_step,
+                        padded_zeros_grid=padded_zeros_grid,
+                        cell_dimension=cell_dimension,
+                        padded_thickness_grid=padded_thickness_grid,
+                        padded_elevation_grid=padded_elevation_grid,
+                        time_step_size=step_size,
+                        padded_rock_properties=padded_rock_properties,
+                        padded_fluid_properties=padded_fluid_properties,
+                        padded_saturation_history=padded_saturation_history,
+                        padded_relperm_grids=padded_relperm_grids,
+                        padded_relative_mobility_grids=padded_relative_mobility_grids,
+                        padded_capillary_pressure_grids=padded_capillary_pressure_grids,
+                        wells=wells,
+                        miscibility_model=miscibility_model,
+                        config=config,
+                        pad_width=pad_width,
+                    )
+                elif scheme == "sequential_implicit":
+                    result = _run_sequential_implicit_step(
                         time_step=new_step,
                         padded_zeros_grid=padded_zeros_grid,
                         cell_dimension=cell_dimension,

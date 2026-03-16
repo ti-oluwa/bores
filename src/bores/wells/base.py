@@ -9,6 +9,7 @@ import attrs
 import numpy as np
 from typing_extensions import Self
 
+from bores.boundary_conditions import GridBoundaryCondition, NoFlowBoundary
 from bores.errors import ValidationError
 from bores.serialization import (
     make_registry_deserializer,
@@ -74,30 +75,35 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
 
     def get_orientation(self) -> Orientation:
         """
-        Determine the dominant orientation of a straight well (even if slanted)
-        by estimating which axis the well is most aligned with.
-        Uses the first perforating interval to determine orientation.
+        Determine the dominant orientation of the well by computing the total
+        length along each axis across all perforating intervals.
 
-        :returns: The dominant orientation of the well
+        For wells with multiple intervals (including multilateral or complex wells),
+        this finds the axis with the greatest cumulative length and returns that
+        as the dominant orientation.
+
+        :returns: The dominant orientation of the well (X, Y, or Z)
         """
         if not self.perforating_intervals:
             return Orientation.Z  # Default to Z if no intervals
 
-        start, end = self.perforating_intervals[0]
+        # Sum up absolute direction components across all intervals
+        total_length = np.array([0.0, 0.0, 0.0])
 
-        # Convert to numpy arrays and pad to 3D if needed
-        start = np.array(start + (0,) * (3 - len(start)))
-        end = np.array(end + (0,) * (3 - len(end)))
+        for start, end in self.perforating_intervals:
+            # Convert to numpy arrays and pad to 3D if needed
+            start_3d = np.array(start + (0,) * (3 - len(start)))
+            end_3d = np.array(end + (0,) * (3 - len(end)))
 
-        # Compute the direction vector
-        direction = end - start
-        norm = np.linalg.norm(direction)
-        if norm == 0:
-            return Orientation.Z  # Default to Z if start and end are the same
+            # Accumulate absolute length along each axis
+            direction = np.abs(end_3d - start_3d)
+            total_length += direction
 
-        # Normalize and take absolute value
-        unit_vector = np.abs(direction / norm)
-        axis = np.argmax(unit_vector)
+        # Find axis with maximum cumulative length
+        if np.all(total_length == 0):
+            return Orientation.Z  # Default if all intervals are zero-length
+
+        axis = np.argmax(total_length)
         return Orientation(("x", "y", "z")[axis])
 
     def check_location(self, grid_dimensions: typing.Tuple[int, ...]) -> None:
@@ -121,51 +127,145 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         self,
         interval_thickness: typing.Tuple[float, ...],
         permeability: typing.Tuple[float, ...],
+        well_location: typing.Optional[Coordinates] = None,
+        grid_dimensions: typing.Optional[Coordinates] = None,
+        boundary_condition: typing.Optional[GridBoundaryCondition[Coordinates]] = None,
     ) -> float:
         """
-        Compute the effective drainage radius for the well based on its orientation.
+        Compute the effective drainage radius for the well based on its orientation,
+        with corrections for wells at no-flow boundaries.
+
+        For wells at no-flow boundaries, the Peaceman formula is adjusted by using
+        half the cell dimension perpendicular to the boundary (e.g., dx/2 for a well
+        at the left or right boundary). This accounts for the reduced drainage area
+        when flow cannot cross the boundary.
+
+        Boundary corrections are applied based on boundary condition type:
+        - **NoFlowBoundary**: Use dx/2 (reduced drainage area)
+        - **ConstantBoundary/Aquifer/Periodic**: No correction (acts like having a neighbor)
+        - **Other types**: No correction (conservative assumption)
 
         :param interval_thickness: A tuple representing the thickness of the reservoir interval in each direction (ft).
         :param permeability: A tuple representing the permeability of the reservoir rock in each direction (mD).
+        :param well_location: Grid indices (i, j, k) of the well perforation. Required for boundary correction.
+        :param grid_dimensions: Grid dimensions (nx, ny, nz). Required for boundary correction.
+        :param boundary_condition: `GridBoundaryCondition` defining BC on each face. Required for boundary correction.
         :return: The effective drainage radius in the direction of the well (ft).
         """
         dimensions = len(interval_thickness)
         if dimensions < 2 or dimensions > 3:
             raise ValidationError("2D/3D locations are required")
 
+        # Apply boundary corrections if parameters provided
+        corrected_thickness = list(interval_thickness)
+        if (
+            well_location is not None
+            and grid_dimensions is not None
+            and boundary_condition is not None
+        ):
+            corrected_thickness = self._correct_interval_thickness(
+                interval_thickness=interval_thickness,
+                well_location=well_location,
+                grid_dimensions=grid_dimensions,
+                boundary_condition=boundary_condition,
+            )
+
         if dimensions == 2:
             if len(permeability) != 2:
                 raise ValidationError(
                     "Permeability must be a 2D tuple for 2D locations"
                 )
-            interval_thickness = typing.cast(TwoDimensions, interval_thickness)
+            thickness_2d = typing.cast(TwoDimensions, tuple(corrected_thickness))
             permeability = typing.cast(TwoDimensions, permeability)
             return compute_2D_effective_drainage_radius(
-                interval_thickness=interval_thickness,
+                interval_thickness=thickness_2d,
                 permeability=permeability,
             )
 
         if len(permeability) != 3:
             raise ValidationError("Permeability must be a 3D tuple for 3D locations")
-        interval_thickness = typing.cast(ThreeDimensions, interval_thickness)
+
+        thickness_3d = typing.cast(ThreeDimensions, tuple(corrected_thickness))
         permeability = typing.cast(ThreeDimensions, permeability)
         return compute_3D_effective_drainage_radius(
-            interval_thickness=interval_thickness,
+            interval_thickness=thickness_3d,
             permeability=permeability,
             well_orientation=self.orientation,
         )
+
+    def _correct_interval_thickness(
+        self,
+        interval_thickness: typing.Tuple[float, ...],
+        well_location: Coordinates,
+        grid_dimensions: Coordinates,
+        boundary_condition: GridBoundaryCondition[Coordinates],
+    ) -> typing.List[float]:
+        """
+        Apply boundary corrections to cell dimensions for Peaceman effective radius.
+
+        For wells at no-flow boundaries, use half the cell dimension perpendicular
+        to the boundary to account for reduced drainage area.
+
+        :param interval_thickness: Original cell dimensions (dx, dy, dz) in ft
+        :param well_location: Grid indices (i, j, k) of the well
+        :param grid_dimensions: Grid dimensions (nx, ny, nz)
+        :param boundary_condition: Boundary conditions for each face
+        :return: Adjusted cell dimensions accounting for boundaries
+        """
+        adjusted = list(interval_thickness)
+        dimensions = len(interval_thickness)
+
+        # Check X-direction boundaries (affects dx)
+        if well_location[0] == 0:  # At left boundary (x-)
+            if isinstance(boundary_condition.left, NoFlowBoundary):
+                adjusted[0] = interval_thickness[0] / 2.0
+        elif well_location[0] == (grid_dimensions[0] - 1) and isinstance(
+            boundary_condition.right, NoFlowBoundary
+        ):  # At right boundary (x+)
+            adjusted[0] = interval_thickness[0] / 2.0
+
+        # Check Y-direction boundaries (affects dy)
+        if dimensions >= 2:
+            if well_location[1] == 0:  # At front boundary (y-)
+                if isinstance(boundary_condition.front, NoFlowBoundary):
+                    adjusted[1] = interval_thickness[1] / 2.0
+            elif well_location[1] == (grid_dimensions[1] - 1) and isinstance(
+                boundary_condition.back, NoFlowBoundary
+            ):  # At back boundary (y+)
+                adjusted[1] = interval_thickness[1] / 2.0
+
+        # Check Z-direction boundaries (affects dz)
+        if dimensions == 3:
+            if well_location[2] == 0:  # At bottom boundary (z-)
+                if isinstance(boundary_condition.bottom, NoFlowBoundary):
+                    adjusted[2] = interval_thickness[2] / 2.0
+            elif well_location[2] == (grid_dimensions[2] - 1) and isinstance(
+                boundary_condition.top, NoFlowBoundary
+            ):  # At top boundary (z+)
+                adjusted[2] = interval_thickness[2] / 2.0
+
+        return adjusted
 
     def get_well_index(
         self,
         interval_thickness: typing.Tuple[float, ...],
         permeability: typing.Tuple[float, ...],
         skin_factor: typing.Optional[float] = None,
+        well_location: typing.Optional[Coordinates] = None,
+        grid_dimensions: typing.Optional[Coordinates] = None,
+        boundary_condition: typing.Optional[GridBoundaryCondition[Coordinates]] = None,
     ) -> float:
         """
         Compute the well index for the well using the Peaceman equation.
 
+        Applies boundary corrections if the well is at a no-flow boundary.
+
         :param interval_thickness: A tuple representing the thickness of the reservoir interval in each direction (ft).
         :param permeability: A tuple representing the permeability of the reservoir rock in each direction (mD).
+        :param skin_factor: Well skin factor (dimensionless). If None, uses self.skin_factor.
+        :param well_location: Grid indices (i, j, k) of the well. Required for boundary correction.
+        :param grid_dimensions: Grid dimensions (nx, ny, nz). Required for boundary correction.
+        :param boundary_condition: `GridBoundaryCondition` defining BC on each face. Required for boundary correction.
         :return: The well index (md*ft).
         """
         dimensions = len(interval_thickness)
@@ -176,6 +276,9 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         effective_drainage_radius = self.get_effective_drainage_radius(
             interval_thickness=interval_thickness,
             permeability=permeability,
+            well_location=well_location,
+            grid_dimensions=grid_dimensions,
+            boundary_condition=boundary_condition,
         )
         skin_factor = skin_factor if skin_factor is not None else self.skin_factor
         radius = self.radius

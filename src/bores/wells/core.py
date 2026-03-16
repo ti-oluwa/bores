@@ -132,20 +132,24 @@ def compute_3D_effective_drainage_radius(
 
     Peaceman's formula for a well aligned along a given axis uses the two
     grid dimensions and permeabilities *perpendicular* to the wellbore.
-    For a well in the Z-direction (standard vertical well)::
+    For a well in the Z-direction (standard vertical well):
 
-        r_o = 0.28 * sqrt[ (ky/kx)^0.5 * dx^2 + (kx/ky)^0.5 * dy^2 ]
-                           -----------------------------------------
-                                  (ky/kx)^0.25 + (kx/ky)^0.25
+    ```
+    r_o = 0.28 * sqrt[ (ky/kx)^0.5 * dx^2 + (kx/ky)^0.5 * dy^2 ]
+                        -----------------------------------------
+                                (ky/kx)^0.25 + (kx/ky)^0.25
+    ```
 
     The same pattern applies by cyclic permutation for X- and Y-oriented
     (horizontal) wells, substituting the two directions perpendicular to
     the wellbore axis in each case.
 
-    For the isotropic case (kx = ky = k) this reduces to::
+    For the isotropic case (kx = ky = k) this reduces to:
 
-        r_o = 0.28 * sqrt(dx^2 + dy^2) / 2^0.5
-            = 0.198 * sqrt(dx^2 + dy^2)
+    ```
+    r_o = 0.28 * sqrt(dx^2 + dy^2) / 2^0.5
+        = 0.198 * sqrt(dx^2 + dy^2)
+    ```
 
     which matches the standard Peaceman result for uniform square grids
     (r_o = 0.2 * dx when dx = dy).
@@ -157,31 +161,31 @@ def compute_3D_effective_drainage_radius(
 
     :param interval_thickness: Tuple of cell dimensions (dx, dy, dz) in ft.
     :param permeability: Tuple of permeabilities (kx, ky, kz) in mD.
-    :param well_orientation: Wellbore axis — Orientation.X for a horizontal
-        well along x, Orientation.Y for a horizontal well along y, or
-        Orientation.Z for a standard vertical well.
+    :param well_orientation: Wellbore axis — `Orientation.X` for a horizontal
+        well along x, `Orientation.Y` for a horizontal well along y, or
+        `Orientation.Z` for a standard vertical well.
     :return: Effective drainage (Peaceman) radius in ft, or 0.0 if either
         perpendicular permeability is zero.
     """
-    dx, dy, dz = interval_thickness[0], interval_thickness[1], interval_thickness[2]
-    kx, ky, kz = permeability[0], permeability[1], permeability[2]
+    dx, dy, dz = interval_thickness
+    kx, ky, kz = permeability
 
     if well_orientation == Orientation.X:
-        # Wellbore along x — perpendicular plane is y-z
+        # Wellbore along x: perpendicular plane is y-z
         if ky <= 0.0 or kz <= 0.0:
             return 0.0
         r1, r2 = ky / kz, kz / ky
         numerator = np.sqrt(r1) * dy**2 + np.sqrt(r2) * dz**2
         denominator = r1**0.25 + r2**0.25
     elif well_orientation == Orientation.Y:
-        # Wellbore along y — perpendicular plane is x-z
+        # Wellbore along y: perpendicular plane is x-z
         if kx <= 0.0 or kz <= 0.0:
             return 0.0
         r1, r2 = kx / kz, kz / kx
         numerator = np.sqrt(r1) * dx**2 + np.sqrt(r2) * dz**2
         denominator = r1**0.25 + r2**0.25
     elif well_orientation == Orientation.Z:
-        # Wellbore along z — perpendicular plane is x-y (standard vertical well)
+        # Wellbore along z: perpendicular plane is x-y (standard vertical well)
         if kx <= 0.0 or ky <= 0.0:
             return 0.0
         r1, r2 = ky / kx, kx / ky
@@ -195,8 +199,7 @@ def compute_3D_effective_drainage_radius(
 
 @numba.njit(cache=True)
 def compute_2D_effective_drainage_radius(
-    interval_thickness: TwoDimensions,
-    permeability: TwoDimensions,
+    interval_thickness: TwoDimensions, permeability: TwoDimensions
 ) -> float:
     """
     Compute the effective drainage radius for a well in a 2D reservoir model
@@ -204,18 +207,21 @@ def compute_2D_effective_drainage_radius(
 
     In a 2D x-y model the wellbore is always perpendicular to the grid plane
     (i.e. implicitly Z-oriented), so there is a single drainage radius
-    expression that uses both in-plane grid dimensions and permeabilities::
+    expression that uses both in-plane grid dimensions and permeabilities:
 
-        r_o = 0.28 * sqrt[ (ky/kx)^0.5 * dx^2 + (kx/ky)^0.5 * dy^2 ]
-                           -----------------------------------------
-                                  (ky/kx)^0.25 + (kx/ky)^0.25
+    ```
+    r_o = 0.28 * sqrt[ (ky/kx)^0.5 * dx^2 + (kx/ky)^0.5 * dy^2 ]
+                        -----------------------------------------
+                                (ky/kx)^0.25 + (kx/ky)^0.25
+    ```
 
-    This is identical to the Z-orientation case of
-    :func:`compute_3D_effective_drainage_radius`.
+    This is identical to the Z-orientation case of `compute_3D_effective_drainage_radius`.
 
-    For the isotropic case (kx = ky) this reduces to::
+    For the isotropic case (kx = ky) this reduces to:
 
-        r_o = 0.28 * sqrt(dx^2 + dy^2) / sqrt(2)
+    ```
+    r_o = 0.28 * sqrt(dx^2 + dy^2) / sqrt(2)
+    ```
 
     which gives r_o = 0.2 * dx for a uniform square grid (dx = dy),
     matching the classic Peaceman result.
@@ -230,13 +236,11 @@ def compute_2D_effective_drainage_radius(
     :return: Effective drainage (Peaceman) radius in ft, or 0.0 if either
         permeability is zero or negative.
     """
-    kx, ky = permeability[0], permeability[1]
-
+    kx, ky = permeability
     if kx <= 0.0 or ky <= 0.0:
         return 0.0
 
     dx, dy = interval_thickness[0], interval_thickness[1]
-
     r1, r2 = ky / kx, kx / ky
     numerator = np.sqrt(r1) * dx**2 + np.sqrt(r2) * dy**2
     denominator = r1**0.25 + r2**0.25
@@ -275,18 +279,18 @@ def compute_oil_well_rate(
     density model is physically valid (c * dP <= 0.7).
 
     Sign convention:
-        - Negative rate indicates production (BHP < reservoir pressure).
-        - Positive rate  indicates injection  (BHP > reservoir pressure).
+    - Negative rate indicates production (BHP < reservoir pressure).
+    - Positive rate  indicates injection  (BHP > reservoir pressure).
 
-    Formula (linear / incompressible)::
+    Formula (linear / incompressible):
 
-        Q = 7.08e-3 * W * M * (P_bhp - P)
+        `Q = 7.08e-3 * W * M * (P_bhp - P)`
 
-    Formula (slightly compressible, exponential)::
+    Formula (slightly compressible, exponential):
 
-        Q = 7.08e-3 * W * M * [exp(c * dP) - 1] / c
+        `Q = 7.08e-3 * W * M * [exp(c * dP) - 1] / c`
 
-    where dP = P_bhp - P.
+    where `dP = P_bhp - P`.
 
     :param well_index: Well index (mD*ft).
     :param pressure: Reservoir cell pressure at the perforation interval (psi).
@@ -299,7 +303,7 @@ def compute_oil_well_rate(
         linear formula, which is correct for black-oil phases.
     :param incompressibility_threshold: Minimum compressibility (psi^-1) below
         which the fluid is treated as incompressible and the linear formula is
-        used regardless.  Default 1e-6 psi^-1.
+        used regardless.  Default `1e-6 psi^-1`.
     :return: Well rate at reservoir conditions (bbl/day).  Negative for
         production, positive for injection.
     """
@@ -355,16 +359,16 @@ def compute_required_bhp_for_oil_rate(
     with no FVF term.
 
     Sign convention:
-        - Negative `target_rate` indicates production (returned BHP < reservoir pressure).
-        - Positive `target_rate`  indicates injection  (returned BHP > reservoir pressure).
+    - Negative `target_rate` indicates production (returned BHP < reservoir pressure).
+    - Positive `target_rate`  indicates injection  (returned BHP > reservoir pressure).
 
-    Inverse formula (linear / incompressible)::
+    Inverse formula (linear / incompressible):
 
-        P_bhp = P + Q / (7.08e-3 * W * M)
+        `P_bhp = P + Q / (7.08e-3 * W * M)`
 
-    Inverse formula (slightly compressible, exponential)::
+    Inverse formula (slightly compressible, exponential):
 
-        P_bhp = P + ln(Q * c / (7.08e-3 * W * M) + 1) / c
+        `P_bhp = P + ln(Q * c / (7.08e-3 * W * M) + 1) / c`
 
     The logarithmic inverse is the algebraically exact inverse of the
     exponential forward formula, not an approximation.  The same c * dP
@@ -373,7 +377,7 @@ def compute_required_bhp_for_oil_rate(
     meaningful range before applying it, guaranteeing that the two functions
     are exact inverses of each other within the same operating regime.
 
-    :param target_rate: Target well rate at reservoir conditions (rb/day).
+    :param target_rate: Target well rate at reservoir conditions (bbl/day).
         Negative for production, positive for injection.
     :param well_index: Well index (mD*ft).
     :param pressure: Reservoir cell pressure at the perforation interval (psi).
@@ -464,8 +468,8 @@ def compute_gas_well_rate(
     `formation_volume_factor` or computed internally from `gas_gravity`.
 
     Sign convention:
-        - Negative rate indicates production (BHP < reservoir pressure).
-        - Positive rate  indicates injection  (BHP > reservoir pressure).
+    - Negative rate indicates production (BHP < reservoir pressure).
+    - Positive rate  indicates injection  (BHP > reservoir pressure).
 
     :param well_index: Well index (mD*ft).
     :param pressure: Reservoir pressure at the perforation interval (psi).
@@ -557,8 +561,8 @@ def compute_required_bhp_for_gas_rate(
     with the return value of :func:`compute_gas_well_rate`.
 
     Sign convention:
-        - Negative `target_rate` indicates production (returned BHP < reservoir pressure).
-        - Positive `target_rate`  indicates injection  (returned BHP > reservoir pressure).
+    - Negative `target_rate` indicates production (returned BHP < reservoir pressure).
+    - Positive `target_rate`  indicates injection  (returned BHP > reservoir pressure).
 
     Inverse formula (pseudo-pressure):
 
@@ -581,16 +585,14 @@ def compute_required_bhp_for_gas_rate(
     :param pressure: Reservoir pressure at the perforation interval (psi).
     :param temperature: Reservoir temperature (deg F).
     :param phase_mobility: Phase relative mobility kr/mu (md/cP).
-        Must not include the Bg term.
+        Must not include the gas formation volume factor term.
     :param average_compressibility_factor: Average Z-factor over the pressure
-        interval.  Used only for the pressure-squared formulation.
-        Default 1.0.
+        interval. Used only for the pressure-squared formulation. Default 1.0.
     :param use_pseudo_pressure: If True (default), use the pseudo-pressure
-        inverse.  If False, use the pressure-squared inverse.
+        inverse. If False, use the pressure-squared inverse.
     :param pseudo_pressure_table: Pre-computed pseudo-pressure lookup table
-        supporting inverse interpolation.  Required when
-        `use_pseudo_pressure=True`.
-    :param formation_volume_factor: Gas Bg (ft³/SCF) at reservoir conditions.
+        supporting inverse interpolation. Required when `use_pseudo_pressure=True`.
+    :param formation_volume_factor: Gas formation volume factor (ft³/SCF) at reservoir conditions.
         Required to convert the reservoir-condition target rate back to
         surface SCF/day before inverting the well equation.
     :return: Required bottom-hole pressure (psi).
@@ -667,11 +669,9 @@ def _build_table_interpolator(
     """
 
     def interpolator(pressure: FloatOrArray) -> FloatOrArray:
-        # Clamp pressure to table bounds
         result = pvt_tables.pt_interpolate(
             name=property_name, pressure=pressure, temperature=temperature
         )
-        # Ensure positive values
         if result is None:
             raise ComputationError(
                 f"Result cannot be None ensure PVT table contains {property_name!r} interpolator. Use `table.exists({property_name!r})`"
@@ -681,6 +681,25 @@ def _build_table_interpolator(
     interpolator._supports_arrays = True  # type: ignore
     interpolator.__name__ = f"{property_name}_interpolator"
     return interpolator
+
+
+def _validate_pseudo_pressure_table_phase(
+    instance: "WellFluid",
+    attribute: typing.Any,
+    value: typing.Optional[GasPseudoPressureTable],
+) -> None:
+    """Validate that pseudo-pressure table is only provided for gas phase."""
+    if value is not None and instance.phase != FluidPhase.GAS:
+        phase_str = (
+            instance.phase.value
+            if isinstance(instance.phase, FluidPhase)
+            else str(instance.phase)
+        )
+        raise ValidationError(
+            f"Pseudo-pressure table can only be provided for gas phase fluids. "
+            f"Fluid '{instance.name}' has phase '{phase_str}'. "
+            f"Remove pseudo_pressure_table parameter or change phase to GAS."
+        )
 
 
 @attrs.frozen
@@ -695,6 +714,46 @@ class WellFluid(Serializable):
     """Specific gravity of the fluid in (lbm/ft³)."""
     molecular_weight: float = attrs.field(validator=attrs.validators.ge(0))
     """Molecular weight of the fluid in (g/mol)."""
+    pseudo_pressure_table: typing.Optional[GasPseudoPressureTable] = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(_validate_pseudo_pressure_table_phase),
+    )
+    """
+    Optional pre-built pseudo-pressure table for gas phase fluids.
+
+    If provided, this table will be used instead of building one internally from correlations.
+    Only valid for gas phase fluids. Must be None for oil or water phases.
+
+    Example:
+
+    ```python
+    # Build custom table from lab data
+    pressure_values = np.array([100, 500, 1000, 2000, 5000])
+    pseudo_pressure_values = np.array([2.1e4, 5.3e5, 1.2e6, 2.8e6, 8.1e6])
+
+    table = bores.GasPseudoPressureTable(
+        pressures=pressure_values,
+        pseudo_pressures=pseudo_pressure_values,
+    )
+
+    # Or from custom Z-factor/viscosity functions
+    table = bores.GasPseudoPressureTable(
+        z_factor_func=my_z_func,
+        viscosity_func=my_mu_func,
+        pressure_range=(100, 8000),
+        points=2000,
+    )
+
+    # Use in fluid definition
+    fluid = bores.InjectedFluid(
+        name="CO2",
+        phase=bores.FluidPhase.GAS,
+        specific_gravity=1.52,
+        molecular_weight=44.01,
+        pseudo_pressure_table=table,
+    )
+    ```
+    """
 
     def _build_pseudo_pressure_cache_key(
         self,
@@ -760,6 +819,10 @@ class WellFluid(Serializable):
         """
         Get gas pseudo-pressure table for this fluid.
 
+        If a custom `pseudo_pressure_table` was provided during fluid construction,
+        that table is returned directly. Otherwise, a table is built internally from
+        correlations or PVT tables.
+
         Uses global caching to avoid recomputing tables for identical fluid properties.
         Multiple `WellFluid` instances with the same properties will share cached tables.
 
@@ -772,6 +835,7 @@ class WellFluid(Serializable):
         :return: `GasPseudoPressureTable` instance
 
         Example:
+
         ```python
         # These two fluids will share the same cached table:
         methane1 = WellFluid(
@@ -796,6 +860,10 @@ class WellFluid(Serializable):
             raise ValidationError(
                 "Pseudo-pressure table is only applicable for gas phase."
             )
+
+        if self.pseudo_pressure_table is not None:
+            logger.debug(f"Using custom pseudo-pressure table for fluid '{self.name}'")
+            return self.pseudo_pressure_table
 
         z_factor_func = None  # type: ignore
         viscosity_func = None  # type: ignore
@@ -896,9 +964,9 @@ class InjectedFluid(WellFluid):
     )
     """Concentration (preferrably volume-based) of the fluid in the mixture (0 to 1). Relevant for miscible fluids."""
     density: typing.Optional[float] = None
-    """Fluid density (lbm/ft³) at reservoir conditions. If provided, bypasses table/correlation-based density calculations. Useful for non-ideal gases like CO2."""
+    """Fluid density (lbm/ft³) at reservoir conditions. If provided, bypasses table or correlation-based density calculations. Useful for non-ideal gases like CO2."""
     viscosity: typing.Optional[float] = None
-    """Fluid viscosity (cP) at reservoir conditions. If provided, bypasses table/correlation-based viscosity calculations. Useful for non-ideal gases like CO2."""
+    """Fluid viscosity (cP) at reservoir conditions. If provided, bypasses table or correlation-based viscosity calculations. Useful for non-ideal gases like CO2."""
 
     def __attrs_post_init__(self) -> None:
         """Validate the fluid properties."""
@@ -907,7 +975,7 @@ class InjectedFluid(WellFluid):
 
         if self.is_miscible:
             if self.phase != FluidPhase.GAS:
-                raise ValidationError("Only gas phase fluids can be miscible.")
+                raise ValidationError("Only gas phase can be miscible.")
             elif not self.minimum_miscibility_pressure or not self.todd_longstaff_omega:
                 raise ValidationError(
                     "Miscible fluids must have both `minimum_miscibility_pressure` and `todd_longstaff_omega` defined."
@@ -993,6 +1061,7 @@ class InjectedFluid(WellFluid):
                     gas_gravity=self.specific_gravity,
                     method="dak",
                 )
+
         if use_vectorization:
             return compute_gas_density_vectorized(
                 pressure=pressure,  # type: ignore
@@ -1264,6 +1333,7 @@ def _geometric_mean(values: typing.Sequence[float]) -> float:
     for v in values:
         prod *= max(v, 0.0)  # ensure non-negative
         n += 1
+
     if n == 0:
         raise ValidationError("No permeability values provided")
     return prod ** (1.0 / n)
@@ -1279,7 +1349,7 @@ def compute_effective_permeability_for_well(
     orientation is one of Orientation.X/Y/Z (or a string equivalent).
     """
     if len(permeability) != 3:
-        # If 2D, fall back to geometric mean of available components:
+        # If 2D, fall back to geometric mean of available components
         return _geometric_mean(permeability)
 
     kx, ky, kz = permeability

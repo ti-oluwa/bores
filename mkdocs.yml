@@ -1,5 +1,5 @@
 site_name: BORES
-site_description: 3D Three-Phase Black-Oil Reservoir Modelling and Simulation Framework in Python
+site_description: Open-source 3D three-phase black-oil reservoir modelling and simulation framework in Python. Features IMPES/Sequential Implicit solvers, PVT correlations, well controls, and comprehensive visualization tools for petroleum engineering.
 site_author: ti-oluwa
 site_url: https://ti-oluwa.github.io/bores
 
@@ -9,10 +9,12 @@ edit_uri: edit/main/docs/
 
 copyright: Copyright &copy; 2025 ti-oluwa
 
+docs_dir: docs
+site_dir: site
+
 theme:
   name: material
   palette:
-    # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
       primary: teal
       accent: amber
@@ -20,7 +22,6 @@ theme:
         icon: material/brightness-auto
         name: Switch to light mode
 
-    # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: teal
@@ -29,7 +30,6 @@ theme:
         icon: material/brightness-7
         name: Switch to dark mode
 
-    # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: teal
@@ -45,6 +45,8 @@ theme:
     text: DM Sans
     code: Roboto Mono
 
+  language: en
+
   features:
     - announce.dismiss
     - content.action.edit
@@ -56,9 +58,9 @@ theme:
     - navigation.expand
     - navigation.footer
     - navigation.indexes
-    - navigation.instant
+    # - navigation.instant
     - navigation.instant.prefetch
-    - navigation.instant.progress
+    # - navigation.instant.progress
     - navigation.path
     - navigation.sections
     - navigation.tabs
@@ -78,8 +80,33 @@ theme:
 plugins:
   - search:
       separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+
+  # SEO: Auto-generate social media preview cards (Open Graph, Twitter)
+  - social:
+      cards: true
+      cards_layout_options:
+        background_color: "#008080"  # Teal to match theme
+        color: "#ffffff"
+
+  # SEO: Show last updated date (signals content freshness to search engines)
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+      fallback_to_build_date: true
+
+  # SEO: Add structured metadata to pages
+  - meta
+
+  # SEO: Tag pages for better categorization and internal linking
+  - tags
+
   - minify:
       minify_html: true
+      minify_js: true
+      minify_css: true
+      htmlmin_opts:
+        remove_comments: true
+      cache_safe: true
 
 markdown_extensions:
   - abbr
@@ -121,14 +148,29 @@ markdown_extensions:
   - pymdownx.tilde
 
 extra:
+  # SEO: Social media links (helps with brand authority)
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/ti-oluwa
+      name: GitHub Profile
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/bores-framework/
+      name: PyPI Package
 
+  # SEO: Versioning
   version:
     provider: mike
+
+  # SEO: Keywords for better discoverability
+  tags:
+    Reservoir Simulation: reservoir-simulation
+    Black Oil: black-oil
+    Petroleum Engineering: petroleum-engineering
+    Python: python
+    Numerical Methods: numerical-methods
+    IMPES: impes
+    Finite Difference: finite-difference
+    Oil and Gas: oil-gas
 
 extra_css:
   - stylesheets/extra.css

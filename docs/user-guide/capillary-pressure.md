@@ -38,7 +38,7 @@ The pore size distribution index $\lambda$ controls how rapidly capillary pressu
 ```python
 import bores
 
-capillary = bores.BrooksCoreyCapillaryPressureModel(
+capillary_pressure = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_entry_pressure_water_wet=5.0,     # psi
     oil_water_pore_size_distribution_index_water_wet=2.0,
     gas_oil_entry_pressure=1.0,                  # psi
@@ -51,7 +51,7 @@ This creates a water-wet Brooks-Corey model with an oil-water entry pressure of 
 Like the relative permeability model, residual saturations can be set on the model or inherited from the reservoir model. When the saturation endpoints are set to `None` (the default), BORES uses the endpoint grids from the reservoir model automatically. If you provide explicit values, those override the grid-level defaults.
 
 ```python
-capillary = bores.BrooksCoreyCapillaryPressureModel(
+capillary_pressure = bores.BrooksCoreyCapillaryPressureModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
@@ -88,7 +88,7 @@ Wettability fundamentally changes the sign and magnitude of capillary pressure. 
 import bores
 
 # Water-wet system: positive Pcow
-cap_ww = bores.BrooksCoreyCapillaryPressureModel(
+capillary_pressure_water_wet = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_entry_pressure_water_wet=5.0,
     oil_water_pore_size_distribution_index_water_wet=2.5,
     gas_oil_entry_pressure=1.0,
@@ -97,7 +97,7 @@ cap_ww = bores.BrooksCoreyCapillaryPressureModel(
 )
 
 # Oil-wet system: negative Pcow
-cap_ow = bores.BrooksCoreyCapillaryPressureModel(
+capillary_pressure_oil_wet = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_entry_pressure_oil_wet=4.0,
     oil_water_pore_size_distribution_index_oil_wet=2.0,
     gas_oil_entry_pressure=1.0,
@@ -106,7 +106,7 @@ cap_ow = bores.BrooksCoreyCapillaryPressureModel(
 )
 
 # Mixed-wet system: 60% water-wet, 40% oil-wet pore surfaces
-cap_mw = bores.BrooksCoreyCapillaryPressureModel(
+capillary_pressure_mixed_wet = bores.BrooksCoreyCapillaryPressureModel(
     oil_water_entry_pressure_water_wet=5.0,
     oil_water_entry_pressure_oil_wet=4.0,
     oil_water_pore_size_distribution_index_water_wet=2.5,
@@ -143,7 +143,7 @@ The key advantage of Van Genuchten over Brooks-Corey is its behavior at the endp
 ```python
 import bores
 
-capillary = bores.VanGenuchtenCapillaryPressureModel(
+capillary_pressure = bores.VanGenuchtenCapillaryPressureModel(
     oil_water_alpha_water_wet=0.01,    # psi⁻¹ (roughly: entry pressure ~ 1/alpha)
     oil_water_n_water_wet=2.0,          # Shape parameter (must be > 1)
     gas_oil_alpha=0.02,                 # psi⁻¹
@@ -195,13 +195,13 @@ The Leverett J-function approach is most valuable in heterogeneous reservoirs wh
 ```python
 import bores
 
-capillary = bores.LeverettJCapillaryPressureModel(
+capillary_pressure = bores.LeverettJCapillaryPressureModel(
     permeability=100.0,                 # mD (reference permeability)
     porosity=0.2,                        # Reference porosity
     oil_water_interfacial_tension=30.0,  # dyne/cm
     gas_oil_interfacial_tension=20.0,    # dyne/cm
-    contact_angle_oil_water=0.0,         # degrees (0 = water-wet)
-    contact_angle_gas_oil=0.0,           # degrees
+    oil_water_contact_angle=0.0,         # degrees (0 = water-wet)
+    gas_oil_contact_angle=0.0,           # degrees
     j_function_coefficient=0.5,          # Empirical coefficient 'a'
     j_function_exponent=0.5,             # Empirical exponent 'b'
 )
@@ -219,8 +219,8 @@ capillary = bores.LeverettJCapillaryPressureModel(
 | `porosity` | `0.2` | Porosity (fraction) |
 | `oil_water_interfacial_tension` | `30.0` | Oil-water IFT (dyne/cm) |
 | `gas_oil_interfacial_tension` | `20.0` | Gas-oil IFT (dyne/cm) |
-| `contact_angle_oil_water` | `0.0` | Oil-water contact angle (degrees) |
-| `contact_angle_gas_oil` | `0.0` | Gas-oil contact angle (degrees) |
+| `oil_water_contact_angle` | `0.0` | Oil-water contact angle (degrees) |
+| `gas_oil_contact_angle` | `0.0` | Gas-oil contact angle (degrees) |
 | `j_function_coefficient` | `0.5` | Coefficient $a$ in $J = a \cdot S_e^{-b}$ |
 | `j_function_exponent` | `0.5` | Exponent $b$ in $J = a \cdot S_e^{-b}$ |
 | `wettability` | `WATER_WET` | Rock wettability |
@@ -247,7 +247,7 @@ import bores
 import numpy as np
 
 # Oil-water capillary pressure from mercury injection data
-ow_pc_table = bores.TwoPhaseCapillaryPressureTable(
+oil_water_capillary_pressure_table = bores.TwoPhaseCapillaryPressureTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
     wetting_phase_saturation=np.array([0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80]),
@@ -261,11 +261,11 @@ You can query the table at any saturation value or with grid arrays:
 
 ```python
 # Single point query
-pc_at_04 = ow_pc_table.get_capillary_pressure(0.4)
+capillary_pressure_at_04 = oil_water_capillary_pressure_table.get_capillary_pressure(0.4)
 
 # Grid array query
 Sw_grid = np.random.uniform(0.2, 0.8, size=(20, 20, 5))
-pc_grid = ow_pc_table.get_capillary_pressure(Sw_grid)
+capillary_pressure_grid = oil_water_capillary_pressure_table.get_capillary_pressure(Sw_grid)
 ```
 
 ### `ThreePhaseCapillaryPressureTable`
@@ -277,7 +277,7 @@ import bores
 import numpy as np
 
 # Oil-water capillary pressure (water is wetting phase)
-ow_pc = bores.TwoPhaseCapillaryPressureTable(
+oil_water_capillary_pressure = bores.TwoPhaseCapillaryPressureTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
     wetting_phase_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80]),
@@ -285,7 +285,7 @@ ow_pc = bores.TwoPhaseCapillaryPressureTable(
 )
 
 # Gas-oil capillary pressure (oil is wetting phase)
-go_pc = bores.TwoPhaseCapillaryPressureTable(
+gas_oil_capillary_pressure = bores.TwoPhaseCapillaryPressureTable(
     wetting_phase=bores.FluidPhase.OIL,
     non_wetting_phase=bores.FluidPhase.GAS,
     wetting_phase_saturation=np.array([0.15, 0.25, 0.40, 0.55, 0.70, 0.85]),
@@ -293,9 +293,9 @@ go_pc = bores.TwoPhaseCapillaryPressureTable(
 )
 
 # Combine into three-phase table
-three_phase_pc = bores.ThreePhaseCapillaryPressureTable(
-    oil_water_table=ow_pc,
-    gas_oil_table=go_pc,
+three_phase_capillary_pressure = bores.ThreePhaseCapillaryPressureTable(
+    oil_water_table=oil_water_capillary_pressure,
+    gas_oil_table=gas_oil_capillary_pressure,
 )
 ```
 
@@ -321,7 +321,7 @@ The `BrooksCoreyCapillaryPressureModel`, `VanGenuchtenCapillaryPressureModel`, a
 import bores
 import numpy as np
 
-capillary = bores.BrooksCoreyCapillaryPressureModel(
+capillary_pressure = bores.BrooksCoreyCapillaryPressureModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
@@ -333,7 +333,7 @@ capillary = bores.BrooksCoreyCapillaryPressureModel(
 )
 
 # Scalar evaluation
-result = capillary.get_capillary_pressures(
+result = capillary_pressure.get_capillary_pressures(
     water_saturation=0.4,
     oil_saturation=0.55,
     gas_saturation=0.05,
@@ -342,7 +342,7 @@ print(f"Pcow = {result['oil_water']:.2f} psi")
 print(f"Pcgo = {result['gas_oil']:.2f} psi")
 
 # Using __call__ (same result)
-result = capillary(
+result = capillary_pressure(
     water_saturation=0.4,
     oil_saturation=0.55,
     gas_saturation=0.05,
@@ -353,15 +353,15 @@ Sw = bores.build_uniform_grid((20, 20, 5), value=0.4)
 So = bores.build_uniform_grid((20, 20, 5), value=0.55)
 Sg = bores.build_uniform_grid((20, 20, 5), value=0.05)
 
-result = capillary(water_saturation=Sw, oil_saturation=So, gas_saturation=Sg)
-pcow_grid = result["oil_water"]  # Shape: (20, 20, 5)
-pcgo_grid = result["gas_oil"]    # Shape: (20, 20, 5)
+result = capillary_pressure(water_saturation=Sw, oil_saturation=So, gas_saturation=Sg)
+pcoil_water_grid = result["oil_water"]  # Shape: (20, 20, 5)
+pcgas_oil_grid = result["gas_oil"]    # Shape: (20, 20, 5)
 ```
 
 The `get_capillary_pressures()` method also accepts optional residual saturation overrides that take precedence over the model defaults. This is useful when the simulator passes cell-level saturation endpoints from the grid:
 
 ```python
-result = capillary.get_capillary_pressures(
+result = capillary_pressure.get_capillary_pressures(
     water_saturation=0.35,
     oil_saturation=0.60,
     gas_saturation=0.05,
@@ -373,7 +373,7 @@ result = capillary.get_capillary_pressures(
 The Van Genuchten and Leverett J-function models use the exact same calling convention:
 
 ```python
-vg = bores.VanGenuchtenCapillaryPressureModel(
+van_genuchten = bores.VanGenuchtenCapillaryPressureModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
@@ -384,7 +384,7 @@ vg = bores.VanGenuchtenCapillaryPressureModel(
     gas_oil_n=2.0,
 )
 
-result = vg(water_saturation=0.4, oil_saturation=0.55, gas_saturation=0.05)
+result = van_genuchten(water_saturation=0.4, oil_saturation=0.55, gas_saturation=0.05)
 ```
 
 ### Calling Tabular Models Directly
@@ -392,23 +392,23 @@ result = vg(water_saturation=0.4, oil_saturation=0.55, gas_saturation=0.05)
 The `TwoPhaseCapillaryPressureTable` can be queried at any saturation using `get_capillary_pressure()` or `__call__`:
 
 ```python
-# Using the ow_pc_table from earlier
-pc_scalar = ow_pc_table.get_capillary_pressure(0.45)
-print(f"Pcow at Sw=0.45: {pc_scalar:.2f} psi")
+# Using the oil_water_capillary_pressure_table from earlier
+capillary_pressure_scalar = oil_water_capillary_pressure_table.get_capillary_pressure(0.45)
+print(f"Pcow at Sw=0.45: {capillary_pressure_scalar:.2f} psi")
 
 # Using __call__
-pc_scalar = ow_pc_table(wetting_phase_saturation=0.45)
+capillary_pressure_scalar = oil_water_capillary_pressure_table(wetting_phase_saturation=0.45)
 
 # Grid array query
 Sw_grid = np.random.uniform(0.2, 0.8, size=(20, 20, 5))
-pc_grid = ow_pc_table.get_capillary_pressure(Sw_grid)  # Shape: (20, 20, 5)
+capillary_pressure_grid = oil_water_capillary_pressure_table.get_capillary_pressure(Sw_grid)  # Shape: (20, 20, 5)
 ```
 
 The `ThreePhaseCapillaryPressureTable` uses `get_capillary_pressures()` or `__call__` with all three saturations:
 
 ```python
-# Using the three_phase_pc from earlier
-result = three_phase_pc.get_capillary_pressures(
+# Using the three_phase_capillary_pressure from earlier
+result = three_phase_capillary_pressure.get_capillary_pressures(
     water_saturation=0.4,
     oil_saturation=0.5,
     gas_saturation=0.1,
@@ -417,7 +417,7 @@ print(f"Pcow = {result['oil_water']:.2f} psi")
 print(f"Pcgo = {result['gas_oil']:.2f} psi")
 
 # Using __call__
-result = three_phase_pc(
+result = three_phase_capillary_pressure(
     water_saturation=Sw,
     oil_saturation=So,
     gas_saturation=Sg,
@@ -473,7 +473,7 @@ rock_fluid_tables = bores.RockFluidTables(
         oil_exponent=2.0,
         gas_exponent=2.0,
     ),
-    capillary_pressure_table=three_phase_pc,  # ThreePhaseCapillaryPressureTable from lab data
+    capillary_pressure_table=three_phase_capillary_pressure,  # ThreePhaseCapillaryPressureTable from lab data
 )
 ```
 
@@ -503,7 +503,7 @@ import bores
 import numpy as np
 
 # Create the model
-capillary = bores.BrooksCoreyCapillaryPressureModel(
+capillary_pressure = bores.BrooksCoreyCapillaryPressureModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
@@ -516,17 +516,17 @@ capillary = bores.BrooksCoreyCapillaryPressureModel(
 
 # Sweep water saturation across the mobile range (no free gas)
 Sw_values = np.linspace(0.26, 0.75, 100)  # Slightly above Swc to avoid singularity
-pcow_values = np.zeros_like(Sw_values)
+pcoil_water_values = np.zeros_like(Sw_values)
 
 for i, sw in enumerate(Sw_values):
     so = 1.0 - sw  # No free gas
-    result = capillary.get_capillary_pressures(
+    result = capillary_pressure.get_capillary_pressures(
         water_saturation=sw, oil_saturation=so, gas_saturation=0.0,
     )
-    pcow_values[i] = result["oil_water"]
+    pcoil_water_values[i] = result["oil_water"]
 
 fig = bores.make_series_plot(
-    data=np.column_stack([Sw_values, pcow_values]),
+    data=np.column_stack([Sw_values, pcoil_water_values]),
     title="Brooks-Corey Oil-Water Capillary Pressure",
     x_label="Water Saturation (fraction)",
     y_label="Capillary Pressure (psi)",
@@ -546,7 +546,7 @@ import bores
 import numpy as np
 
 # Brooks-Corey (water-wet)
-bc_ww = bores.BrooksCoreyCapillaryPressureModel(
+brookes_corey_water_wet = bores.BrooksCoreyCapillaryPressureModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     oil_water_entry_pressure_water_wet=5.0,
@@ -554,7 +554,7 @@ bc_ww = bores.BrooksCoreyCapillaryPressureModel(
 )
 
 # Van Genuchten (water-wet)
-vg_ww = bores.VanGenuchtenCapillaryPressureModel(
+van_genuchten_water_wet = bores.VanGenuchtenCapillaryPressureModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     oil_water_alpha_water_wet=0.2,
@@ -563,24 +563,24 @@ vg_ww = bores.VanGenuchtenCapillaryPressureModel(
 
 # Evaluate both across the same saturation range
 Sw_range = np.linspace(0.26, 0.74, 80)
-pcow_bc = np.zeros_like(Sw_range)
-pcow_vg = np.zeros_like(Sw_range)
+pcoil_water_brookes_corey = np.zeros_like(Sw_range)
+pcoil_water_van_genuchten = np.zeros_like(Sw_range)
 
 for i, sw in enumerate(Sw_range):
     so = 1.0 - sw
-    result_bc = bc_ww.get_capillary_pressures(
+    result_brookes_corey = brookes_corey_water_wet.get_capillary_pressures(
         water_saturation=sw, oil_saturation=so, gas_saturation=0.0,
     )
-    result_vg = vg_ww.get_capillary_pressures(
+    result_van_genuchten = van_genuchten_water_wet.get_capillary_pressures(
         water_saturation=sw, oil_saturation=so, gas_saturation=0.0,
     )
-    pcow_bc[i] = result_bc["oil_water"]
-    pcow_vg[i] = result_vg["oil_water"]
+    pcoil_water_brookes_corey[i] = result_brookes_corey["oil_water"]
+    pcoil_water_van_genuchten[i] = result_van_genuchten["oil_water"]
 
 fig = bores.make_series_plot(
     data={
-        "Brooks-Corey": np.column_stack([Sw_range, pcow_bc]),
-        "Van Genuchten": np.column_stack([Sw_range, pcow_vg]),
+        "Brooks-Corey": np.column_stack([Sw_range, pcoil_water_brookes_corey]),
+        "Van Genuchten": np.column_stack([Sw_range, pcoil_water_van_genuchten]),
     },
     title="Capillary Pressure Model Comparison",
     x_label="Water Saturation (fraction)",
@@ -611,7 +611,7 @@ The choice of capillary pressure model depends on the data available and the sim
     === "Consolidated Sandstone"
 
         ```python
-        capillary = bores.BrooksCoreyCapillaryPressureModel(
+        capillary_pressure = bores.BrooksCoreyCapillaryPressureModel(
             oil_water_entry_pressure_water_wet=5.0,
             oil_water_pore_size_distribution_index_water_wet=2.5,
             gas_oil_entry_pressure=1.5,
@@ -623,7 +623,7 @@ The choice of capillary pressure model depends on the data available and the sim
     === "Tight Carbonate"
 
         ```python
-        capillary = bores.BrooksCoreyCapillaryPressureModel(
+        capillary_pressure = bores.BrooksCoreyCapillaryPressureModel(
             oil_water_entry_pressure_water_wet=25.0,
             oil_water_pore_size_distribution_index_water_wet=1.2,
             gas_oil_entry_pressure=10.0,
@@ -637,8 +637,8 @@ The choice of capillary pressure model depends on the data available and the sim
     === "High-Perm Unconsolidated"
 
         ```python
-        capillary = bores.VanGenuchtenCapillaryPressureModel(
-            oil_water_alpha_water_wet=0.5,     # Low capillary pressure
+        capillary_pressure = bores.VanGenuchtenCapillaryPressureModel(
+            oil_water_alpha_water_wet=0.5,     # Low capillary_pressure pressure
             oil_water_n_water_wet=3.0,          # Narrow pore size distribution
             gas_oil_alpha=0.8,
             gas_oil_n=2.5,
@@ -648,7 +648,7 @@ The choice of capillary pressure model depends on the data available and the sim
     === "Heterogeneous with J-Function"
 
         ```python
-        capillary = bores.LeverettJCapillaryPressureModel(
+        capillary_pressure = bores.LeverettJCapillaryPressureModel(
             permeability=150.0,
             porosity=0.22,
             oil_water_interfacial_tension=30.0,

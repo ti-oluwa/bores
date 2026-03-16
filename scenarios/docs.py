@@ -39,12 +39,8 @@ def _():
     bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)  # psi
 
     # Residual and irreducible saturations
-    Sorw = bores.build_uniform_grid(
-        grid_shape, value=0.20
-    )  # Residual oil (waterflood)
-    Sorg = bores.build_uniform_grid(
-        grid_shape, value=0.15
-    )  # Residual oil (gas flood)
+    Sorw = bores.build_uniform_grid(grid_shape, value=0.20)  # Residual oil (waterflood)
+    Sorg = bores.build_uniform_grid(grid_shape, value=0.15)  # Residual oil (gas flood)
     Sgr = bores.build_uniform_grid(grid_shape, value=0.05)  # Residual gas
     Swir = bores.build_uniform_grid(grid_shape, value=0.20)  # Irreducible water
     Swc = bores.build_uniform_grid(grid_shape, value=0.20)  # Connate water
@@ -213,8 +209,12 @@ def _():
 
 @app.cell
 def _(bores, np, states, time_days):
-    avg_So = np.array([s.model.fluid_properties.oil_saturation_grid.mean() for s in states])
-    avg_Sw = np.array([s.model.fluid_properties.water_saturation_grid.mean() for s in states])
+    avg_So = np.array(
+        [s.model.fluid_properties.oil_saturation_grid.mean() for s in states]
+    )
+    avg_Sw = np.array(
+        [s.model.fluid_properties.water_saturation_grid.mean() for s in states]
+    )
 
     fig2 = bores.make_series_plot(
         data={

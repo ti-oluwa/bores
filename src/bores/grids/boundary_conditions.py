@@ -1,19 +1,11 @@
 import logging
 import typing
 
-from bores.boundary_conditions import BoundaryConditions, BoundaryMetadata, default_bc
+from bores.boundary_conditions import BoundaryConditions, BoundaryMetadata
 from bores.models import FluidProperties, RockProperties
-from bores.types import NDimension, NDimensionalGrid, ThreeDimensions
+from bores.types import NDimensionalGrid, ThreeDimensions
 
 logger = logging.getLogger(__name__)
-
-
-def mirror_neighbour_cells(
-    grid: NDimensionalGrid[NDimension],
-) -> NDimensionalGrid[NDimension]:
-    """Mirrors the neighbour cells for boundary padding."""
-    default_bc.apply(grid)
-    return grid
 
 
 def apply_boundary_conditions(
@@ -93,16 +85,4 @@ def apply_boundary_conditions(
         ),
         pad_width=pad_width,
     )
-
-    excluded_fluid_properties = (
-        "pressure_grid",
-        "oil_saturation_grid",
-        "water_saturation_grid",
-        "gas_saturation_grid",
-        "temperature_grid",
-    )
-    fluid_properties = fluid_properties.apply_hook(
-        hook=mirror_neighbour_cells, exclude=excluded_fluid_properties
-    )
-    rock_properties = rock_properties.apply_hook(hook=mirror_neighbour_cells)
     return fluid_properties, rock_properties

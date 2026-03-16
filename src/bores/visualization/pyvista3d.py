@@ -43,8 +43,6 @@ from bores.visualization.plotly3d import (
 )
 from bores.visualization.utils import (
     FrameExporter,
-    Label,
-    LabelCoordinate,
     Labels,
     get_data,
     resolve_exporter,

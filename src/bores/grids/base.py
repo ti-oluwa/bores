@@ -528,7 +528,7 @@ def get_pad_mask(grid_shape: typing.Tuple[int, ...], pad_width: int = 1) -> np.n
         else slice(-pad_width, None)
         if i == 1
         else slice(pad_width, -pad_width)
-        for i, dim in enumerate(padded_shape)
+        for i, _ in enumerate(padded_shape)
     )
     mask[slices] = True
     return mask

@@ -1,3 +1,15 @@
+---
+title: Your First Reservoir Simulation - BORES Tutorial
+description: Step-by-step tutorial for building a complete 3D depletion simulation with BORES. Learn grid construction, well placement, PVT properties, and result visualization using Python.
+tags:
+  - tutorial
+  - beginner
+  - reservoir-simulation
+  - python
+keywords: reservoir simulation tutorial, primary depletion, BORES first simulation, black-oil modeling, Python petroleum engineering, production well, solution gas drive
+author: ti-oluwa
+---
+
 # Your First Simulation
 
 Build a complete depletion simulation from scratch and learn every step of the BORES workflow.
@@ -147,6 +159,7 @@ model = bores.reservoir_model(
     residual_gas_saturation_grid=Sgr,
     irreducible_water_saturation_grid=Swir,
     connate_water_saturation_grid=Swc,
+    datum_depth=5000,
 )
 ```
 

@@ -125,9 +125,7 @@ def run_simulation(bores, run, store):
 
 @app.cell
 def capture_last_state(Path, last_state):
-    last_state.model.save(
-        Path("./scenarios/runs/primary_depletion/results/model.h5")
-    )
+    last_state.model.save(Path("./scenarios/runs/primary_depletion/results/model.h5"))
     return
 
 

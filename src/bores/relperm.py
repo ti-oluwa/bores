@@ -1,4 +1,4 @@
-"""Relative permeability models and mixing rules for multiphase flow simulations."""
+"""Relative permeability models and mixing rules for multi-phase flow simulations."""
 
 import threading
 import typing
@@ -23,6 +23,8 @@ from bores.types import (
 
 __all__ = [
     "BrooksCoreyThreePhaseRelPermModel",
+    "LETParameters",
+    "LETThreePhaseRelPermModel",
     "ThreePhaseRelPermTable",
     "TwoPhaseRelPermTable",
     "arithmetic_mean_rule",
@@ -30,6 +32,7 @@ __all__ = [
     "baker_linear_rule",
     "blunt_rule",
     "compute_corey_three_phase_relative_permeabilities",
+    "compute_let_three_phase_relative_permeabilities",
     "eclipse_rule",
     "geometric_mean_rule",
     "get_relperm_table",
@@ -458,9 +461,9 @@ def baker_linear_rule(
     Interpolates three-phase kro as a saturation-weighted combination
     of the two-phase endpoint values:
 
-        kro = (Sw * kro_w + So * kro_ow_endpoint + Sg * kro_g) / (Sw + So + Sg)
+        kro = (Sw * kro_w + So * kro_oil_water_contact_angleendpoint + Sg * kro_g) / (Sw + So + Sg)
 
-    where kro_ow_endpoint is approximated as max(kro_w, kro_g) (the oil kr
+    where kro_oil_water_contact_angleendpoint is approximated as max(kro_w, kro_g) (the oil kr
     at the oil-water endpoint, i.e. in absence of gas), and kro_g is the
     oil kr from the gas-oil table.
 
@@ -1386,6 +1389,481 @@ class BrooksCoreyThreePhaseRelPermModel(
         :kwarg residual_gas_saturation: Optional override for residual gas saturation.
         :return: A dictionary with relative permeabilities for water, oil, and gas.
         0 <= water_saturation, oil_saturation, gas_saturation <= 1
+        """
+        return self.get_relative_permeabilities(
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=kwargs.get(
+                "irreducible_water_saturation", None
+            ),
+            residual_oil_saturation_water=kwargs.get(
+                "residual_oil_saturation_water", None
+            ),
+            residual_oil_saturation_gas=kwargs.get("residual_oil_saturation_gas", None),
+            residual_gas_saturation=kwargs.get("residual_gas_saturation", None),
+        )
+
+
+@attrs.frozen
+class LETParameters(Serializable):
+    """
+    LET curve-shape parameters for a single relative permeability curve.
+
+    The LET correlation computes relative permeability from normalized
+    saturation S* as:
+
+        kr = kr_max * S*^L / (S*^L + E * (1 - S*)^T)
+
+    where L, E, and T control different regions of the curve:
+
+    - **L** (low-end): Controls curvature at low normalized saturation.
+      Higher values delay the onset of flow (the curve stays near zero longer
+      before rising). Analogous to a Corey exponent for the lower end.
+
+    - **E** (elevation): Controls the overall position/elevation of the curve
+      between the endpoints. Higher values push the curve downward (lower kr
+      at intermediate saturations). E = 1 gives a curve similar to a simple
+      power law. E < 1 raises the curve; E > 1 suppresses it.
+
+    - **T** (top-end): Controls curvature at high normalized saturation.
+      Higher values make the curve flatten earlier as it approaches kr_max
+      (the curve reaches its plateau sooner). Analogous to a Corey exponent
+      for the upper end.
+
+    All three parameters must be positive. Typical ranges are L in [0.5, 5],
+    E in [0.1, 10], and T in [0.5, 5].
+    """
+
+    L: float = 2.0
+    """Low-end shape parameter. Controls curvature near zero normalized saturation."""
+    E: float = 1.0
+    """Elevation parameter. Controls overall curve height at intermediate saturations."""
+    T: float = 2.0
+    """Top-end shape parameter. Controls curvature near maximum normalized saturation."""
+
+    def __attrs_post_init__(self) -> None:
+        if self.L <= 0:
+            raise ValidationError(f"LET parameter `L` must be positive, got {self.L}")
+        if self.E <= 0:
+            raise ValidationError(f"LET parameter `E` must be positive, got {self.E}")
+        if self.T <= 0:
+            raise ValidationError(f"LET parameter `T` must be positive, got {self.T}")
+
+
+def _let_kr(
+    normalized_saturation: FloatOrArray,
+    L: float,
+    E: float,
+    T: float,
+) -> FloatOrArray:
+    """
+    Core LET relative permeability formula (without endpoint scaling).
+
+    Computes: S*^L / (S*^L + E * (1 - S*)^T)
+
+    Returns 0 when S* = 0, and 1 when S* = 1. For intermediate values the
+    curve shape is governed by L, E, and T.
+
+    :param normalized_saturation: Effective (normalized) saturation, clipped to [0, 1].
+    :param L: Low-end shape parameter (> 0).
+    :param E: Elevation parameter (> 0).
+    :param T: Top-end shape parameter (> 0).
+    :return: Relative permeability value(s) in [0, 1].
+    """
+    s = normalized_saturation
+    numerator = s**L
+    denominator = numerator + E * (1.0 - s) ** T
+    # Safe division: denominator is zero only when both s^L = 0 and (1-s)^T = 0,
+    # which requires s = 0 and s = 1 simultaneously (impossible). For s = 0,
+    # numerator = 0 and denominator = E > 0, so result = 0. For s = 1,
+    # numerator = 1 and denominator = 1, so result = 1. No special handling needed
+    # for well-formed inputs, but protect against floating-point edge cases.
+    return np.where(denominator > 0.0, numerator / denominator, 0.0)
+
+
+def compute_let_three_phase_relative_permeabilities(
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    irreducible_water_saturation: float,
+    residual_oil_saturation_water: float,
+    residual_oil_saturation_gas: float,
+    residual_gas_saturation: float,
+    water_L: float,
+    water_E: float,
+    water_T: float,
+    oil_water_L: float,
+    oil_water_E: float,
+    oil_water_T: float,
+    gas_oil_L: float,
+    gas_oil_E: float,
+    gas_oil_T: float,
+    gas_L: float,
+    gas_E: float,
+    gas_T: float,
+    max_water_relperm: float = 1.0,
+    max_oil_relperm: float = 1.0,
+    max_gas_relperm: float = 1.0,
+    wettability: Wettability = Wettability.WATER_WET,
+    mixing_rule: MixingRule = eclipse_rule,
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray]:
+    """
+    Compute three-phase relative permeabilities using the LET correlation.
+
+    The LET (Lomeland-Ebeltoft-Thomas) model uses three curve-shape parameters
+    (L, E, T) per phase-pair, providing more flexibility than the single Corey
+    exponent for fitting laboratory data. Each two-phase kr curve is computed
+    independently from normalized saturation, then the three-phase oil kr is
+    obtained through a mixing rule.
+
+    Supports both scalar and array inputs for saturations.
+
+    :param water_saturation: Water saturation (fraction, 0 to 1).
+    :param oil_saturation: Oil saturation (fraction, 0 to 1).
+    :param gas_saturation: Gas saturation (fraction, 0 to 1).
+    :param irreducible_water_saturation: Irreducible water saturation (Swc).
+    :param residual_oil_saturation_water: Residual oil saturation to waterflood (Sorw).
+    :param residual_oil_saturation_gas: Residual oil saturation to gas flood (Sorg).
+    :param residual_gas_saturation: Residual gas saturation (Sgr).
+    :param water_L: Water LET `L` parameter.
+    :param water_E: Water LET `E` parameter.
+    :param water_T: Water LET `T` parameter.
+    :param oil_water_L: Oil (water-oil system) LET `L` parameter.
+    :param oil_water_E: Oil (water-oil system) LET `E` parameter.
+    :param oil_water_T: Oil (water-oil system) LET `T` parameter.
+    :param gas_oil_L: Oil (gas-oil system) LET `L` parameter.
+    :param gas_oil_E: Oil (gas-oil system) LET `E` parameter.
+    :param gas_oil_T: Oil (gas-oil system) LET `T` parameter.
+    :param gas_L: Gas LET `L` parameter.
+    :param gas_E: Gas LET `E` parameter.
+    :param gas_T: Gas LET `T` parameter.
+    :param max_water_relperm: Endpoint relative permeability for water (krw_max).
+    :param max_oil_relperm: Endpoint relative permeability for oil (kro_max).
+    :param max_gas_relperm: Endpoint relative permeability for gas (krg_max).
+    :param wettability: Wettability type (water-wet or oil-wet).
+    :param mixing_rule: Three-phase mixing rule for oil relative permeability.
+    :return: (krw, kro, krg) tuple of relative permeabilities.
+    """
+    sw = np.atleast_1d(water_saturation)
+    so = np.atleast_1d(oil_saturation)
+    sg = np.atleast_1d(gas_saturation)
+
+    sw, so, sg = np.broadcast_arrays(sw, so, sg)
+
+    if np.any((sw < 0) | (sw > 1) | (so < 0) | (so > 1) | (sg < 0) | (sg > 1)):
+        raise ValidationError("Saturations must be between 0 and 1.")
+
+    # Normalize saturations if they do not sum to 1
+    total_saturation = sw + so + sg
+    needs_norm = (np.abs(total_saturation - 1.0) > 1e-6) & (total_saturation > 0.0)
+    if np.any(needs_norm):
+        sw = np.where(needs_norm, sw / total_saturation, sw)
+        so = np.where(needs_norm, so / total_saturation, so)
+        sg = np.where(needs_norm, sg / total_saturation, sg)
+
+    Swc = irreducible_water_saturation
+    Sorw = residual_oil_saturation_water
+    Sorg = residual_oil_saturation_gas
+    Sgr = residual_gas_saturation
+
+    if wettability == Wettability.WATER_WET:
+        # Water kr (wetting phase)
+        movable_water_range = 1.0 - Swc - Sorw
+        sw_star = np.where(
+            movable_water_range <= 1e-6,
+            np.zeros_like(sw),
+            np.clip((sw - Swc) / movable_water_range, 0.0, 1.0),
+        )
+        krw = max_water_relperm * _let_kr(sw_star, water_L, water_E, water_T)
+
+        # Gas kr (non-wetting phase)
+        movable_gas_range = 1.0 - Swc - Sgr - Sorg
+        sg_star = np.where(
+            movable_gas_range <= 1e-6,
+            np.zeros_like(sg),
+            np.clip((sg - Sgr) / movable_gas_range, 0.0, 1.0),
+        )
+        krg = max_gas_relperm * _let_kr(sg_star, gas_L, gas_E, gas_T)
+
+        # Oil kr (intermediate phase, three-phase mixing)
+        # Compute two-phase oil kr on a unit-endpoint basis (0 to 1) so that
+        # mixing rules, which are designed for unit-endpoint curves, produce
+        # correct results. The endpoint scaling is applied after mixing.
+
+        # Two-phase oil kr in the water-oil system (unit endpoint)
+        movable_oil_water_range = 1.0 - Swc - Sorw
+        so_star_w = np.where(
+            movable_oil_water_range <= 1e-6,
+            np.zeros_like(so),
+            np.clip((so - Sorw) / movable_oil_water_range, 0.0, 1.0),
+        )
+        kro_w = _let_kr(so_star_w, oil_water_L, oil_water_E, oil_water_T)
+
+        # Two-phase oil kr in the gas-oil system (unit endpoint)
+        movable_gas_oil_range = 1.0 - Swc - Sorg - Sgr
+        so_star_g = np.where(
+            movable_gas_oil_range <= 1e-6,
+            np.zeros_like(so),
+            np.clip((so - Sorg) / movable_gas_oil_range, 0.0, 1.0),
+        )
+        kro_g = _let_kr(so_star_g, gas_oil_L, gas_oil_E, gas_oil_T)
+
+        # Combine using mixing rule, then apply endpoint scaling.
+        # Clip the mixing rule output to [0, 1] before scaling because some
+        # rules (e.g. eclipse, Stone II) can produce values > 1 when both
+        # two-phase curves are near their maximum simultaneously.
+        kro_mixed = mixing_rule(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=sw,
+            oil_saturation=so,
+            gas_saturation=sg,
+        )
+        kro = max_oil_relperm * np.clip(kro_mixed, 0.0, 1.0)
+
+    elif wettability == Wettability.OIL_WET:
+        # Oil is wetting, water becomes intermediate
+        # Oil kr (wetting phase)
+        movable_oil_range = 1.0 - Sorw - Sorg
+        min_residual = np.minimum(Sorw, Sorg)
+        so_star = np.where(
+            movable_oil_range <= 1e-6,
+            np.zeros_like(so),
+            np.clip((so - min_residual) / movable_oil_range, 0.0, 1.0),
+        )
+        kro = max_oil_relperm * _let_kr(so_star, oil_water_L, oil_water_E, oil_water_T)
+
+        # Gas kr (non-wetting phase)
+        movable_gas_range = 1.0 - Sgr - Swc
+        sg_star = np.where(
+            movable_gas_range <= 1e-6,
+            np.zeros_like(sg),
+            np.clip((sg - Sgr) / movable_gas_range, 0.0, 1.0),
+        )
+        krg = max_gas_relperm * _let_kr(sg_star, gas_L, gas_E, gas_T)
+
+        # Water kr (intermediate phase, use mixing rule)
+        # Compute two-phase water kr on unit-endpoint basis, apply endpoint
+        # scaling after mixing (same rationale as oil in water-wet case).
+
+        # Two-phase water kr from oil-water system (unit endpoint)
+        movable_water_range_ow = 1.0 - Swc - Sorw
+        sw_star_ow = np.where(
+            movable_water_range_ow <= 1e-6,
+            np.zeros_like(sw),
+            np.clip((sw - Swc) / movable_water_range_ow, 0.0, 1.0),
+        )
+        krw_ow = _let_kr(sw_star_ow, water_L, water_E, water_T)
+
+        # Two-phase water kr proxy from gas-water system (unit endpoint)
+        movable_water_range_gw = 1.0 - Swc - Sgr
+        sw_star_gw = np.where(
+            movable_water_range_gw <= 1e-6,
+            np.zeros_like(sw),
+            np.clip((sw - Swc) / movable_water_range_gw, 0.0, 1.0),
+        )
+        krw_gw = _let_kr(sw_star_gw, water_L, water_E, water_T)
+
+        krw_mixed = mixing_rule(
+            kro_w=krw_ow,
+            kro_g=krw_gw,
+            water_saturation=sw,
+            oil_saturation=so,
+            gas_saturation=sg,
+        )
+        krw = max_water_relperm * np.clip(krw_mixed, 0.0, 1.0)
+
+    else:
+        raise ValidationError(f"Wettability {wettability!r} not implemented.")
+
+    krw = np.clip(krw, 0.0, 1.0)
+    kro = np.clip(kro, 0.0, 1.0)
+    krg = np.clip(krg, 0.0, 1.0)
+    return krw, kro, krg  # type: ignore[return-value]
+
+
+@relperm_table
+@attrs.frozen
+class LETThreePhaseRelPermModel(
+    RelativePermeabilityTable,
+    serializers={"mixing_rule": serialize_mixing_rule},
+    deserializers={"mixing_rule": deserialize_mixing_rule},
+    load_exclude={"supports_arrays"},
+    dump_exclude={"supports_arrays"},
+):
+    """
+    LET (Lomeland-Ebeltoft-Thomas) three-phase relative permeability model.
+
+    Uses the LET correlation for two-phase relative permeability curves and a
+    configurable mixing rule for three-phase oil relative permeability. The LET
+    model provides more curve-fitting flexibility than Brooks-Corey by using
+    three shape parameters (L, E, T) per phase-pair instead of a single Corey
+    exponent.
+
+    Each phase-pair is described by a `LETParameters` instance that groups the
+    L, E, and T values:
+
+    - `water`: Parameters for the water kr curve (wetting phase in water-wet).
+    - `oil_water`: Parameters for oil kr in the oil-water two-phase system.
+    - `gas_oil`: Parameters for oil kr in the gas-oil two-phase system.
+    - `gas`: Parameters for the gas kr curve (non-wetting phase).
+
+    Supports water-wet and oil-wet wettability assumptions. Supports both
+    scalar and array inputs for saturations (`supports_arrays=True`).
+    """
+
+    __type__ = "let_three_phase_relperm_model"
+
+    irreducible_water_saturation: typing.Optional[float] = None
+    """(Default) Irreducible water saturation (Swc)."""
+    residual_oil_saturation_water: typing.Optional[float] = None
+    """(Default) Residual oil saturation after water flood (Sorw)."""
+    residual_oil_saturation_gas: typing.Optional[float] = None
+    """(Default) Residual oil saturation after gas flood (Sorg)."""
+    residual_gas_saturation: typing.Optional[float] = None
+    """(Default) Residual gas saturation (Sgr)."""
+
+    water: LETParameters = LETParameters()
+    """LET parameters for the water relative permeability curve."""
+    oil_water: LETParameters = LETParameters()
+    """LET parameters for oil relative permeability in the water-oil system."""
+    gas_oil: LETParameters = LETParameters()
+    """LET parameters for oil relative permeability in the gas-oil system."""
+    gas: LETParameters = LETParameters()
+    """LET parameters for the gas relative permeability curve."""
+
+    max_water_relperm: float = 1.0
+    """Endpoint (maximum) relative permeability for water."""
+    max_oil_relperm: float = 1.0
+    """Endpoint (maximum) relative permeability for oil."""
+    max_gas_relperm: float = 1.0
+    """Endpoint (maximum) relative permeability for gas."""
+
+    wettability: Wettability = Wettability.WATER_WET
+    """Wettability type (water-wet or oil-wet)."""
+    mixing_rule: typing.Union[MixingRule, str] = eclipse_rule
+    """
+    Mixing rule function or name to compute oil relative permeability in
+    three-phase system. Accepts a function or a registered name string.
+    """
+    supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
+    """Flag indicating support for array inputs."""
+
+    def __attrs_post_init__(self) -> None:
+        mixing_rule = self.mixing_rule
+        if isinstance(mixing_rule, str):
+            object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
+
+    def get_relative_permeabilities(
+        self,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
+        irreducible_water_saturation: typing.Optional[float] = None,
+        residual_oil_saturation_water: typing.Optional[float] = None,
+        residual_oil_saturation_gas: typing.Optional[float] = None,
+        residual_gas_saturation: typing.Optional[float] = None,
+    ) -> RelativePermeabilities:
+        """
+        Compute relative permeabilities for water, oil, and gas using the
+        LET correlation.
+
+        Supports both scalar and array inputs for saturations.
+
+        :param water_saturation: Water saturation (fraction) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction) - scalar or array.
+        :param irreducible_water_saturation: Optional override for Swc.
+        :param residual_oil_saturation_water: Optional override for Sorw.
+        :param residual_oil_saturation_gas: Optional override for Sorg.
+        :param residual_gas_saturation: Optional override for Sgr.
+        :return: Dictionary with relative permeabilities for water, oil, and gas.
+        """
+        Sorw = (
+            residual_oil_saturation_water
+            if residual_oil_saturation_water is not None
+            else self.residual_oil_saturation_water
+        )
+        Sorg = (
+            residual_oil_saturation_gas
+            if residual_oil_saturation_gas is not None
+            else self.residual_oil_saturation_gas
+        )
+        Sgr = (
+            residual_gas_saturation
+            if residual_gas_saturation is not None
+            else self.residual_gas_saturation
+        )
+        Swc = (
+            irreducible_water_saturation
+            if irreducible_water_saturation is not None
+            else self.irreducible_water_saturation
+        )
+        params_missing = []
+        if Swc is None:
+            params_missing.append("Swc")
+        if Sorw is None:
+            params_missing.append("Sorw")
+        if Sorg is None:
+            params_missing.append("Sorg")
+        if Sgr is None:
+            params_missing.append("Sgr")
+        if params_missing:
+            raise ValidationError(
+                f"Residual saturations must be provided either as arguments or set in the model instance. "
+                f"Missing: {', '.join(params_missing)}"
+            )
+
+        krw, kro, krg = compute_let_three_phase_relative_permeabilities(
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=Swc,  # type: ignore[arg-type]
+            residual_oil_saturation_water=Sorw,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=Sorg,  # type: ignore[arg-type]
+            residual_gas_saturation=Sgr,  # type: ignore[arg-type]
+            water_L=self.water.L,
+            water_E=self.water.E,
+            water_T=self.water.T,
+            oil_water_L=self.oil_water.L,
+            oil_water_E=self.oil_water.E,
+            oil_water_T=self.oil_water.T,
+            gas_oil_L=self.gas_oil.L,
+            gas_oil_E=self.gas_oil.E,
+            gas_oil_T=self.gas_oil.T,
+            gas_L=self.gas.L,
+            gas_E=self.gas.E,
+            gas_T=self.gas.T,
+            max_water_relperm=self.max_water_relperm,
+            max_oil_relperm=self.max_oil_relperm,
+            max_gas_relperm=self.max_gas_relperm,
+            wettability=self.wettability,
+            mixing_rule=self.mixing_rule,  # type: ignore[arg-type]
+        )
+        return RelativePermeabilities(water=krw, oil=kro, gas=krg)  # type: ignore[typeddict-item]
+
+    def __call__(
+        self,
+        *,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
+        **kwargs: typing.Any,
+    ) -> RelativePermeabilities:
+        """
+        Compute relative permeabilities for water, oil, and gas.
+
+        Supports both scalar and array inputs for saturations.
+
+        :param water_saturation: Water saturation (fraction) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction) - scalar or array.
+        :kwarg irreducible_water_saturation: Optional override for Swc.
+        :kwarg residual_oil_saturation_water: Optional override for Sorw.
+        :kwarg residual_oil_saturation_gas: Optional override for Sorg.
+        :kwarg residual_gas_saturation: Optional override for Sgr.
+        :return: Dictionary with relative permeabilities for water, oil, and gas.
         """
         return self.get_relative_permeabilities(
             water_saturation=water_saturation,

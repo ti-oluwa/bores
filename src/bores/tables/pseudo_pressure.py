@@ -345,58 +345,172 @@ class GasPseudoPressureTable:
     Uses `np.interp` for fast linear interpolation.
     Supports both forward (pressure → pseudo-pressure) and inverse (pseudo-pressure → pressure)
     interpolation.
+
+    Two construction modes:
+
+    1. **Function-based**: Provide Z-factor and viscosity functions, and the table is computed
+       automatically over a pressure range.
+    2. **Value-based**: Provide pre-computed pressure and pseudo-pressure arrays directly
+       (e.g., from laboratory data or external calculations).
+
+    These modes are mutually exclusive.
     """
 
+    @typing.overload
     def __init__(
         self,
+        *,
         z_factor_func: typing.Callable[[FloatOrArray], FloatOrArray],
         viscosity_func: typing.Callable[[FloatOrArray], FloatOrArray],
         pressure_range: typing.Optional[typing.Tuple[float, float]] = None,
         points: typing.Optional[int] = None,
         reference_pressure: typing.Optional[float] = None,
+    ) -> None: ...
+
+    @typing.overload
+    def __init__(
+        self,
+        *,
+        pressures: np.typing.NDArray,
+        pseudo_pressures: np.typing.NDArray,
+        reference_pressure: typing.Optional[float] = None,
+    ) -> None: ...
+
+    def __init__(
+        self,
+        z_factor_func: typing.Optional[
+            typing.Callable[[FloatOrArray], FloatOrArray]
+        ] = None,
+        viscosity_func: typing.Optional[
+            typing.Callable[[FloatOrArray], FloatOrArray]
+        ] = None,
+        pressure_range: typing.Optional[typing.Tuple[float, float]] = None,
+        points: typing.Optional[int] = None,
+        pressures: typing.Optional[np.typing.NDArray] = None,
+        pseudo_pressures: typing.Optional[np.typing.NDArray] = None,
+        reference_pressure: typing.Optional[float] = None,
     ):
         """
         Build pseudo-pressure lookup table.
 
+        **Function-based mode** (compute from correlations):
+
         :param z_factor_func: Z-factor correlation Z(P)
         :param viscosity_func: Gas viscosity correlation μ(P)
-        :param pressure_range: (P_min, P_max) for table. Defaults to the (c.MINIMUM_VALID_PRESSURE, c.MAXIMUM_VALID_PRESSURE)
-            if not provided.
-        :param points: Number of points in table. typically 500-2000 for good accuracy. The higher the number, the more accurate the interpolation.
-            1000 points is a good balance between accuracy and memory usage.
-            2000 points may be used for very high accuracy at the cost of memory.
-            500 points may be used for low memory usage at the cost of accuracy.
-        :param reference_pressure: Reference pressure (psi)
+        :param pressure_range: (P_min, P_max) for table. Defaults to (c.MINIMUM_VALID_PRESSURE, c.MAXIMUM_VALID_PRESSURE)
+        :param points: Number of points in table (500-2000 for good accuracy)
+        :param reference_pressure: Reference pressure (psi), default 14.7
+
+        **Value-based mode** (use pre-computed data):
+
+        :param pressures: Array of pressure points (psi), must be sorted
+        :param pseudo_pressures: Array of corresponding pseudo-pressure values (psi²/cP)
+        :param reference_pressure: Reference pressure (psi), default 14.7
+
+        Example (function-based):
+
+        ```python
+        table = GasPseudoPressureTable(
+            z_factor_func=my_z_func,
+            viscosity_func=my_mu_func,
+            pressure_range=(100, 5000),
+            points=1000,
+        )
+        ```
+
+        Example (value-based):
+
+        ```python
+        # From lab data or external tool
+        pressure_values = np.array([100, 500, 1000, 2000, 5000])
+        pseudo_pressure_values = np.array([2.1e4, 5.3e5, 1.2e6, 2.8e6, 8.1e6])
+
+        table = GasPseudoPressureTable(
+            pressures=pressure_values,
+            pseudo_pressures=pseudo_pressure_values,
+        )
+        ```
         """
+        func_mode = z_factor_func is not None or viscosity_func is not None
+        value_mode = pressures is not None or pseudo_pressures is not None
+
+        if func_mode and value_mode:
+            raise ValidationError(
+                "Cannot mix function-based mode (`z_factor_func`, `viscosity_func`) "
+                "with value-based mode (`pressures`, `pseudo_pressures`). "
+                "Use one or the other, not both."
+            )
+
+        if not func_mode and not value_mode:
+            raise ValidationError(
+                "Must provide either:\n"
+                "  1. `z_factor_func` and `viscosity_func` (function-based mode), or\n"
+                "  2. `pressures` and `pseudo_pressures` arrays (value-based mode)"
+            )
+
         self.reference_pressure = typing.cast(
             float, reference_pressure or c.MINIMUM_VALID_PRESSURE
         )
-        self.z_factor_func = z_factor_func
-        self.viscosity_func = viscosity_func
 
-        # Create pressure grid (log-spaced for better resolution at low P)
-        min_pressure, max_pressure = pressure_range or (
-            c.MINIMUM_VALID_PRESSURE,
-            c.MAXIMUM_VALID_PRESSURE,
-        )
-        points = typing.cast(int, points or c.GAS_PSEUDO_PRESSURE_POINTS)
-        dtype = get_dtype()
-        self.pressures = np.logspace(
-            np.log10(min_pressure), np.log10(max_pressure), points, dtype=dtype
-        )
+        if value_mode:
+            if pressures is None or pseudo_pressures is None:
+                raise ValidationError(
+                    "Value-based mode requires both 'pressures' and 'pseudo_pressures' arrays"
+                )
 
-        # Compute pseudo-pressure at each point
-        logger.info(f"Building pseudo-pressure table with {points} points...")
-        self.pseudo_pressures = build_pseudo_pressure_table(
-            pressures=self.pressures,
-            z_factor_func=self.z_factor_func,
-            viscosity_func=self.viscosity_func,
-            reference_pressure=self.reference_pressure,
-            dtype=dtype,
-        )
-        logger.info(
-            f"Pseudo-pressure table built: P ∈ [{min_pressure:.4f}, {max_pressure:.4f}] psi"
-        )
+            if pressures.shape != pseudo_pressures.shape:
+                raise ValidationError(
+                    f"Pressure and pseudo-pressure arrays must have same shape. "
+                    f"Got pressures: {pressures.shape}, pseudo_pressures: {pseudo_pressures.shape}"
+                )
+
+            if len(pressures) < 2:
+                raise ValidationError(
+                    f"Need at least 2 points for interpolation, got {len(pressures)}"
+                )
+
+            dtype = get_dtype()
+            self.pressures = np.ascontiguousarray(pressures, dtype=dtype)
+            self.pseudo_pressures = np.ascontiguousarray(pseudo_pressures, dtype=dtype)
+
+            self.z_factor_func = None  # type: ignore[assignment]
+            self.viscosity_func = None  # type: ignore[assignment]
+
+            logger.info(
+                f"Built pseudo-pressure table from {len(pressures)} data points: "
+                f"P ∈ [{pressures.min():.4f}, {pressures.max():.4f}] psi"
+            )
+        else:
+            if z_factor_func is None or viscosity_func is None:
+                raise ValidationError(
+                    "Function-based mode requires both 'z_factor_func' and 'viscosity_func'"
+                )
+
+            self.z_factor_func = z_factor_func
+            self.viscosity_func = viscosity_func
+
+            # Create pressure grid (log-spaced for better resolution at low P)
+            min_pressure, max_pressure = pressure_range or (
+                c.MINIMUM_VALID_PRESSURE,
+                c.MAXIMUM_VALID_PRESSURE,
+            )
+            points = typing.cast(int, points or c.GAS_PSEUDO_PRESSURE_POINTS)
+            dtype = get_dtype()
+            self.pressures = np.logspace(
+                np.log10(min_pressure), np.log10(max_pressure), points, dtype=dtype
+            )
+
+            logger.info(f"Building pseudo-pressure table with {points} points...")
+            self.pseudo_pressures = build_pseudo_pressure_table(
+                pressures=self.pressures,
+                z_factor_func=self.z_factor_func,
+                viscosity_func=self.viscosity_func,
+                reference_pressure=self.reference_pressure,
+                dtype=dtype,
+            )
+            logger.info(
+                f"Pseudo-pressure table built: P ∈ [{min_pressure:.4f}, {max_pressure:.4f}] psi"
+            )
 
     def interpolate(self, pressure: float) -> float:
         """
@@ -445,9 +559,20 @@ class GasPseudoPressureTable:
         """
         Compute dm/dP = 2P/(μ*Z) for use in well models.
 
+        Only available when table was built in function-based mode.
+        For value-based mode, use numerical differentiation instead.
+
         :param pressure: Pressure (psi)
         :return: dm/dP (psi/cP)
+        :raises ValidationError: If table was built from data values (no Z/μ functions)
         """
+        if self.z_factor_func is None or self.viscosity_func is None:
+            raise ValidationError(
+                "`gradient()` method requires function-based construction mode. "
+                "Table was built from data values without Z-factor/viscosity functions. "
+                "Use numerical differentiation on the table instead."
+            )
+
         if pressure <= 0:
             return 0.0  # Gradient at P=0 is 0
 

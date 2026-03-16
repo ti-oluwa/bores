@@ -445,12 +445,13 @@ class ReservoirModel(
         :return: N-dimensional numpy array representing the depth of each cell in the reservoir (ft).
 
         Example:
+
         ```python
         # Flat reservoir
         depth = model.get_depth_grid(apply_dip=False)
 
         # Dipping reservoir (5° toward North)
-        model = ReservoirModel(dip_angle=5.0, dip_direction="N", ...)
+        model = ReservoirModel(dip_angle=5.0, ...)
         depth = model.get_depth_grid(apply_dip=True)
         ```
         """

@@ -1,3 +1,15 @@
+---
+title: Quick Start - Build Your First Simulation - BORES
+description: Build and run your first 3D waterflood reservoir simulation with BORES in under 5 minutes. Complete code walkthrough with grid setup, wells, and result visualization.
+tags:
+  - tutorial
+  - beginner
+  - reservoir-simulation
+  - python
+keywords: reservoir simulation tutorial, waterflood simulation, BORES quickstart, Python petroleum engineering, black-oil simulation, IMPES scheme
+author: ti-oluwa
+---
+
 # Quick Start
 
 Build and run your first reservoir simulation in under 5 minutes.

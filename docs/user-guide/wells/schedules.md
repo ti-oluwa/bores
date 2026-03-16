@@ -165,7 +165,7 @@ import bores
 
 schedule = bores.WellSchedule()
 
-# Add events
+# Add events using `add(id, event)`
 schedule.add("rate_reduction", bores.WellEvent(
     predicate=bores.time_predicate(time_step=50),
     action=bores.update_well(
@@ -181,10 +181,11 @@ schedule.add("rate_reduction", bores.WellEvent(
     ),
 ))
 
-schedule.add("shut_in", bores.WellEvent(
+# Or use like a dictionary
+schedule["shut_in"] = bores.WellEvent(
     predicate=bores.time_predicate(time=730.0),  # After 2 years
     action=bores.update_well(is_active=False),
-))
+)
 ```
 
 ### Multi-Well Schedules
@@ -212,7 +213,7 @@ prod_schedule.add("reduce_rate", bores.WellEvent(
         ),
     ),
 ))
-schedules.add("PROD-1", prod_schedule)
+schedules["PROD-1"] = prod_schedule
 
 # Add schedule for an injection well
 inj_schedule = bores.WellSchedule()
@@ -225,7 +226,7 @@ inj_schedule.add("increase_rate", bores.WellEvent(
         ),
     ),
 ))
-schedules.add("INJ-1", inj_schedule)
+schedules.add("INJ-1", inj_schedule) # Same as doing `schedules["INJ-1"] = inj_schedule`
 ```
 
 Pass the schedules to the `Config`:

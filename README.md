@@ -16,9 +16,9 @@ BORES is a Python framework for 3D black-oil reservoir simulation of three-phase
 
 > **Disclaimer**: BORES is designed for **educational, research, and prototyping purposes**. It is not production-grade software and should not be used for critical business decisions or regulatory compliance. Results should be validated against established commercial simulators before any real-world application.
 
-**Full documentation**: [https://ti-oluwa.github.io/bores](https://ti-oluwa.github.io/bores)
+**Full documentation @** [https://ti-oluwa.github.io/bores](https://ti-oluwa.github.io/bores)
 
-> NOTE: The latest release does not match the current docs. The release for the current docs is still in development and is almost ready.
+> **NOTE**: The latest release does not match the current docs. The release for the current docs is still in development and is almost ready.
 
 ## Installation
 
@@ -203,7 +203,7 @@ print(
 - Faults, fractures, and transmissibility modifications
 - Boundary conditions including Carter-Tracy analytical aquifer
 - Todd-Longstaff miscible flooding with pressure-dependent miscibility
-- Relative permeability models (Corey, Brooks-Corey, tabular) with 15+ three-phase mixing rules
+- Relative permeability models (Brooks-Corey, LET, tabular) with 15+ three-phase mixing rules
 - Capillary pressure models (Brooks-Corey, Leverett J-function, Van Genuchten, tabular)
 - Plotly-based visualization (1D time series, 2D maps, 3D volume rendering)
 - HDF5, Zarr, JSON, and YAML storage backends with serialization
@@ -215,9 +215,9 @@ If you use BORES in academic work, please cite it as:
 
 ```bibtex
 @software{bores,
-  author = {Daniel T. Afolayan},
+  author = {Daniel Toluwalase Afolayan},
   title = {BORES: 3D 3-Phase Black-Oil Reservoir Modelling and Simulation Framework},
-  year = {2025},
+  year = {2026},
   url = {https://github.com/ti-oluwa/bores},
 }
 ```

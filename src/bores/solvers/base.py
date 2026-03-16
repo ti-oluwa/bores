@@ -440,7 +440,6 @@ def build_block_jacobi_preconditioner(
     # Handle remainder cells (if n is not divisible by block_size)
     remainder_start = num_blocks * block_size
     if remainder_start < n:
-        remainder = n - remainder_start
         remainder_block = A_csr[remainder_start:n, remainder_start:n].toarray()  # type: ignore
         try:
             remainder_inv = np.linalg.inv(remainder_block)
@@ -464,7 +463,6 @@ def build_block_jacobi_preconditioner(
         # Handle remainder
         if remainder_start < n:
             y[remainder_start:n] = block_inverses[num_blocks] @ x[remainder_start:n]
-
         return y
 
     return LinearOperator(shape=A_csr.shape, matvec=matvec)  # type: ignore[arg-type]
@@ -938,7 +936,7 @@ def preconditioner_factory(
                     f"Preconditioner factory '{name}' is already registered. "
                     f"Use `override=True` to replace it."
                 )
-            _PRECONDITIONER_FACTORIES[key] = func
+            _PRECONDITIONER_FACTORIES[key] = func  # type: ignore
         return func
 
     if func is not None:

@@ -1,3 +1,15 @@
+---
+title: Well Basics - BORES User Guide
+description: Learn how to define production and injection wells in BORES. Covers well types, perforating intervals, wellbore radius, skin factors, and control strategies for reservoir simulation.
+tags:
+  - guide
+  - intermediate
+  - reservoir-simulation
+  - wells
+keywords: production well, injection well, well control, wellbore radius, skin factor, perforating intervals, BORES wells, rate control, BHP control
+author: ti-oluwa
+---
+
 # Well Basics
 
 ## Overview

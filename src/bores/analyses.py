@@ -2395,7 +2395,10 @@ class ModelAnalyst(typing.Generic[NDimension]):
             sorted_idx = 0
             for t in range(from_step, to_step + 1, interval):
                 # Accumulate solution gas contributions up to step t
-                while sorted_idx < len(self._sorted_steps) and self._sorted_steps[sorted_idx] <= t:
+                while (
+                    sorted_idx < len(self._sorted_steps)
+                    and self._sorted_steps[sorted_idx] <= t
+                ):
                     s = self._sorted_steps[sorted_idx]
                     cumulative_solution_gas += step_solution_gas.get(s, 0.0)
                     sorted_idx += 1

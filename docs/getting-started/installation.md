@@ -1,3 +1,15 @@
+---
+title: Installation Guide - BORES Documentation
+description: Install BORES reservoir simulator with uv or pip. Includes platform-specific instructions for Linux, macOS, and Windows, dependency setup, and troubleshooting common issues.
+tags:
+  - guide
+  - beginner
+  - python
+  - reservoir-simulation
+keywords: install BORES, Python reservoir simulator setup, uv package manager, pip install, BORES dependencies, NumPy SciPy installation
+author: ti-oluwa
+---
+
 # Installation
 
 This page covers how to install BORES, verify your setup, and troubleshoot common issues. BORES supports Python 3.10 and above on Linux, macOS, and Windows.

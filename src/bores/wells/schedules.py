@@ -191,13 +191,10 @@ class EventPredicate(Serializable, typing.Generic[WellT, Coordinates]):
             # Leaf node, call the actual predicate function
             return self._func(well, state)
         elif self._op == "and":
-            # AND operation, all operands must be True
             return all(op(well, state) for op in self._operands)  # type: ignore
         elif self._op == "or":
-            # OR operation, any operand must be True
             return any(op(well, state) for op in self._operands)  # type: ignore
         elif self._op == "not":
-            # NOT operation, invert the operand
             return not self._operands[0](well, state)  # type: ignore
         raise ValueError("Invalid EventPredicate state: no func or op defined")
 
@@ -249,7 +246,7 @@ class EventPredicate(Serializable, typing.Generic[WellT, Coordinates]):
             # Deserialize composite node
             operands = tuple(cls.load(op_data) for op_data in data["operands"])
             return cls(_op=data["op"], _operands=operands)  # type: ignore
-        raise DeserializationError(f"Unknown EventPredicate type: {pred_type}")
+        raise DeserializationError(f"Unknown {cls.__name__} type: {pred_type}")
 
 
 @attrs.define(slots=True)
@@ -278,6 +275,7 @@ class EventAction(Serializable, typing.Generic[WellT, Coordinates]):
         """Convenience: create sequence of actions."""
         if len(actions) == 1:
             return cls.from_func(actions[0])
+
         result = cls.from_func(actions[0])
         for action in actions[1:]:
             result = result & action
@@ -288,7 +286,7 @@ class EventAction(Serializable, typing.Generic[WellT, Coordinates]):
             # Leaf node, call the actual action function
             self._func(well, state)
         else:
-            # Composite - execute all actions in sequence
+            # Execute all actions in sequence
             for action in self._actions:
                 action(well, state)  # type: ignore
 
@@ -716,6 +714,7 @@ class WellEvent(Serializable, typing.Generic[Coordinates]):
         """Deserialize the well event."""
         if "predicate" not in data or "action" not in data:
             raise DeserializationError("Invalid data for well event deserialization")
+
         return cls(
             predicate=deserialize_event_predicate(data["predicate"]),
             action=deserialize_event_action(data["action"]),
@@ -731,10 +730,10 @@ class WellSchedule(Serializable, typing.Generic[Coordinates]):
     Each event is identified by a unique string identifier.
 
     Example:
-    
+
     ```python
     schedule = WellSchedule()
-    schedule.add("event1", WellEvent(...))
+    schedule.add("event1", event=WellEvent(...))
     ```
     """
 
@@ -745,7 +744,7 @@ class WellSchedule(Serializable, typing.Generic[Coordinates]):
     _events_hashes: typing.Dict[int, str] = attrs.field(factory=dict, init=False)
     """A set to track hashes of added events for uniqueness."""
 
-    def add(self, id_: str, event: WellEvent[Coordinates]) -> None:
+    def add(self, id_: str, /, event: WellEvent[Coordinates]) -> None:
         """
         Adds an event to the schedule.
 
@@ -779,7 +778,7 @@ class WellSchedule(Serializable, typing.Generic[Coordinates]):
         self.events.clear()
         self._events_hashes.clear()
 
-    def get(self, id_: str) -> typing.Optional[WellEvent[Coordinates]]:
+    def get(self, id_: str, /) -> typing.Optional[WellEvent[Coordinates]]:
         """
         Retrieves an event from the schedule by its identifier.
 
@@ -788,7 +787,7 @@ class WellSchedule(Serializable, typing.Generic[Coordinates]):
         """
         return self.events.get(id_, None)
 
-    def __getitem__(self, id_: str) -> WellEvent[Coordinates]:
+    def __getitem__(self, id_: str, /) -> WellEvent[Coordinates]:
         """
         Retrieves an event from the schedule by its identifier.
 
@@ -801,7 +800,7 @@ class WellSchedule(Serializable, typing.Generic[Coordinates]):
         except KeyError:
             raise KeyError(f"Event with id {id_} not found")
 
-    def __setitem__(self, id_: str, event: WellEvent[Coordinates]) -> None:
+    def __setitem__(self, id_: str, event: WellEvent[Coordinates], /) -> None:
         """
         Sets an event in the schedule with the given identifier.
 

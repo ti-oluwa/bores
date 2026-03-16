@@ -1,3 +1,16 @@
+---
+title: BORES - Black-Oil Reservoir Simulation in Python
+description: Open-source 3D three-phase black-oil reservoir simulation framework in Python. Features IMPES solvers, PVT correlations, well controls, and comprehensive visualization for petroleum engineering.
+tags:
+  - reservoir-simulation
+  - black-oil
+  - petroleum-engineering
+  - python
+  - beginner
+keywords: reservoir simulation, black-oil model, Python petroleum engineering, IMPES solver, open source reservoir simulator, three-phase flow, waterflooding
+author: ti-oluwa
+---
+
 <p align="center">
   <img src="images/logo.svg" alt="BORES Logo" width="200">
 </p>

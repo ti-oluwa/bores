@@ -56,12 +56,12 @@ class Config(
     pressure_convergence_tolerance: float = attrs.field(
         default=1e-6, validator=attrs.validators.le(1e-2)
     )
-    """Relative convergence tolerance for pressure solvers (default is 1e-6)."""
+    """Relative convergence tolerance for pressure iterative solvers (default is 1e-6)."""
 
     saturation_convergence_tolerance: float = attrs.field(
         default=1e-4, validator=attrs.validators.le(1e-2)
     )
-    """Relative convergence tolerance for saturation solvers (default is 1e-4). Transport matrix tend to be more well conditioned."""
+    """Relative convergence tolerance for saturation iterative solvers (default is 1e-4). Transport matrix tend to be more well conditioned."""
 
     max_iterations: int = attrs.field(  # type: ignore
         default=250,
@@ -83,7 +83,7 @@ class Config(
     """Frequency at which model states are yielded/outputted during the simulation."""
 
     scheme: EvolutionScheme = "impes"
-    """Evolution scheme to use for the simulation ('impes', 'explicit', 'implicit')."""
+    """Evolution scheme to use for the simulation ('impes', 'explicit', 'implicit', 'sequential_implicit')."""
 
     use_pseudo_pressure: bool = True
     """Whether to use pseudo-pressure for gas (when applicable)."""
@@ -260,9 +260,54 @@ class Config(
     Note: Larger changes can cause density/viscosity jumps and well control issues.
     """
 
+    max_newton_iterations: int = attrs.field(  # type: ignore
+        default=15,
+        validator=attrs.validators.and_(
+            attrs.validators.ge(1),  # type: ignore[arg-type]
+            attrs.validators.le(50),  # type: ignore[arg-type]
+        ),
+    )
+    """Maximum Newton-Raphson iterations for implicit solvers."""
+
+    newton_tolerance: float = attrs.field(
+        default=1e-6, validator=attrs.validators.le(1e-2)
+    )
+    """Relative residual tolerance for Newton convergence in implicit solvers."""
+
+    line_search_max_cuts: int = attrs.field(  # type: ignore
+        default=4,
+        validator=attrs.validators.and_(
+            attrs.validators.ge(0),  # type: ignore[arg-type]
+            attrs.validators.le(10),  # type: ignore[arg-type]
+        ),
+    )
+    """Maximum line search bisections per Newton step."""
+
+    max_saturation_step: float = attrs.field(
+        default=0.05,
+        validator=attrs.validators.and_(
+            attrs.validators.gt(0.0),
+            attrs.validators.le(1.0),
+        ),
+    )
+    """
+    Maximum per-cell saturation change per Newton iteration. Damps the Newton
+    update to prevent upwind direction flipping that causes limit-cycle oscillation.
+    """
+
+    newton_saturation_change_tolerance: float = attrs.field(
+        default=1e-4,
+        validator=attrs.validators.le(1e-2),
+    )
+    """
+    Saturation change tolerance for dual convergence check. If the maximum
+    saturation change per iteration falls below this and the relative residual
+    is below 1e-3, Newton is declared converged.
+    """
+
     normalize_saturations: bool = True
     """
-    Whether to normalize saturations so that So + Sw + Sg = 1.0 after each timestep.
+    Whether to normalize saturations so that `So + Sw + Sg = 1.0` after each timestep.
 
     When True (default), the simulator rescales all three phase saturations at the end
     of each saturation update so their sum is exactly 1.0. This corrects small
@@ -279,7 +324,7 @@ class Config(
     """
     If True, keeps oil bubble point pressure (Pb) constant at its initial value throughout the simulation.
 
-    You would mosttimes want this set to True, if you are not modelling complex conditions like 
+    You would sometimes want this set to True, if you are not modelling complex conditions like 
     miscible injection, Waterflooding, etc., to adhere to standard black-oil model assumptions.
 
     This is appropriate for:
@@ -352,22 +397,6 @@ class Config(
 
     Do not share a pool between concurrent simulation runs unless the pool has
     sufficient workers to service both simultaneously.
-
-    **Thread safety**
-
-    The assembly functions submitted to the pool are read-only on all shared
-    grids. Each function writes only to its own private output arrays. There
-    are no shared writes and no locks required during concurrent assembly.
-
-    **Why `ThreadPoolExecutor` and not `ProcessPoolExecutor`**
-
-    The assembly functions operate on large numpy arrays that are shared by
-    reference between threads. `ProcessPoolExecutor` would require pickling and
-    copying those arrays into child processes on every call - for a 100x100x30
-    grid this is 30-50 MB of serialisation overhead per time step, which
-    eliminates any parallelism gain entirely. Numba JIT-compiled functions also
-    release the GIL during execution, so threads achieve true parallel CPU
-    utilisation without GIL contention.
     """
 
     _lock: threading.Lock = attrs.field(

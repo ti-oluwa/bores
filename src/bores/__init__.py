@@ -39,7 +39,13 @@ from .visualization import *
 from .wells import *
 
 # Use custom ndarray serializer if `BORES_SAVE_RAW_NDARRAY != True`
-if os.getenv("BORES_SAVE_RAW_NDARRAY", "f").lower() not in ("t", "y", "yes", "true", "1"):
+if os.getenv("BORES_SAVE_RAW_NDARRAY", "f").lower() not in (
+    "t",
+    "y",
+    "yes",
+    "true",
+    "1",
+):
     register_ndarray_serializers()
 
 use_32bit_precision()

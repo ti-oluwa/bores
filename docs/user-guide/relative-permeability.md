@@ -180,6 +180,108 @@ If you have laboratory SCAL data from mixed-wet core plugs, the best approach is
 
 ---
 
+## The LET Model
+
+The LET (Lomeland-Ebeltoft-Thomas) model is a three-parameter relative permeability correlation that provides more curve-fitting flexibility than the Brooks-Corey power law. Where Brooks-Corey uses a single exponent to control the entire curve shape, the LET model uses three parameters that independently control different regions of the curve. This makes it particularly useful when you need to match laboratory SCAL data that has features like inflection points or S-shaped behavior that a simple power law cannot capture.
+
+The LET correlation computes relative permeability from normalized saturation $S^*$ as:
+
+$$k_r = k_r^{max} \cdot \frac{(S^*)^L}{(S^*)^L + E \cdot (1 - S^*)^T}$$
+
+The three parameters control distinct parts of the curve:
+
+- **L** (low-end): Controls curvature at low normalized saturation. Higher values delay the onset of flow, keeping the curve near zero for longer before it rises. Think of it as a "starting steepness" control.
+- **E** (elevation): Controls the overall height of the curve between the endpoints. Higher values push the curve downward at intermediate saturations. $E = 1$ gives a curve shape similar to a power law. $E < 1$ raises the curve (more optimistic flow); $E > 1$ suppresses it (more pessimistic).
+- **T** (top-end): Controls curvature at high normalized saturation. Higher values make the curve flatten out sooner as it approaches the endpoint $k_r^{max}$. Think of it as controlling how quickly the curve reaches its plateau.
+
+At the boundaries, the formula behaves correctly without special handling: when $S^* = 0$ the numerator is zero so $k_r = 0$, and when $S^* = 1$ the denominator reduces to 1 so $k_r = k_r^{max}$.
+
+### LET Parameters
+
+Each phase-pair in the three-phase model is described by a `LETParameters` instance that groups the L, E, and T values together. You create one for each two-phase curve:
+
+```python
+import bores
+
+# Water curve: moderate onset, slightly suppressed, gradual plateau
+water_params = bores.LETParameters(L=2.5, E=1.2, T=1.8)
+
+# Oil in the water-oil system: standard shape
+oil_water_params = bores.LETParameters(L=2.0, E=1.0, T=2.0)
+
+# Oil in the gas-oil system: slightly elevated
+gas_oil_params = bores.LETParameters(L=2.0, E=0.8, T=1.5)
+
+# Gas curve: slow start, suppressed, steep plateau
+gas_params = bores.LETParameters(L=1.5, E=1.5, T=2.5)
+```
+
+All three parameters must be positive. Typical ranges are $L \in [0.5, 5]$, $E \in [0.1, 10]$, and $T \in [0.5, 5]$.
+
+### Creating a LET Model
+
+The `LETThreePhaseRelPermModel` takes four `LETParameters` instances (one per phase-pair), endpoint relative permeabilities, and the same residual saturation and mixing rule options as the Brooks-Corey model.
+
+```python
+import bores
+
+relperm = bores.LETThreePhaseRelPermModel(
+    # Residual saturations
+    irreducible_water_saturation=0.20,
+    residual_oil_saturation_water=0.25,
+    residual_oil_saturation_gas=0.15,
+    residual_gas_saturation=0.05,
+
+    # LET parameters for each phase-pair
+    water=bores.LETParameters(L=2.5, E=1.2, T=1.8),
+    oil_water=bores.LETParameters(L=2.0, E=1.0, T=2.0),
+    gas_oil=bores.LETParameters(L=2.0, E=0.8, T=1.5),
+    gas=bores.LETParameters(L=1.5, E=1.5, T=2.5),
+
+    # Endpoint relative permeabilities
+    max_water_relperm=0.35,
+    max_oil_relperm=0.90,
+    max_gas_relperm=0.75,
+
+    # Same wettability and mixing rule options as Brooks-Corey
+    wettability=bores.Wettability.WATER_WET,
+    mixing_rule="eclipse_rule",
+)
+```
+
+Unlike the Brooks-Corey model, the LET model includes explicit endpoint relative permeability parameters (`max_water_relperm`, `max_oil_relperm`, `max_gas_relperm`). These scale the curve output so that the maximum relative permeability for each phase matches your laboratory or correlation data. They default to 1.0 if not specified.
+
+The four `LETParameters` instances describe four separate two-phase curves. The `water` parameters control the water relative permeability curve in the water-oil system. The `oil_water` parameters control the oil curve in the water-oil system. The `gas_oil` parameters control the oil curve in the gas-oil system. The `gas` parameters control the gas curve in the gas-oil system. Three-phase oil relative permeability is then computed by combining the two-phase oil curves using the selected mixing rule.
+
+### When to Use LET vs Brooks-Corey
+
+Brooks-Corey is a good starting point for most simulations. It produces physically reasonable curves from a small number of parameters and has a long track record in the industry. Use it when you have limited SCAL data, when you are running screening simulations, or when the exact curve shape is not critical to your results.
+
+The LET model is better when you need to match specific laboratory data more precisely. The extra parameters give you independent control over the low-saturation, mid-saturation, and high-saturation regions of each curve, which is necessary for reproducing features like:
+
+- Delayed onset of flow (high L) combined with rapid rise to plateau (high T)
+- S-shaped curves with an inflection point (achievable by tuning E relative to L and T)
+- Asymmetric curve shapes where the low-end and high-end behaviors are fundamentally different
+
+As a rough guideline: if a single Corey exponent can match your data to within your uncertainty range, use Brooks-Corey. If you need to match curve shapes from steady-state or centrifuge experiments with high fidelity, use LET.
+
+### LET Parameter Guidelines
+
+| Rock Type | Phase | L | E | T | kr_max |
+| --- | --- | --- | --- | --- | --- |
+| Water-wet sandstone | Water | 2.0-3.0 | 1.0-2.0 | 1.5-2.5 | 0.25-0.40 |
+| Water-wet sandstone | Oil (w-o) | 1.5-2.5 | 0.8-1.5 | 1.5-2.5 | 0.80-1.00 |
+| Water-wet sandstone | Oil (g-o) | 1.5-2.5 | 0.5-1.2 | 1.5-2.0 | 0.80-1.00 |
+| Water-wet sandstone | Gas | 1.0-2.0 | 1.0-3.0 | 2.0-3.0 | 0.60-0.85 |
+| Carbonate | Water | 2.5-4.0 | 1.5-3.0 | 2.0-3.5 | 0.15-0.30 |
+| Carbonate | Oil (w-o) | 1.5-3.0 | 0.5-1.5 | 1.5-3.0 | 0.70-0.95 |
+| Unconsolidated sand | Water | 1.5-2.5 | 0.8-1.5 | 1.0-2.0 | 0.35-0.55 |
+| Unconsolidated sand | Oil (w-o) | 1.0-2.0 | 0.5-1.0 | 1.0-2.0 | 0.85-1.00 |
+
+These are starting points for history matching. Always calibrate to your specific SCAL data when available.
+
+---
+
 ## Three-Phase Mixing Rules
 
 In a three-phase system (oil, water, and gas present simultaneously), BORES needs a way to compute the oil relative permeability $k_{ro}$ from the two-phase curves $k_{ro,w}(S_w)$ and $k_{ro,g}(S_g)$. This is done through a mixing rule that interpolates between the two-phase oil curves.
@@ -254,7 +356,7 @@ import bores
 import numpy as np
 
 # Oil-water relative permeability from lab data
-ow_table = bores.TwoPhaseRelPermTable(
+oil_water_table = bores.TwoPhaseRelPermTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
     wetting_phase_saturation=np.array([0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
@@ -269,13 +371,13 @@ You can query the table for relative permeability values at any saturation, incl
 
 ```python
 # Query at a single saturation
-krw_at_05 = ow_table.get_wetting_phase_relative_permeability(0.5)
-kro_at_05 = ow_table.get_non_wetting_phase_relative_permeability(0.5)
+krw_at_05 = oil_water_table.get_wetting_phase_relative_permeability(0.5)
+kro_at_05 = oil_water_table.get_non_wetting_phase_relative_permeability(0.5)
 
 # Query with a grid array
 Sw_grid = np.random.uniform(0.2, 0.75, size=(20, 20, 5))
-krw_grid = ow_table.get_wetting_phase_relative_permeability(Sw_grid)
-kro_grid = ow_table.get_non_wetting_phase_relative_permeability(Sw_grid)
+krw_grid = oil_water_table.get_wetting_phase_relative_permeability(Sw_grid)
+kro_grid = oil_water_table.get_non_wetting_phase_relative_permeability(Sw_grid)
 ```
 
 ### `ThreePhaseRelPermTable`
@@ -287,7 +389,7 @@ import bores
 import numpy as np
 
 # Oil-water table (water is wetting phase)
-ow_table = bores.TwoPhaseRelPermTable(
+oil_water_table = bores.TwoPhaseRelPermTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
     wetting_phase_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
@@ -296,7 +398,7 @@ ow_table = bores.TwoPhaseRelPermTable(
 )
 
 # Gas-oil table (oil is wetting phase)
-go_table = bores.TwoPhaseRelPermTable(
+gas_oil_table = bores.TwoPhaseRelPermTable(
     wetting_phase=bores.FluidPhase.OIL,
     non_wetting_phase=bores.FluidPhase.GAS,
     wetting_phase_saturation=np.array([0.15, 0.25, 0.35, 0.50, 0.65, 0.80, 0.85]),
@@ -305,9 +407,9 @@ go_table = bores.TwoPhaseRelPermTable(
 )
 
 # Combine into three-phase table with Eclipse mixing rule
-three_phase = bores.ThreePhaseRelPermTable(
-    oil_water_table=ow_table,
-    gas_oil_table=go_table,
+relperm_table = bores.ThreePhaseRelPermTable(
+    oil_water_table=oil_water_table,
+    gas_oil_table=gas_oil_table,
     mixing_rule=bores.eclipse_rule,
 )
 ```
@@ -403,14 +505,14 @@ For the two-phase table, you query by wetting phase saturation using the dedicat
 
 ```python
 # Get individual phase relative permeabilities
-krw = ow_table.get_wetting_phase_relative_permeability(0.45)
-kro = ow_table.get_non_wetting_phase_relative_permeability(0.45)
+krw = oil_water_table.get_wetting_phase_relative_permeability(0.45)
+kro = oil_water_table.get_non_wetting_phase_relative_permeability(0.45)
 
 # Get both at once
-krw, kro = ow_table.get_relative_permeabilities(0.45)
+krw, kro = oil_water_table.get_relative_permeabilities(0.45)
 
 # Using __call__ (returns wetting phase kr only)
-krw = ow_table(wetting_phase_saturation=0.45)
+krw = oil_water_table(wetting_phase_saturation=0.45)
 ```
 
 This direct evaluation capability is valuable for generating relative permeability curves for reports, comparing analytical and tabular models side by side, and verifying that your model parameters produce physically reasonable curves before committing to a full simulation run.
@@ -419,7 +521,7 @@ This direct evaluation capability is valuable for generating relative permeabili
 
 ## Integrating with `RockFluidTables`
 
-Relative permeability is passed to the simulation through the `RockFluidTables` object, which also holds the capillary pressure model. You then pass `RockFluidTables` to the `Config`. This works the same way whether you use the Brooks-Corey analytical model or a tabular approach:
+Relative permeability is passed to the simulation through the `RockFluidTables` object, which also holds the capillary pressure model. You then pass `RockFluidTables` to the `Config`. This works the same way whether you use the Brooks-Corey model, the LET model, or a tabular approach:
 
 ```python
 import bores
@@ -457,7 +559,7 @@ rock_fluid_tables = bores.RockFluidTables(
 )
 ```
 
-Both analytical models and tabular data are `RockFluidTables`-compatible and serializable. When you save a `Config` to disk, the relative permeability model (whether Brooks-Corey or tabular) and all its parameters or data are preserved and can be reloaded exactly.
+All three approaches (Brooks-Corey, LET, and tabular) are `RockFluidTables`-compatible and serializable. When you save a `Config` to disk, the relative permeability model and all its parameters or data are preserved and can be reloaded exactly.
 
 ---
 
@@ -558,7 +660,7 @@ relperm_bc = bores.BrooksCoreyThreePhaseRelPermModel(
 )
 
 # Tabular model from lab data
-ow_table = bores.TwoPhaseRelPermTable(
+oil_water_table = bores.TwoPhaseRelPermTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
     wetting_phase_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
@@ -578,8 +680,8 @@ for i, sw in enumerate(Sw_range):
     krw_bc[i] = result["water"]
     kro_bc[i] = result["oil"]
 
-krw_tab = ow_table.get_wetting_phase_relative_permeability(Sw_range)
-kro_tab = ow_table.get_non_wetting_phase_relative_permeability(Sw_range)
+krw_tab = oil_water_table.get_wetting_phase_relative_permeability(Sw_range)
+kro_tab = oil_water_table.get_non_wetting_phase_relative_permeability(Sw_range)
 
 fig = bores.make_series_plot(
     data={

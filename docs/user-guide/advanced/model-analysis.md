@@ -842,6 +842,40 @@ EUR is computed using analytical integration of the decline curve equations rath
 
 ---
 
+## Method Aliases Quick Reference
+
+Many analyst methods have shorter aliases for convenience. The table below lists every alias and its full method name. You can use either form interchangeably.
+
+| Alias | Full Method Name | Returns |
+|---|---|---|
+| `stoiip` | `stock_tank_oil_initially_in_place` | STOIIP in STB (property) |
+| `stgiip` | `stock_tank_gas_initially_in_place` | STGIIP in SCF (property) |
+| `No` | `cumulative_oil_produced` | Cumulative oil in STB (property) |
+| `Ng` | `cumulative_gas_produced` | Cumulative gas in SCF (property) |
+| `Nw` | `cumulative_water_produced` | Cumulative water in STB (property) |
+| `mbal(...)` | `material_balance(...)` | Material balance analysis result |
+| `mbe(...)` | `material_balance_error(...)` | Material balance error result |
+| `vrr(...)` / `VRR(...)` | `voidage_replacement_ratio(...)` | VRR as float |
+| `dca(...)` | `decline_curve_analysis(...)` | Decline curve result |
+| `mr(...)` | `mobility_ratio(...)` | Mobility ratio result |
+| `mbal_history(...)` | `material_balance_history(...)` | Generator of (step, result) |
+| `mbe_history(...)` | `material_balance_error_history(...)` | Generator of (step, result) |
+| `vrr_history(...)` | `voidage_replacement_ratio_history(...)` | Generator of (step, VRR) |
+| `mr_history(...)` | `mobility_ratio_history(...)` | Generator of (step, result) |
+
+```python
+# These are equivalent:
+analyst.material_balance(step=-1)
+analyst.mbal(step=-1)
+
+# So are these:
+analyst.voidage_replacement_ratio(step=-1)
+analyst.vrr(step=-1)
+analyst.VRR(step=-1)
+```
+
+---
+
 ## Complete Workflow
 
 A typical post-simulation analysis workflow combines several of these methods:

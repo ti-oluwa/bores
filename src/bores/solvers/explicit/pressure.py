@@ -766,6 +766,11 @@ def compute_well_rate_grid(
 
         # First pass over perforated cells: compute total WI and cache well indices
         # Offset well coordinates by pad_width to account for ghost cells
+        grid_dims = (
+            cell_count_x - 2 * pad_width,
+            cell_count_y - 2 * pad_width,
+            cell_count_z - 2 * pad_width,
+        )
         for start, end in well.perforating_intervals:
             for i, j, k in itertools.product(
                 range(start[0] + pad_width, end[0] + pad_width + 1),
@@ -779,10 +784,17 @@ def compute_well_rate_grid(
                     absolute_permeability.y[i, j, k],
                     absolute_permeability.z[i, j, k],
                 )
+                # Actual grid location (without ghost cell offset)
+                actual_location = (i - pad_width, j - pad_width, k - pad_width)
                 well_index = well.get_well_index(
                     interval_thickness=interval_thickness,
                     permeability=permeability,
                     skin_factor=well.skin_factor,
+                    well_location=actual_location,
+                    grid_dimensions=grid_dims,
+                    boundary_condition=config.boundary_conditions["pressure"]
+                    if config.boundary_conditions
+                    else None,
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -882,6 +894,11 @@ def compute_well_rate_grid(
 
         # First pass over perforated cells: compute total WI and cache well indices
         # Offset well coordinates by pad_width to account for ghost cells
+        grid_dims = (
+            cell_count_x - 2 * pad_width,
+            cell_count_y - 2 * pad_width,
+            cell_count_z - 2 * pad_width,
+        )
         for start, end in well.perforating_intervals:
             for i, j, k in itertools.product(
                 range(start[0] + pad_width, end[0] + pad_width + 1),
@@ -895,10 +912,17 @@ def compute_well_rate_grid(
                     absolute_permeability.y[i, j, k],
                     absolute_permeability.z[i, j, k],
                 )
+                # Actual grid location (without ghost cell offset)
+                actual_location = (i - pad_width, j - pad_width, k - pad_width)
                 well_index = well.get_well_index(
                     interval_thickness=interval_thickness,
                     permeability=permeability,
                     skin_factor=well.skin_factor,
+                    well_location=actual_location,
+                    grid_dimensions=grid_dims,
+                    boundary_condition=config.boundary_conditions["pressure"]
+                    if config.boundary_conditions
+                    else None,
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -1081,14 +1105,14 @@ def apply_pressure_updates(
                 # Total flow rate = flux from neighbors + well contribution
                 net_volumetric_flow = net_flux_grid[i, j, k]
                 net_well_flow = well_rate_grid[i, j, k]
-                total_flow_rate = net_volumetric_flow + net_well_flow
+                total_flow_contact_anglerate = net_volumetric_flow + net_well_flow
 
                 # Calculate pressure change
                 # dP = (Δt / (φ * c_t * V)) * Q_total
                 change_in_pressure = (
                     time_step_size_in_days
                     / (cell_porosity * cell_total_compressibility * cell_volume)
-                ) * total_flow_rate
+                ) * total_flow_contact_anglerate
 
                 # Apply the update
                 updated_grid[i, j, k] += change_in_pressure
@@ -1097,69 +1121,67 @@ def apply_pressure_updates(
 
 
 """
-Explicit finite difference formulation for pressure diffusion in a N-Dimensional reservoir
-(slightly compressible fluid):
+Explicit finite difference formulation for pressure diffusion in a 3D reservoir
+(slightly compressible three-phase fluid):
 
-The governing equation is the N-Dimensional linear-flow diffusivity equation:
+The governing equation is the 3D linear-flow diffusivity equation:
 
-    ∂p/∂t * (ρ·φ·c_t) * V = ∇ · (λ·∇p) * V + q * V
+    ∂p/∂t * (φ·c_t) * V = ∇ · (λ_t · ∇Φ) * A + q * V
 
 where:
-    - ∂p/∂t * (ρ·φ·c_t) * V is the accumulation term (mass storage)
-    - ∇ · (λ·∇p) * A is the diffusion term
-    - q * V is the source/sink term (injection/production)
+    - ∂p/∂t * (φ·c_t) * V is the accumulation term (ft³/day)
+    - ∇ · (λ_t · ∇Φ) * A is the diffusion term including gravity and capillary effects
+    - q * V is the source/sink term (injection/production) (ft³/day)
+
+    λ_t = total mobility = Σ_phases (k · kr_phase / μ_phase)  (ft²/psi·day)
+    Φ_phase = phase potential = P_phase + ρ_phase · (g/gc) · Δz / 144  (psi)
+
+    Phase pressures:
+        P_water = P_oil - P_cow  (capillary correction)
+        P_gas   = P_oil + P_cgo  (capillary correction)
 
 Assumptions:
-    - Constant porosity (φ), total compressibility (c_t), and fluid density (ρ)
-    - No convection or reaction terms
+    - Slightly compressible fluids (properties frozen at current time level)
     - Cartesian grid (structured)
-    - Fluid is slightly compressible; mobility is scalar
-
-Simplified equation:
-
-    ∂p/∂t * (φ·c_t) * V = ∇ · (λ·∇p) * V + q * V
-
-Where:
-    - V = cell volume = Δx * Δy * Δz
-    - A = directional area across cell face
-    - λ = mobility = k / μ
-    - ∇p = pressure gradient
-    - q = source/sink rate per unit volume
+    - Mobility and density are evaluated at old time level (explicit)
 
 The diffusion term is expanded as:
 
-    ∇ · (λ·∇p) = ∂/∂x (λ·∂p/∂x) + ∂/∂y (λ·∂p/∂y) + ∂/∂z (λ·∂p/∂z)
+    ∇ · (λ_t · ∇Φ) = ∂/∂x (λ_t · ∂Φ/∂x) + ∂/∂y (λ_t · ∂Φ/∂y) + ∂/∂z (λ_t · ∂Φ/∂z)
+
+    The total flux across each face sums phase contributions:
+        q_face = Σ_phases [λ_phase · (ΔP_phase + ρ_phase · g/gc · Δelevation / 144)]
 
 Explicit Discretization (Forward Euler in time, central difference in space):
 
     ∂p/∂t ≈ (pⁿ⁺¹_ijk - pⁿ_ijk) / Δt
 
-    ∂/∂x (λ·∂p/∂x) ≈ (λ_{i+½,j,k}(pⁿ_{i+1,j,k} - pⁿ_{i,j,k}) - λ_{i-½,j,k}(pⁿ_{i,j,k} - pⁿ_{i-1,j,k})) / Δx²
-    ∂/∂y (λ·∂p/∂y) ≈ (λ_{i,j+½,k}(pⁿ_{i,j+1,k} - pⁿ_{i,j,k}) - λ_{i,j-½,k}(pⁿ_{i,j,k} - pⁿ_{i,j-1,k})) / Δy²
-    ∂/∂z (λ·∂p/∂z) ≈ (λ_{i,j,k+½}(pⁿ_{i,j,k+1} - pⁿ_{i,j,k}) - λ_{i,j,k-½}(pⁿ_{i,j,k} - pⁿ_{i,j,k-1})) / Δz²
+    ∂/∂x (λ·∂Φ/∂x) ≈ (λ_{i+½}·Φⁿ_{i+1} - λ_{i+½}·Φⁿ_i - λ_{i-½}·Φⁿ_i + λ_{i-½}·Φⁿ_{i-1}) / Δx²
 
 Final explicit update formula:
 
     pⁿ⁺¹_ijk = pⁿ_ijk + (Δt / (φ·c_t·V)) * [
-        A_x * (λ_{i+½,j,k}(pⁿ_{i+1,j,k} - pⁿ_{i,j,k}) - λ_{i-½,j,k}(pⁿ_{i,j,k} - pⁿ_{i-1,j,k})) / Δx +
-        A_y * (λ_{i,j+½,k}(pⁿ_{i,j+1,k} - pⁿ_{i,j,k}) - λ_{i,j-½,k}(pⁿ_{i,j,k} - pⁿ_{i,j-1,k})) / Δy +
-        A_z * (λ_{i,j,k+½}(pⁿ_{i,j,k+1} - pⁿ_{i,j,k}) - λ_{i,j,k-½}(pⁿ_{i,j,k} - pⁿ_{i,j,k-1})) / Δz +
-        q_{i,j,k} * V
+        Σ_neighbours [λ_harmonic · (ΔP + capillary + gravity) · A_face / ΔL] + q_{i,j,k} * V
     ]
+
+    Gravity potential at each face:
+        gravity_potential_phase = harmonic_ρ_phase · (g/gc) · Δelevation / 144   (psi)
 
 Where:
     - Δt is time step (s)
     - Δx, Δy, Δz are cell dimensions (ft)
-    - A_x = Δy * Δz; A_y = Δx * Δz; A_z = Δx * Δy (ft²)
-    - V = Δx * Δy * Δz (ft³)
-    - λ_{i±½,...} = harmonic average of mobility between adjacent cells
-    - q_{i,j,k} = injection/production rate per unit volume (ft³/s/ft³)
+    - A_x = Δy · h_face; A_y = Δx · h_face; A_z = Δx · Δy (ft²)
+    - V = Δx · Δy · Δz (ft³)
+    - h_face = harmonic mean of adjacent cell thicknesses (ft)
+    - λ_{i±½,...} = harmonic average of total mobility between adjacent cells
+    - q_{i,j,k} = well injection/production rate (ft³/day)
 
 Stability Condition:
-    Explicit scheme is conditionally stable. The N-Dimensional diffusion CFL criterion requires:
-    Δt ≤ min( (φ·c_t·V) / (2 * λ_max * (A_x/Δx + A_y/Δy + A_z/Δz)) )
+    Explicit scheme is conditionally stable. The 3D diffusion CFL criterion requires:
+    Δt ≤ min( (φ·c_t·V) / (2 · λ_max · (A_x/Δx + A_y/Δy + A_z/Δz)) )
 
 Notes:
-    - Harmonic averaging ensures continuity of flux across interfaces.
+    - Harmonic averaging is used for both λ and ρ at cell interfaces.
+    - Gravity and capillary effects are included in the phase potential difference.
     - Volume-normalized source/sink terms only affect the cell where the well is located.
 """

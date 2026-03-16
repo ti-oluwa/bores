@@ -96,13 +96,14 @@ class FluidPhase(enum.Enum):
 WellFluidType = typing.Literal["water", "oil", "gas"]
 """Types of fluids that can be injected in the simulation"""
 
-EvolutionScheme = typing.Literal["impes", "explicit", "implicit"]
+EvolutionScheme = typing.Literal["impes", "explicit", "implicit", "sequential_implicit"]
 """
 Discretization methods for numerical simulations
 
 - "impes": Implicit pressure, Explicit saturation
 - "explicit": Both pressure and saturation are treated explicitly
 - "implicit": Both pressure and saturation are treated implicitly
+- "sequential_implicit": Implicit pressure followed by implicit saturation (Newton-Raphson)
 """
 
 MiscibilityModel = typing.Literal["immiscible", "todd_longstaff"]

@@ -1,4 +1,4 @@
-"""Capillary pressure models and tables for multiphase flow simulations."""
+"""Capillary pressure models and tables for multi-phase flow simulations."""
 
 import threading
 import typing
@@ -344,14 +344,14 @@ def compute_brooks_corey_capillary_pressures(
     sw = np.atleast_1d(water_saturation)
     so = np.atleast_1d(oil_saturation)
     sg = np.atleast_1d(gas_saturation)
-    swc = np.atleast_1d(irreducible_water_saturation)
-    sorw = np.atleast_1d(residual_oil_saturation_water)
-    sorg = np.atleast_1d(residual_oil_saturation_gas)
-    sgr = np.atleast_1d(residual_gas_saturation)
+    Swc = np.atleast_1d(irreducible_water_saturation)
+    Sorw = np.atleast_1d(residual_oil_saturation_water)
+    Sorg = np.atleast_1d(residual_oil_saturation_gas)
+    Sgr = np.atleast_1d(residual_gas_saturation)
 
     # Broadcast all arrays to same shape
-    sw, so, sg, swc, sorw, sorg, sgr = np.broadcast_arrays(
-        sw, so, sg, swc, sorw, sorg, sgr
+    sw, so, sg, Swc, Sorw, Sorg, Sgr = np.broadcast_arrays(
+        sw, so, sg, Swc, Sorw, Sorg, Sgr
     )
 
     # Validate saturations
@@ -367,8 +367,8 @@ def compute_brooks_corey_capillary_pressures(
         sg = np.where(needs_norm, sg / total_saturation, sg)
 
     # Effective pore spaces
-    total_mobile_pore_space_water = 1.0 - swc - sorw
-    total_mobile_pore_space_gas = 1.0 - swc - sorg - sgr
+    total_mobile_pore_space_water = 1.0 - Swc - Sorw
+    total_mobile_pore_space_gas = 1.0 - Swc - Sorg - Sgr
 
     # Pcow (Po - Pw)
     oil_water_capillary_pressure = np.zeros_like(sw)
@@ -378,7 +378,7 @@ def compute_brooks_corey_capillary_pressures(
 
     if np.any(valid_water):
         effective_water_saturation = np.where(
-            valid_water, (sw - swc) / total_mobile_pore_space_water, 0.0
+            valid_water, (sw - Swc) / total_mobile_pore_space_water, 0.0
         )
         effective_water_saturation = np.clip(effective_water_saturation, 1e-6, 1.0)
         # Mask for undersaturated conditions
@@ -404,18 +404,22 @@ def compute_brooks_corey_capillary_pressures(
 
             elif wettability == Wettability.MIXED_WET:
                 # Mixed-wet: Weighted average
-                pcow_water_wet = oil_water_entry_pressure_water_wet * (
-                    effective_water_saturation
-                    ** (-1.0 / oil_water_pore_size_distribution_index_water_wet)
+                pcoil_water_contact_anglewater_wet = (
+                    oil_water_entry_pressure_water_wet
+                    * (
+                        effective_water_saturation
+                        ** (-1.0 / oil_water_pore_size_distribution_index_water_wet)
+                    )
                 )
-                pcow_oil_wet = -(
+                pcoil_water_contact_angleoil_wet = -(
                     oil_water_entry_pressure_oil_wet
                     * effective_water_saturation
                     ** (-1.0 / oil_water_pore_size_distribution_index_oil_wet)
                 )
                 pcow = (
-                    mixed_wet_water_fraction * pcow_water_wet
-                    + (1.0 - mixed_wet_water_fraction) * pcow_oil_wet
+                    mixed_wet_water_fraction * pcoil_water_contact_anglewater_wet
+                    + (1.0 - mixed_wet_water_fraction)
+                    * pcoil_water_contact_angleoil_wet
                 )
                 oil_water_capillary_pressure = np.where(undersaturated, pcow, 0.0)
 
@@ -425,7 +429,7 @@ def compute_brooks_corey_capillary_pressures(
 
     if np.any(valid_gas):
         effective_gas_saturation = np.where(
-            valid_gas, (sg - sgr) / total_mobile_pore_space_gas, 0.0
+            valid_gas, (sg - Sgr) / total_mobile_pore_space_gas, 0.0
         )
         effective_gas_saturation = np.clip(effective_gas_saturation, 1e-6, 1.0)
 
@@ -514,35 +518,35 @@ class BrooksCoreyCapillaryPressureModel(
         :param residual_gas_saturation: Optional override for Sgr - scalar or array.
         :return: Dictionary with oil_water and gas_oil capillary pressures.
         """
-        swc = (
+        Swc = (
             irreducible_water_saturation
             if irreducible_water_saturation is not None
             else self.irreducible_water_saturation
         )
-        sorw = (
+        Sorw = (
             residual_oil_saturation_water
             if residual_oil_saturation_water is not None
             else self.residual_oil_saturation_water
         )
-        sorg = (
+        Sorg = (
             residual_oil_saturation_gas
             if residual_oil_saturation_gas is not None
             else self.residual_oil_saturation_gas
         )
-        sgr = (
+        Sgr = (
             residual_gas_saturation
             if residual_gas_saturation is not None
             else self.residual_gas_saturation
         )
 
         params_missing = []
-        if swc is None:
+        if Swc is None:
             params_missing.append("Swc")
-        if sorw is None:
+        if Sorw is None:
             params_missing.append("Sorw")
-        if sorg is None:
+        if Sorg is None:
             params_missing.append("Sorg")
-        if sgr is None:
+        if Sgr is None:
             params_missing.append("Sgr")
         if params_missing:
             raise ValidationError(
@@ -554,10 +558,10 @@ class BrooksCoreyCapillaryPressureModel(
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
-            irreducible_water_saturation=swc,  # type: ignore[arg-type]
-            residual_oil_saturation_water=sorw,  # type: ignore[arg-type]
-            residual_oil_saturation_gas=sorg,  # type: ignore[arg-type]
-            residual_gas_saturation=sgr,  # type: ignore[arg-type]
+            irreducible_water_saturation=Swc,  # type: ignore[arg-type]
+            residual_oil_saturation_water=Sorw,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=Sorg,  # type: ignore[arg-type]
+            residual_gas_saturation=Sgr,  # type: ignore[arg-type]
             wettability=self.wettability,
             oil_water_entry_pressure_water_wet=self.oil_water_entry_pressure_water_wet,
             oil_water_entry_pressure_oil_wet=self.oil_water_entry_pressure_oil_wet,
@@ -659,14 +663,14 @@ def compute_van_genuchten_capillary_pressures(
     sw = np.atleast_1d(water_saturation)
     so = np.atleast_1d(oil_saturation)
     sg = np.atleast_1d(gas_saturation)
-    swc = np.atleast_1d(irreducible_water_saturation)
-    sorw = np.atleast_1d(residual_oil_saturation_water)
-    sorg = np.atleast_1d(residual_oil_saturation_gas)
-    sgr = np.atleast_1d(residual_gas_saturation)
+    Swc = np.atleast_1d(irreducible_water_saturation)
+    Sorw = np.atleast_1d(residual_oil_saturation_water)
+    Sorg = np.atleast_1d(residual_oil_saturation_gas)
+    Sgr = np.atleast_1d(residual_gas_saturation)
 
     # Broadcast all arrays to same shape
-    sw, so, sg, swc, sorw, sorg, sgr = np.broadcast_arrays(
-        sw, so, sg, swc, sorw, sorg, sgr
+    sw, so, sg, Swc, Sorw, Sorg, Sgr = np.broadcast_arrays(
+        sw, so, sg, Swc, Sorw, Sorg, Sgr
     )
 
     # Validate saturations
@@ -682,8 +686,8 @@ def compute_van_genuchten_capillary_pressures(
         sg = np.where(needs_norm, sg / total_saturation, sg)
 
     # Effective pore spaces
-    total_mobile_pore_space_water = 1.0 - swc - sorw
-    total_mobile_pore_space_gas = 1.0 - swc - sorg - sgr
+    total_mobile_pore_space_water = 1.0 - Swc - Sorw
+    total_mobile_pore_space_gas = 1.0 - Swc - Sorg - Sgr
 
     #  Pcow (Po - Pw)
     oil_water_capillary_pressure = np.zeros_like(sw)
@@ -692,7 +696,7 @@ def compute_van_genuchten_capillary_pressures(
 
     if np.any(valid_water):
         effective_water_saturation = np.where(
-            valid_water, (sw - swc) / total_mobile_pore_space_water, 0.0
+            valid_water, (sw - Swc) / total_mobile_pore_space_water, 0.0
         )
         effective_water_saturation = np.clip(
             effective_water_saturation, 1e-6, 1.0 - 1e-6
@@ -720,18 +724,22 @@ def compute_van_genuchten_capillary_pressures(
             term_ww = (effective_water_saturation ** (-1.0 / m_ww) - 1.0) ** (
                 1.0 / oil_water_n_water_wet
             )
-            pcow_water_wet = (1.0 / oil_water_alpha_water_wet) * term_ww
+            pcoil_water_contact_anglewater_wet = (
+                1.0 / oil_water_alpha_water_wet
+            ) * term_ww
 
             # Oil-wet contribution
             m_ow = 1.0 - 1.0 / oil_water_n_oil_wet
             term_ow = (effective_water_saturation ** (-1.0 / m_ow) - 1.0) ** (
                 1.0 / oil_water_n_oil_wet
             )
-            pcow_oil_wet = -(1.0 / oil_water_alpha_oil_wet) * term_ow
+            pcoil_water_contact_angleoil_wet = (
+                -(1.0 / oil_water_alpha_oil_wet) * term_ow
+            )
 
             pcow = (
-                mixed_wet_water_fraction * pcow_water_wet
-                + (1.0 - mixed_wet_water_fraction) * pcow_oil_wet
+                mixed_wet_water_fraction * pcoil_water_contact_anglewater_wet
+                + (1.0 - mixed_wet_water_fraction) * pcoil_water_contact_angleoil_wet
             )
             oil_water_capillary_pressure = np.where(valid_water, pcow, 0.0)
 
@@ -741,7 +749,7 @@ def compute_van_genuchten_capillary_pressures(
 
     if np.any(valid_gas):
         effective_gas_saturation = np.where(
-            valid_gas, (sg - sgr) / total_mobile_pore_space_gas, 0.0
+            valid_gas, (sg - Sgr) / total_mobile_pore_space_gas, 0.0
         )
         effective_gas_saturation = np.clip(effective_gas_saturation, 1e-6, 1.0 - 1e-6)
 
@@ -825,35 +833,35 @@ class VanGenuchtenCapillaryPressureModel(
         :param residual_gas_saturation: Optional override for Sgr - scalar or array.
         :return: Dictionary with oil_water and gas_oil capillary pressures.
         """
-        swc = (
+        Swc = (
             irreducible_water_saturation
             if irreducible_water_saturation is not None
             else self.irreducible_water_saturation
         )
-        sorw = (
+        Sorw = (
             residual_oil_saturation_water
             if residual_oil_saturation_water is not None
             else self.residual_oil_saturation_water
         )
-        sorg = (
+        Sorg = (
             residual_oil_saturation_gas
             if residual_oil_saturation_gas is not None
             else self.residual_oil_saturation_gas
         )
-        sgr = (
+        Sgr = (
             residual_gas_saturation
             if residual_gas_saturation is not None
             else self.residual_gas_saturation
         )
 
         params_missing = []
-        if swc is None:
+        if Swc is None:
             params_missing.append("Swc")
-        if sorw is None:
+        if Sorw is None:
             params_missing.append("Sorw")
-        if sorg is None:
+        if Sorg is None:
             params_missing.append("Sorg")
-        if sgr is None:
+        if Sgr is None:
             params_missing.append("Sgr")
         if params_missing:
             raise ValidationError(
@@ -865,10 +873,10 @@ class VanGenuchtenCapillaryPressureModel(
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
-            irreducible_water_saturation=swc,  # type: ignore[arg-type]
-            residual_oil_saturation_water=sorw,  # type: ignore[arg-type]
-            residual_oil_saturation_gas=sorg,  # type: ignore[arg-type]
-            residual_gas_saturation=sgr,  # type: ignore[arg-type]
+            irreducible_water_saturation=Swc,  # type: ignore[arg-type]
+            residual_oil_saturation_water=Sorw,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=Sorg,  # type: ignore[arg-type]
+            residual_gas_saturation=Sgr,  # type: ignore[arg-type]
             wettability=self.wettability,
             oil_water_alpha_water_wet=self.oil_water_alpha_water_wet,
             oil_water_alpha_oil_wet=self.oil_water_alpha_oil_wet,
@@ -923,8 +931,8 @@ def compute_leverett_j_capillary_pressures(
     porosity: FloatOrArray,
     oil_water_interfacial_tension: float,
     gas_oil_interfacial_tension: float,
-    contact_angle_oil_water: float = 0.0,
-    contact_angle_gas_oil: float = 0.0,
+    oil_water_contact_angle: float = 0.0,
+    gas_oil_contact_angle: float = 0.0,
     j_function_coefficient: float = 0.5,
     j_function_exponent: float = 0.5,
     mixed_wet_water_fraction: float = 0.5,
@@ -961,8 +969,8 @@ def compute_leverett_j_capillary_pressures(
     :param porosity: Porosity (fraction, 0-1) - scalar or array.
     :param oil_water_interfacial_tension: Oil-water interfacial tension (dyne/cm).
     :param gas_oil_interfacial_tension: Gas-oil interfacial tension (dyne/cm).
-    :param contact_angle_oil_water: Oil-water contact angle in degrees (0° = water-wet).
-    :param contact_angle_gas_oil: Gas-oil contact angle in degrees (0° = oil-wet).
+    :param oil_water_contact_angle: Oil-water contact angle in degrees (0° = water-wet).
+    :param gas_oil_contact_angle: Gas-oil contact angle in degrees (0° = oil-wet).
     :param j_function_coefficient: Empirical coefficient 'a' in J(Se) = a * Se^(-b). Fit to core data (can be tuned to match experimental data).
     :param j_function_exponent: Empirical exponent 'b' in J(Se) = a * Se^(-b). Fit to core data (can be tuned to match experimental data).
     :param mixed_wet_water_fraction: Fraction of pore space that is water-wet in mixed-wet systems (0-1).
@@ -973,16 +981,16 @@ def compute_leverett_j_capillary_pressures(
     sw = np.atleast_1d(water_saturation)
     so = np.atleast_1d(oil_saturation)
     sg = np.atleast_1d(gas_saturation)
-    swc = np.atleast_1d(irreducible_water_saturation)
-    sorw = np.atleast_1d(residual_oil_saturation_water)
-    sorg = np.atleast_1d(residual_oil_saturation_gas)
-    sgr = np.atleast_1d(residual_gas_saturation)
+    Swc = np.atleast_1d(irreducible_water_saturation)
+    Sorw = np.atleast_1d(residual_oil_saturation_water)
+    Sorg = np.atleast_1d(residual_oil_saturation_gas)
+    Sgr = np.atleast_1d(residual_gas_saturation)
     perm = np.atleast_1d(permeability)
     phi = np.atleast_1d(porosity)
 
     # Broadcast all arrays to same shape
-    sw, so, sg, swc, sorw, sorg, sgr, perm, phi = np.broadcast_arrays(
-        sw, so, sg, swc, sorw, sorg, sgr, perm, phi
+    sw, so, sg, Swc, Sorw, Sorg, Sgr, perm, phi = np.broadcast_arrays(
+        sw, so, sg, Swc, Sorw, Sorg, Sgr, perm, phi
     )
 
     # Validate saturations
@@ -1004,13 +1012,13 @@ def compute_leverett_j_capillary_pressures(
     # Effective pore spaces
     # Water mobile pore space: excludes connate water and residual oil (to water)
     # Gas residual doesn't affect water-oil mobile space
-    total_mobile_pore_space_water = 1.0 - swc - sorw
+    total_mobile_pore_space_water = 1.0 - Swc - Sorw
     # Gas mobile pore space: excludes connate water, residual oil (to gas), and residual gas
-    total_mobile_pore_space_gas = 1.0 - swc - sorg - sgr
+    total_mobile_pore_space_gas = 1.0 - Swc - Sorg - Sgr
 
     # Convert contact angles to radians
-    theta_ow_rad = np.deg2rad(contact_angle_oil_water)
-    theta_go_rad = np.deg2rad(contact_angle_gas_oil)
+    theta_oil_water_contact_anglerad = np.deg2rad(oil_water_contact_angle)
+    theta_go_rad = np.deg2rad(gas_oil_contact_angle)
 
     # Leverett scaling factor: sqrt(φ/k)
     # Check for zero/invalid values
@@ -1023,7 +1031,7 @@ def compute_leverett_j_capillary_pressures(
 
     if np.any(valid_water):
         effective_water_saturation = np.where(
-            valid_water, (sw - swc) / total_mobile_pore_space_water, 0.0
+            valid_water, (sw - Swc) / total_mobile_pore_space_water, 0.0
         )
         effective_water_saturation = np.clip(
             effective_water_saturation, 1e-6, 1.0 - 1e-6
@@ -1039,7 +1047,7 @@ def compute_leverett_j_capillary_pressures(
         pc_ow = (
             oil_water_interfacial_tension
             * 4.725  # Convert to psi
-            * np.cos(theta_ow_rad)
+            * np.cos(theta_oil_water_contact_anglerad)
             * leverett_factor
             * j_value_ow
         )
@@ -1062,7 +1070,7 @@ def compute_leverett_j_capillary_pressures(
 
     if np.any(valid_gas):
         effective_gas_saturation = np.where(
-            valid_gas, (sg - sgr) / total_mobile_pore_space_gas, 0.0
+            valid_gas, (sg - Sgr) / total_mobile_pore_space_gas, 0.0
         )
         effective_gas_saturation = np.clip(effective_gas_saturation, 1e-6, 1.0 - 1e-6)
 
@@ -1123,9 +1131,9 @@ class LeverettJCapillaryPressureModel(
     """Oil-water interfacial tension (dyne/cm)."""
     gas_oil_interfacial_tension: float = 20.0
     """Gas-oil interfacial tension (dyne/cm)."""
-    contact_angle_oil_water: float = 0.0
+    oil_water_contact_angle: float = 0.0
     """Oil-water contact angle in degrees (0° = water-wet, 180° = oil-wet)."""
-    contact_angle_gas_oil: float = 0.0
+    gas_oil_contact_angle: float = 0.0
     """Gas-oil contact angle in degrees (0° = oil-wet to gas)."""
     mixed_wet_water_fraction: float = 0.5
     """Fraction of pore space that is water-wet in mixed-wet systems (0-1)."""
@@ -1162,35 +1170,35 @@ class LeverettJCapillaryPressureModel(
         :param residual_gas_saturation: Optional override for Sgr - scalar or array.
         :return: Dictionary with oil_water and gas_oil capillary pressures.
         """
-        swc = (
+        Swc = (
             irreducible_water_saturation
             if irreducible_water_saturation is not None
             else self.irreducible_water_saturation
         )
-        sorw = (
+        Sorw = (
             residual_oil_saturation_water
             if residual_oil_saturation_water is not None
             else self.residual_oil_saturation_water
         )
-        sorg = (
+        Sorg = (
             residual_oil_saturation_gas
             if residual_oil_saturation_gas is not None
             else self.residual_oil_saturation_gas
         )
-        sgr = (
+        Sgr = (
             residual_gas_saturation
             if residual_gas_saturation is not None
             else self.residual_gas_saturation
         )
 
         params_missing = []
-        if swc is None:
+        if Swc is None:
             params_missing.append("Swc")
-        if sorw is None:
+        if Sorw is None:
             params_missing.append("Sorw")
-        if sorg is None:
+        if Sorg is None:
             params_missing.append("Sorg")
-        if sgr is None:
+        if Sgr is None:
             params_missing.append("Sgr")
         if params_missing:
             raise ValidationError(
@@ -1202,16 +1210,16 @@ class LeverettJCapillaryPressureModel(
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
-            irreducible_water_saturation=swc,  # type: ignore[arg-type]
-            residual_oil_saturation_water=sorw,  # type: ignore[arg-type]
-            residual_oil_saturation_gas=sorg,  # type: ignore[arg-type]
-            residual_gas_saturation=sgr,  # type: ignore[arg-type]
+            irreducible_water_saturation=Swc,  # type: ignore[arg-type]
+            residual_oil_saturation_water=Sorw,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=Sorg,  # type: ignore[arg-type]
+            residual_gas_saturation=Sgr,  # type: ignore[arg-type]
             permeability=self.permeability,
             porosity=self.porosity,
             oil_water_interfacial_tension=self.oil_water_interfacial_tension,
             gas_oil_interfacial_tension=self.gas_oil_interfacial_tension,
-            contact_angle_oil_water=self.contact_angle_oil_water,
-            contact_angle_gas_oil=self.contact_angle_gas_oil,
+            oil_water_contact_angle=self.oil_water_contact_angle,
+            gas_oil_contact_angle=self.gas_oil_contact_angle,
             j_function_coefficient=self.j_function_coefficient,
             j_function_exponent=self.j_function_exponent,
             mixed_wet_water_fraction=self.mixed_wet_water_fraction,

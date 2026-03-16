@@ -127,6 +127,109 @@ The density and viscosity values should come from equation-of-state calculations
 
     If you are simulating CO2 injection without setting `density` and `viscosity` on the `InjectedFluid`, the simulator will use standard gas correlations that can underpredict CO2 density by a factor of 5 or more. This leads to incorrect gravity segregation, incorrect injection volumes, and unreliable recovery predictions. Always provide measured or EOS-computed properties for CO2.
 
+### Custom Pseudo-Pressure Tables
+
+For gas wells operating at high pressures or with non-ideal gases (CO2, nitrogen, sour gas), you can provide a custom pseudo-pressure table instead of relying on the default correlations. This is useful when you have:
+
+- Laboratory PVT measurements at specific pressures
+- Equation-of-state calculations from commercial software
+- High-resolution data that requires finer pressure spacing than the default
+
+BORES supports two ways to build custom pseudo-pressure tables:
+
+**Option 1: From data arrays** (recommended for lab data or EOS output):
+
+```python
+import numpy as np
+import bores
+
+# From your PVT measurements or EOS calculations
+pressures = np.array([100, 500, 1000, 1500, 2000, 3000, 4000, 5000])  # psi
+pseudo_pressures = np.array([
+    2.1e4, 5.3e5, 1.2e6, 1.9e6, 2.8e6, 4.5e6, 6.4e6, 8.1e6
+])  # psi²/cP
+
+# Build table from your data
+custom_table = bores.GasPseudoPressureTable(
+    pressures=pressures,
+    pseudo_pressures=pseudo_pressures,
+    reference_pressure=14.7,  # Standard conditions
+)
+
+# Use in injected fluid
+co2_fluid = bores.InjectedFluid(
+    name="CO2",
+    phase=bores.FluidPhase.GAS,
+    specific_gravity=1.52,
+    molecular_weight=44.01,
+    density=35.0,
+    viscosity=0.05,
+    pseudo_pressure_table=custom_table,  # Provide custom table
+)
+```
+
+**Option 2: From custom Z-factor and viscosity functions**:
+
+```python
+import numpy as np
+import bores
+
+# Your custom correlation functions (must support arrays)
+def my_z_factor(pressure):
+    """Custom Z-factor correlation from EOS."""
+    # Your equation-of-state calculations here
+    return z_array  # Must return numpy array
+
+def my_viscosity(pressure):
+    """Custom viscosity correlation from lab data."""
+    # Your viscosity model here
+    return mu_array  # Must return numpy array
+
+# Mark functions as array-compatible
+my_z_factor._supports_arrays = True
+my_viscosity._supports_arrays = True
+
+# Build table with higher resolution
+custom_table = bores.GasPseudoPressureTable(
+    z_factor_func=my_z_factor,
+    viscosity_func=my_viscosity,
+    pressure_range=(100, 8000),  # Wider range
+    points=2000,  # Higher resolution (default is 1000)
+    reference_pressure=14.7,
+)
+
+# Use in injected fluid
+co2_fluid = bores.InjectedFluid(
+    name="CO2",
+    phase=bores.FluidPhase.GAS,
+    specific_gravity=1.52,
+    molecular_weight=44.01,
+    pseudo_pressure_table=custom_table,
+)
+```
+
+!!! info "When to Use Custom Pseudo-Pressure Tables"
+
+    Custom tables are most valuable for:
+
+    - **CO2 injection**: Standard correlations are inaccurate; use EOS-computed Z and μ
+    - **Sour gas**: H2S content affects Z-factor significantly
+    - **High pressure** (> 5000 psi): Non-ideal gas behavior increases
+    - **Fine-tuning**: Match specific lab PVT measurements exactly
+
+    For typical hydrocarbon gas injection (methane, natural gas) at moderate pressures (< 3000 psi), the default correlations are usually adequate.
+
+!!! tip "Obtaining Pseudo-Pressure Data"
+
+    You can compute pseudo-pressure tables using:
+
+    - **CoolProp**: Open-source thermodynamic library (Python, C++)
+    - **NIST REFPROP**: High-accuracy reference fluid properties
+    - **Commercial PVT software**: Eclipse PVTi, CMG WinProp, etc.
+    - **Laboratory measurements**: Direct PVT cell measurements
+
+    Most commercial tools can export P-Z-μ tables that you can convert to pseudo-pressure using BORES' `GasPseudoPressureTable` with the value-based mode.
+
 ### Miscible Gas Injection
 
 For miscible flooding (CO2 or enriched gas that mixes with oil above the minimum miscibility pressure), set `is_miscible=True` and provide the MMP and Todd-Longstaff mixing parameter:

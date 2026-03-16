@@ -10,7 +10,7 @@ from bores._precision import get_dtype
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
-from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
+from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids, unpad_grid
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
     EvolutionResult,
@@ -414,10 +414,26 @@ def evolve_saturation(
             gas_saturation - updated_gas_saturation_grid[i, j, k]
         )
 
+        # Pressure diagnostics at the CFL-violating cell
+        cell_pressure = float(oil_pressure_grid[i, j, k])
+        cell_bubble_point = float(
+            fluid_properties.oil_bubble_point_pressure_grid[i, j, k]
+        )
+        pressure_state = (
+            "UNDERSATURATED" if cell_pressure > cell_bubble_point else "SATURATED"
+        )
+        interior_pressure_grid = unpad_grid(oil_pressure_grid, pad_width=pad_width)
+        avg_reservoir_pressure = float(np.mean(interior_pressure_grid))
+
         msg = f"""
-        CFL condition violated at cell ({i}, {j}, {k}) at timestep {time_step}:
+        CFL condition violated at cell ({i - 1}, {j - 1}, {k - 1}) at timestep {time_step}:
 
         Max CFL number {max_cfl_encountered:.4f} exceeds limit {cfl_threshold:.4f}.
+
+        Pressure diagnostics:
+        Cell pressure = {cell_pressure:.2f} psi, Bubble point = {cell_bubble_point:.2f} psi ({pressure_state})
+        Avg reservoir pressure = {avg_reservoir_pressure:.2f} psi
+
         Water Inflow = {total_water_inflow:.12f} ft³/day, Water Outflow = {total_water_outflow:.12f} ft³/day,
         Oil Inflow = {total_oil_inflow:.12f} ft³/day, Oil Outflow = {total_oil_outflow:.12f} ft³/day,
         Gas Inflow = {total_gas_inflow:.12f} ft³/day, Gas Outflow = {total_gas_outflow:.12f} ft³/day,
@@ -452,7 +468,7 @@ def evolve_saturation(
                 cfl_info=CFLMeta(
                     cfl_threshold=cfl_threshold,
                     max_cfl_encountered=max_cfl_encountered,
-                    cell=(i, j, k),
+                    cell=(i - 1, j - 1, k - 1),
                     time_step=time_step,
                     violated=True,
                 ),
@@ -477,10 +493,11 @@ def evolve_saturation(
 
     cfl_threshold = cfl_violation_info[5]
     max_cfl_encountered = cfl_violation_info[4]
+    # Convert padded index to unpadded index
     cfl_i, cfl_j, cfl_k = (
-        int(cfl_violation_info[1]),
-        int(cfl_violation_info[2]),
-        int(cfl_violation_info[3]),
+        int(cfl_violation_info[1]) - 1,
+        int(cfl_violation_info[2]) - 1,
+        int(cfl_violation_info[3]) - 1,
     )
     return EvolutionResult(
         value=ExplicitSaturationSolution(
@@ -999,6 +1016,11 @@ def compute_well_rate_grids(
 
         # Iterate over perforated cells to compute total WI and cache well indices
         # Offset well coordinates by pad_width to account for ghost cells
+        grid_dims = (
+            cell_count_x - 2 * pad_width,
+            cell_count_y - 2 * pad_width,
+            cell_count_z - 2 * pad_width,
+        )
         for start, end in well.perforating_intervals:
             for i, j, k in itertools.product(
                 range(start[0] + pad_width, end[0] + pad_width + 1),
@@ -1012,10 +1034,17 @@ def compute_well_rate_grids(
                     absolute_permeability.y[i, j, k],
                     absolute_permeability.z[i, j, k],
                 )
+                # Actual grid location (without ghost cell offset)
+                actual_location = (i - pad_width, j - pad_width, k - pad_width)
                 well_index = well.get_well_index(
                     interval_thickness=interval_thickness,
                     permeability=permeability,
                     skin_factor=well.skin_factor,
+                    well_location=actual_location,
+                    grid_dimensions=grid_dims,
+                    boundary_condition=config.boundary_conditions["pressure"]
+                    if config.boundary_conditions
+                    else None,
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -1119,6 +1148,11 @@ def compute_well_rate_grids(
 
         # Iterate over perforated cells to compute total WI and cache well indices
         # Offset well coordinates by pad_width to account for ghost cells
+        grid_dims = (
+            cell_count_x - 2 * pad_width,
+            cell_count_y - 2 * pad_width,
+            cell_count_z - 2 * pad_width,
+        )
         for start, end in well.perforating_intervals:
             for i, j, k in itertools.product(
                 range(start[0] + pad_width, end[0] + pad_width + 1),
@@ -1132,10 +1166,17 @@ def compute_well_rate_grids(
                     absolute_permeability.y[i, j, k],
                     absolute_permeability.z[i, j, k],
                 )
+                # Actual grid location (without ghost cell offset)
+                actual_location = (i - pad_width, j - pad_width, k - pad_width)
                 well_index = well.get_well_index(
                     interval_thickness=interval_thickness,
                     permeability=permeability,
                     skin_factor=well.skin_factor,
+                    well_location=actual_location,
+                    grid_dimensions=grid_dims,
+                    boundary_condition=config.boundary_conditions["pressure"]
+                    if config.boundary_conditions
+                    else None,
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -1849,10 +1890,26 @@ def evolve_miscible_saturation(
             gas_saturation - updated_gas_saturation_grid[i, j, k]
         )
 
+        # Pressure diagnostics at the CFL-violating cell
+        cell_pressure = float(oil_pressure_grid[i, j, k])
+        cell_bubble_point = float(
+            fluid_properties.oil_bubble_point_pressure_grid[i, j, k]
+        )
+        pressure_state = (
+            "UNDERSATURATED" if cell_pressure > cell_bubble_point else "SATURATED"
+        )
+        interior_pressure_grid = unpad_grid(oil_pressure_grid, pad_width=pad_width)
+        avg_reservoir_pressure = float(np.mean(interior_pressure_grid))
+
         msg = f"""
-        CFL condition violated at cell ({i}, {j}, {k}) at timestep {time_step}:
+        CFL condition violated at cell ({i - 1}, {j - 1}, {k - 1}) at timestep {time_step}:
 
         Max CFL number {max_cfl_encountered:.4f} exceeds limit {cfl_threshold:.4f}.
+
+        Pressure diagnostics:
+        Cell pressure = {cell_pressure:.2f} psi, Bubble point = {cell_bubble_point:.2f} psi ({pressure_state})
+        Avg reservoir pressure = {avg_reservoir_pressure:.2f} psi
+
         Water Inflow = {total_water_inflow:.12f} ft³/day, Water Outflow = {total_water_outflow:.12f} ft³/day,
         Oil Inflow = {total_oil_inflow:.12f} ft³/day, Oil Outflow = {total_oil_outflow:.12f} ft³/day,
         Gas Inflow = {total_gas_inflow:.12f} ft³/day, Gas Outflow = {total_gas_outflow:.12f} ft³/day,
@@ -1890,7 +1947,7 @@ def evolve_miscible_saturation(
                 cfl_info=CFLMeta(
                     cfl_threshold=cfl_threshold,
                     max_cfl_encountered=max_cfl_encountered,
-                    cell=(i, j, k),
+                    cell=(i - 1, j - 1, k - 1),
                     time_step=time_step,
                     violated=True,
                 ),
@@ -1914,10 +1971,11 @@ def evolve_miscible_saturation(
         )
 
     cfl_threshold = cfl_violation_info[5]
+    # Convert padded index to unpadded index
     cfl_i, cfl_j, cfl_k = (
-        int(cfl_violation_info[1]),
-        int(cfl_violation_info[2]),
-        int(cfl_violation_info[3]),
+        int(cfl_violation_info[1]) - 1,
+        int(cfl_violation_info[2]) - 1,
+        int(cfl_violation_info[3]) - 1,
     )
     max_cfl_encountered = cfl_violation_info[4]
     return EvolutionResult(
@@ -2512,6 +2570,11 @@ def compute_miscible_well_rate_grids(
 
         # Iterate over perforated cells to compute total WI and cache well indices
         # Offset well coordinates by pad_width to account for ghost cells
+        grid_dims = (
+            cell_count_x - 2 * pad_width,
+            cell_count_y - 2 * pad_width,
+            cell_count_z - 2 * pad_width,
+        )
         for start, end in well.perforating_intervals:
             for i, j, k in itertools.product(
                 range(start[0] + pad_width, end[0] + pad_width + 1),
@@ -2525,10 +2588,17 @@ def compute_miscible_well_rate_grids(
                     absolute_permeability.y[i, j, k],
                     absolute_permeability.z[i, j, k],
                 )
+                # Actual grid location (without ghost cell offset)
+                actual_location = (i - pad_width, j - pad_width, k - pad_width)
                 well_index = well.get_well_index(
                     interval_thickness=interval_thickness,
                     permeability=permeability,
                     skin_factor=well.skin_factor,
+                    well_location=actual_location,
+                    grid_dimensions=grid_dims,
+                    boundary_condition=config.boundary_conditions["pressure"]
+                    if config.boundary_conditions
+                    else None,
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -2647,6 +2717,11 @@ def compute_miscible_well_rate_grids(
 
         # Iterate over perforated cells to compute total WI and cache well indices
         # Offset well coordinates by pad_width to account for ghost cells
+        grid_dims = (
+            cell_count_x - 2 * pad_width,
+            cell_count_y - 2 * pad_width,
+            cell_count_z - 2 * pad_width,
+        )
         for start, end in well.perforating_intervals:
             for i, j, k in itertools.product(
                 range(start[0] + pad_width, end[0] + pad_width + 1),
@@ -2660,10 +2735,17 @@ def compute_miscible_well_rate_grids(
                     absolute_permeability.y[i, j, k],
                     absolute_permeability.z[i, j, k],
                 )
+                # Actual grid location (without ghost cell offset)
+                actual_location = (i - pad_width, j - pad_width, k - pad_width)
                 well_index = well.get_well_index(
                     interval_thickness=interval_thickness,
                     permeability=permeability,
                     skin_factor=well.skin_factor,
+                    well_location=actual_location,
+                    grid_dimensions=grid_dims,
+                    boundary_condition=config.boundary_conditions["pressure"]
+                    if config.boundary_conditions
+                    else None,
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -3082,96 +3164,91 @@ def apply_saturation_and_solvent_updates(
 Explicit finite difference formulation for saturation transport in a 3D reservoir
 (immiscible three-phase flow: oil, water, and gas with slightly compressible fluids):
 
-The governing equation for saturation evolution is the conservation of mass with advection:
+The governing equation for saturation evolution is conservation of mass per phase:
 
-    ∂S/∂t * (φ * V_cell) = -∇ · (f_x * v ) * V_cell + q_x * V_cell
+    ∂S_x/∂t * (φ * V_cell) = Σ_faces [F_x_face] + q_x * V_cell
 
 Where:
-    ∂S/∂t * φ * V_cell = Accumulation term (change in phase saturation) (ft³/day)
-    ∇ · (f_x * v ) * V_cell = Advection term (Darcy velocity * fractional flow) (ft³/day)
+    ∂S_x/∂t * φ * V_cell = Accumulation term (change in phase volume) (ft³/day)
+    Σ_faces [F_x_face] = Net advective flux from all 6 neighbours (ft³/day)
     q_x * V_cell = Source/sink term for the phase (injection/production) (ft³/day)
 
-Assuming constant cell volume, the equation simplifies to:
+Phase Flux Computation (per-phase Darcy velocity, NOT fractional flow):
 
-        ∂S/∂t * φ = -∇ · (f_x * v ) + q_x
+    Each phase has its own Darcy velocity driven by its own potential gradient:
 
-where:
-    S = phase saturation (fraction)
-    φ = porosity (fraction)
-    V_cell = cell bulk volume = Δx * Δy * Δz (ft³)
-    f_x = phase fractional flow function (depends on S_x)
-    v = Darcy velocity vector [v_x, v_y, v_z] (ft/day)
-    q_x = source/sink term per unit volume (1/day)
+    v_x_phase = λ_phase · ∂Φ_phase/∂dir / ΔL_dir    (ft/day)
+    F_x_face = v_x_phase · A_face                      (ft³/day)
+
+    where:
+    λ_phase = k · kr_phase(S_upwind) / μ_phase         (ft²/psi·day)
+    Φ_phase = P_phase + ρ_phase · (g/gc) · Δelevation / 144   (psi)
+
+    Phase pressures include capillary corrections:
+        P_water = P_oil - P_cow
+        P_gas   = P_oil + P_cgo
+
+    This per-phase formulation correctly handles capillary-driven counter-current flow,
+    where different phases can flow in opposite directions at the same face.
+
+Upwind Selection:
+
+    Two-stage upwinding:
+    1. Density upwinding: ρ_upwind selected based on pressure difference sign
+       (used in gravity potential computation)
+    2. Mobility upwinding: λ_upwind selected based on total phase potential sign
+       (used in Darcy velocity computation)
+
+    Convention: positive flux = flow from neighbour into current cell.
+
+Gravity:
+
+    gravity_potential_phase = ρ_upwind_phase · (g/gc) · Δelevation / 144   (psi)
+
+    where:
+    g/gc = 32.174 / 32.174 = 1.0 (dimensionless in consistent imperial units)
+    Δelevation = elevation_neighbour - elevation_current (ft)
+    144 converts lbf/ft² to psi
+
+    Gravity drives lighter phases (gas) upward and heavier phases (water, oil) downward.
 
 Discretization:
 
 Time: Forward Euler
     ∂S/∂t ≈ (Sⁿ⁺¹_ijk - Sⁿ_ijk) / Δt
 
-Space: First-order upwind scheme:
+Space: First-order upwind scheme
 
-    ∇ · (f_x * v ) ≈ [(F_x_east + F_x_west)/Δx + (F_y_north + F_y_south)/Δy + (F_z_top + F_z_bottom)/Δz]
-
-    Sⁿ⁺¹_ijk = Sⁿ_ijk + Δt / (φ * V_cell) * [
-        (F_x_east + F_x_west) + (F_y_north + F_y_south) + (F_z_top + F_z_bottom) + q_x_ijk * V_cell
+    Sⁿ⁺¹_ijk = Sⁿ_ijk + Δt / (φ · V_cell) · [
+        Σ_faces [F_phase_face] + q_phase_ijk · V_cell
     ]
-
-    F_dir = phase volumetric flux at face in direction `dir` (ft³/day)
-
-Volumetric phase flux at face F_dir is computed as:
-    F_dir = f_x(S_upwind) * v_dir * A_face (ft³/day)
-    f_x = phase fractional flow = [k_r(S_upwind) / μ] / λ_total
-    v_dir = Darcy velocity component in direction `dir` (ft/day)
-    v_dir = λ_total * ∂∅/∂dir
-    ∂∅/∂dir = (∅neighbour - ∅current) / ΔL_dir
-
-    where; 
-    λ_total = Σ [k_r(S_upwind) / μ] for all phases
-    A_face = face area perpendicular to flow direction (ft²)
-    ∅ = phase potential (pressure + gravity effects + capillary effects)
-
-
-Upwind saturation S_upwind is selected based on the sign of v_dir:
-    - If v_dir < 0 → S_upwind = Sⁿ_current (flow from current cell)
-    - If v_dir > 0 → S_upwind = Sⁿ_neighbour (flow from neighbour into current cell)
-
-Velocity Components:
-    v_x = λ_total * ∂p/∂x
-    v_y = λ_total * ∂p/∂y
-    v_z = λ_total * ∂p/∂z
-
-Note: This is taking the convention that flux from cell to neighbour is negative.
-and flux from neighbour to cell is positive.
-
-Where:
-    λ_total = Σ [k_r(S_upwind) / μ] for all phases
-    f_x = phase fractional flow = [k_r(S_upwind) / μ] / λ_total
-    k_r = relative permeability of the phase(s)
-    ∂p = Pressure/Potential difference in a specific direction
 
 Variables:
     Sⁿ_ijk = saturation at cell (i,j,k) at time step n
     Sⁿ⁺¹_ijk = updated saturation
     φ = porosity
-    Δx, Δy, Δz = cell dimensions (ft)
-    A_x = Δy * Δz (face area for x-direction flow)
-    A_y = Δx * Δz (face area for y-direction flow)
-    A_z = Δx * Δy (face area for z-direction flow)
-    q_x_ijk = phase source/sink rate per unit volume (1/day)
-    F_x, F_y, F_z = phase volumetric fluxes (ft³/day)
+    Δx, Δy = cell dimensions in x, y (ft)
+    h_face = harmonic mean of adjacent cell thicknesses (ft)
+    A_x = Δy · h_face; A_y = Δx · h_face; A_z = Δx · Δy (face areas, ft²)
+    ΔL = flow length between cell centres (ft)
+    q_phase_ijk = phase well rate (ft³/day)
 
 Assumptions:
 - Darcy flow
-- No dispersion or diffusion (purely advective)
-- Saturation-dependent fractional flow model (Corey, Brooks-Corey, etc.)
+- No dispersion or diffusion (purely advective; miscible version adds optional diffusion)
+- Saturation-dependent relative permeability (Corey, Brooks-Corey, LET, etc.)
 - Time step satisfies CFL condition
+- Pressure field is computed before solving saturation (IMPES splitting)
 
 Stability (CFL) condition:
 
-    max(|v_x|/Δx + |v_y|/Δy + |v_z|/Δz) * Δt / φ ≤ 1
+    max(|v_x|/Δx + |v_y|/Δy + |v_z|/Δz) · Δt / φ ≤ 1
 
 Notes:
 - Pressure field must be computed before solving saturation.
-- Upwind saturation is selected based on local flow direction.
-- A single saturation equation must be solved per phase (water, oil, gas).
+- Upwind selection is based on phase potential, not pressure alone.
+- All three phase transport equations (water, oil, gas) are solved independently.
+  A residual volume balance correction is applied to oil to enforce So + Sw + Sg = 1.
+  (This differs from the implicit saturation solver, which solves only Sw and Sg
+  and derives So = 1 - Sw - Sg from the constraint.)
 """

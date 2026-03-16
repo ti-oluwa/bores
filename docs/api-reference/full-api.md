@@ -1,3 +1,15 @@
+---
+title: Full API Reference - BORES Documentation
+description: Complete API reference for BORES reservoir simulation framework. Includes all classes, functions, constants, PVT correlations, well controls, solvers, and configuration options.
+tags:
+  - reference
+  - advanced
+  - python
+  - reservoir-simulation
+keywords: BORES API, Python reservoir simulator API, PVT correlations API, well controls API, solver configuration, IMPES API reference, black-oil API
+author: ti-oluwa
+---
+
 # Full API Reference
 
 ## Overview
@@ -25,19 +37,40 @@ These are the main entry points for building reservoir models and wells. The fac
 
 ```python
 import bores
+import numpy as np
+
+# Build input grids (10x10x3 reservoir)
+shape = (10, 10, 3)
+thickness = bores.build_uniform_grid(shape, 20.0)
+pressure = bores.build_uniform_grid(shape, 3000.0)
+porosity = bores.build_uniform_grid(shape, 0.20)
+temperature = bores.build_uniform_grid(shape, 200.0)
+oil_viscosity = bores.build_uniform_grid(shape, 1.5)
+bubble_point = bores.build_uniform_grid(shape, 2500.0)
 
 model = bores.reservoir_model(
-    grid_shape=(10, 10, 3),
-    grid_sizes=(100.0, 100.0, 20.0),
-    porosity=0.20,
-    permeability_x=100.0,
-    oil_api_gravity=35.0,
-    gas_gravity=0.70,
-    initial_pressure=3000.0,
-    temperature=200.0,
+    grid_shape=shape,
+    cell_dimension=(100.0, 100.0),
+    thickness_grid=thickness,
+    pressure_grid=pressure,
+    rock_compressibility=3e-6,
+    absolute_permeability=bores.RockPermeability(
+        kx=bores.build_uniform_grid(shape, 100.0),
+        ky=bores.build_uniform_grid(shape, 100.0),
+        kz=bores.build_uniform_grid(shape, 10.0),
+    ),
+    porosity_grid=porosity,
+    temperature_grid=temperature,
     water_saturation_grid=Sw,
     oil_saturation_grid=So,
     gas_saturation_grid=Sg,
+    oil_viscosity_grid=oil_viscosity,
+    oil_bubble_point_pressure_grid=bubble_point,
+    residual_oil_saturation_water_grid=bores.build_uniform_grid(shape, 0.20),
+    residual_oil_saturation_gas_grid=bores.build_uniform_grid(shape, 0.10),
+    residual_gas_saturation_grid=bores.build_uniform_grid(shape, 0.05),
+    irreducible_water_saturation_grid=bores.build_uniform_grid(shape, 0.20),
+    connate_water_saturation_grid=bores.build_uniform_grid(shape, 0.20),
 )
 ```
 
@@ -69,7 +102,12 @@ These classes and functions control how simulations are configured and executed.
 
 ```python
 config = bores.Config(
-    timer=bores.Timer(end=365.0, initial_time_step=1.0),
+    timer=bores.Timer(
+        simulation_time=bores.Time(days=365),
+        initial_step_size=bores.Time(days=1),
+        max_step_size=bores.Time(days=30),
+        min_step_size=bores.Time(days=0.01),
+    ),
     wells=wells,
     scheme="impes",
 )
@@ -84,7 +122,7 @@ for step in simulation:
 | Name | Type | Description |
 | --- | --- | --- |
 | `Timer` | class | Simulation timer with start, end, and adaptive timestep control. |
-| `Time()` | function | Create a `Timer` instance (convenience constructor). |
+| `Time()` | function | Convert time units (days, hours, years, etc.) to seconds. Used to specify `Timer` parameters in readable units. |
 | `TimerState` | TypedDict | Current state of the timer during simulation (current time, step count, dt). |
 
 ### Model State
@@ -226,6 +264,8 @@ Models for relative permeability and capillary pressure.
 | Name | Type | Description |
 | --- | --- | --- |
 | `BrooksCoreyThreePhaseRelPermModel` | class | Three-phase relative permeability using Brooks-Corey (Corey) exponents for oil, water, and gas. |
+| `LETThreePhaseRelPermModel` | class | Three-phase relative permeability using LET (Lomeland-Ebeltoft-Thomas) three-parameter correlation. More flexible than Brooks-Corey for matching laboratory data. |
+| `LETParameters` | class | Frozen container for a single set of LET parameters (L, E, T). Used to group the three parameters when constructing `LETThreePhaseRelPermModel`. |
 | `TwoPhaseRelPermTable` | class | Tabular two-phase relative permeability (oil-water or gas-oil). |
 | `ThreePhaseRelPermTable` | class | Tabular three-phase relative permeability. |
 
@@ -260,6 +300,7 @@ These functions compute oil relative permeability in three-phase flow from two-p
 | `saturation_weighted_interpolation_rule()` | function | Saturation-weighted interpolation. |
 | `product_saturation_weighted_rule()` | function | Product of saturation-weighted curves. |
 | `compute_corey_three_phase_relative_permeabilities()` | function | Compute all three-phase kr values from Corey parameters directly. |
+| `compute_let_three_phase_relative_permeabilities()` | function | Compute all three-phase kr values from LET parameters directly. |
 
 ### Capillary Pressure Models
 
@@ -437,8 +478,6 @@ The visualization system provides Plotly-based plotting for 1D time series, 2D m
 | Name | Type | Description |
 | --- | --- | --- |
 | `ColorScheme` | enum | Available color schemes for visualizations (includes colorblind-friendly options). |
-| `ColorbarConfig` | class | Configuration for colorbars (label, range, position). |
-| `ColorbarPresets` | class | Pre-built colorbar configurations for common reservoir properties. |
 | `PropertyMeta` | class | Metadata about a reservoir property (name, unit, colormap). |
 | `PropertyRegistry` | class | Registry of known reservoir properties and their visualization defaults. |
 | `property_registry` | object | The global property registry instance. |
@@ -487,6 +526,51 @@ Import from `bores.visualization.plotly3d`:
 | `plotly3d.Scatter3DRenderer` | class | 3D scatter plot renderer. |
 | `plotly3d.Labels` | class | Manages text labels and annotations in 3D scenes. |
 | `plotly3d.Label` | class | A single text label with position and formatting info. |
+
+### PyVista 3D Plotting
+
+Import from `bores.visualization.pyvista3d`:
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `pyvista3d.DataVisualizer` | class | PyVista-based 3D visualization orchestrator. Supports volume rendering, isosurfaces, cell blocks, and scatter plots with interactive picking and animation. |
+| `pyvista3d.VolumeRenderer` | class | PyVista volume renderer for full 3D grids. |
+| `pyvista3d.IsosurfaceRenderer` | class | PyVista isosurface extraction and rendering. |
+| `pyvista3d.CellBlockRenderer` | class | PyVista individual cell block renderer. |
+| `pyvista3d.Scatter3DRenderer` | class | PyVista 3D scatter plot renderer. |
+| `pyvista3d.PlotConfig` | class | Configuration for PyVista 3D plots (width, height, color scheme, opacity, camera, shading, notebook mode, etc.). |
+| `pyvista3d.PlotType` | enum | PyVista plot types: `VOLUME`, `ISOSURFACE`, `SCATTER_3D`, `CELL_BLOCKS`. |
+| `pyvista3d.Labels` | class | Manages text labels and annotations in PyVista 3D scenes. |
+| `pyvista3d.Label` | class | A single text label with position and formatting. |
+| `bores.GifExporter` | class | Export animations as animated GIF. |
+| `bores.Mp4Exporter` | class | Export animations as MP4 video. |
+| `bores.WebPExporter` | class | Export animations as animated WebP. |
+| `bores.HtmlExporter` | class | Export animations as interactive HTML. |
+| `pyvista3d.viz` | object | Global PyVista visualizer instance with default configuration. |
+
+```python
+from bores.visualization.pyvista3d import DataVisualizer, PlotConfig, PlotType
+
+viz = DataVisualizer(config=PlotConfig(
+    width=1200,
+    height=960,
+    plot_type=PlotType.CELL_BLOCKS,
+    smooth_shading=True,
+    enable_picking=True,
+))
+
+# Single plot from a model state
+plotter = viz.make_plot(state, property="pressure", title="Reservoir Pressure")
+plotter.show()
+
+# Animation from simulation states
+plotters = viz.animate(
+    states,
+    property="oil_saturation",
+    step_size=5,
+    save=bores.GifExporter("saturation.gif"),
+)
+```
 
 ---
 

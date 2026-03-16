@@ -78,7 +78,7 @@ lambda_g = state.relative_mobilities.gas
 
 # Capillary pressures (psi)
 pcow = state.capillary_pressures.oil_water
-pcog = state.capillary_pressures.oil_gas
+pcog = state.capillary_pressures.gas_oil
 ```
 
 ### Well Information
