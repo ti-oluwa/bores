@@ -32,7 +32,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --group docs
+          uv sync --group docs --system
 
       - name: Build documentation
         run: mkdocs build --strict
