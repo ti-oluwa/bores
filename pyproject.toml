@@ -70,10 +70,6 @@ dependencies = [
     "types-pyyaml>=6.0.12.20250915",
     "types-cachetools>=6.2.0.20251022",
     "scipy-stubs>=1.15.3.0",
-    "mkdocs-git-revision-date-localized-plugin>=1.5.1",
-    "mkdocs-minify-plugin>=0.8.0",
-    "pillow>=12.1.1",
-    "cairosvg>=2.9.0",
 ]
 
 
@@ -123,4 +119,7 @@ docs = [
     "mkdocs-material>=9.5.0",
     "mkdocs-minify-plugin>=0.8.0",
     "pymdown-extensions>=10.11.0",
+    "pillow>=12.1.1",
+    "cairosvg>=2.9.0",
+    "mkdocs-git-revision-date-localized-plugin",
 ]
