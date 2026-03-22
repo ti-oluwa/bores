@@ -305,6 +305,19 @@ class Config(
     is below 1e-3, Newton is declared converged.
     """
 
+    jacobian_assembly_method: typing.Literal["numerical", "analytical"] = "numerical"
+    """
+    Method used to assemble the Jacobian matrix in the implicit saturation
+    Newton loop.
+
+    - `"numerical"`: column-wise forward finite differences exploiting the
+      7-point stencil sparsity (the default, always available).
+    - `"analytical"`: exact derivatives from the relperm and capillary
+      pressure table derivative methods, assembled by a Numba-parallel kernel.
+      Faster and more accurate than the numerical Jacobian, but requires that
+      the relperm and capillary pressure tables implement the `derivatives(...)` API.
+    """
+
     normalize_saturations: bool = True
     """
     Whether to normalize saturations so that `So + Sw + Sg = 1.0` after each timestep.

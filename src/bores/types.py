@@ -96,14 +96,13 @@ class FluidPhase(enum.Enum):
 WellFluidType = typing.Literal["water", "oil", "gas"]
 """Types of fluids that can be injected in the simulation"""
 
-EvolutionScheme = typing.Literal["impes", "explicit", "implicit", "sequential_implicit"]
+EvolutionScheme = typing.Literal["impes", "explicit", "implicit"]
 """
 Discretization methods for numerical simulations
 
 - "impes": Implicit pressure, Explicit saturation
 - "explicit": Both pressure and saturation are treated explicitly
-- "implicit": Both pressure and saturation are treated implicitly
-- "sequential_implicit": Implicit pressure followed by implicit saturation (Newton-Raphson)
+- "implicit": Both pressure and saturation are treated (sequentially) implicitly
 """
 
 MiscibilityModel = typing.Literal["immiscible", "todd_longstaff"]
@@ -237,6 +236,7 @@ class CapillaryPressureDerivatives(TypedDict):
     dPcow_dSw: FloatOrArray
     dPcow_dSo: FloatOrArray
     dPcgo_dSg: FloatOrArray
+    dPcgo_dSo: FloatOrArray
 
 
 class Wettability(enum.Enum):

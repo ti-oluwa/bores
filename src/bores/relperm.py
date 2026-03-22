@@ -1437,7 +1437,7 @@ class ThreePhaseRelPermTable(
         permeabilities with respect to water saturation, oil saturation, and
         gas saturation.
 
-        Returns a 9-tuple in row-major order:
+        Returns a dictionary containing:
         ```
         (dkrw/dSw, dkrw/dSo, dkrw/dSg,
         dkro/dSw, dkro/dSo, dkro/dSg,
@@ -2043,16 +2043,16 @@ class BrooksCoreyThreePhaseRelPermModel(
                 f"Missing: {', '.join(params_missing)}"
             )
 
-        water_corey_exponent = self.water_exponent
-        oil_corey_exponent = self.oil_exponent
-        gas_corey_exponent = self.gas_exponent
+        water_exponent = self.water_exponent
+        oil_exponent = self.oil_exponent
+        gas_exponent = self.gas_exponent
         wettability = self.wettability
         mixing_rule = typing.cast(MixingRule, self.mixing_rule)
 
         is_scalar = np.isscalar(water_saturation)
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
+        sw = np.atleast_1d(water_saturation)
+        so = np.atleast_1d(oil_saturation)
+        sg = np.atleast_1d(gas_saturation)
         sw, so, sg = np.broadcast_arrays(sw, so, sg)
         zeros = np.zeros_like(sw)
 
@@ -2069,9 +2069,9 @@ class BrooksCoreyThreePhaseRelPermModel(
                     residual_oil_saturation_water=Sorw,  # type: ignore[arg-type]
                     residual_oil_saturation_gas=Sorg,  # type: ignore[arg-type]
                     residual_gas_saturation=Sgr,  # type: ignore[arg-type]
-                    water_exponent=water_corey_exponent,
-                    oil_exponent=oil_corey_exponent,
-                    gas_exponent=gas_corey_exponent,
+                    water_exponent=water_exponent,
+                    oil_exponent=oil_exponent,
+                    gas_exponent=gas_exponent,
                     wettability=wettability,
                     mixing_rule=mixing_rule,
                 )
@@ -2121,12 +2121,12 @@ class BrooksCoreyThreePhaseRelPermModel(
             )
             d_krw_d_sw = np.where(
                 se_w > 0.0,
-                water_corey_exponent
-                * (se_w ** max(water_corey_exponent - 1.0, 0.0))
+                water_exponent
+                * (se_w ** max(water_exponent - 1.0, 0.0))
                 / mobile_water_range,
                 0.0,
             )
-            krw_values = se_w**water_corey_exponent
+            krw_values = se_w**water_exponent
         else:
             d_krw_d_sw = zeros.copy()
             se_w = zeros.copy()
@@ -2140,12 +2140,12 @@ class BrooksCoreyThreePhaseRelPermModel(
             se_g = np.clip((sg - Sgr) / mobile_gas_range, 0.0, 1.0)
             d_krg_d_sg = np.where(
                 se_g > 0.0,
-                gas_corey_exponent
-                * (se_g ** max(gas_corey_exponent - 1.0, 0.0))
+                gas_exponent
+                * (se_g ** max(gas_exponent - 1.0, 0.0))
                 / mobile_gas_range,
                 0.0,
             )
-            krg_values = se_g**gas_corey_exponent
+            krg_values = se_g**gas_exponent
         else:
             d_krg_d_sg = zeros.copy()
             se_g = zeros.copy()
@@ -2155,11 +2155,11 @@ class BrooksCoreyThreePhaseRelPermModel(
 
         # kro_w shaped = (1 - krw)^no
         one_minus_krw = np.clip(1.0 - krw_values, 0.0, None)
-        kro_w_shaped = one_minus_krw**oil_corey_exponent
+        kro_w_shaped = one_minus_krw**oil_exponent
         d_kro_w_d_sw = np.where(
             one_minus_krw > 0.0,
-            oil_corey_exponent
-            * (one_minus_krw ** max(oil_corey_exponent - 1.0, 0.0))
+            oil_exponent
+            * (one_minus_krw ** max(oil_exponent - 1.0, 0.0))
             * (-d_krw_d_sw),
             0.0,
         )
@@ -2168,11 +2168,11 @@ class BrooksCoreyThreePhaseRelPermModel(
 
         # kro_g shaped = (1 - krg)^no
         one_minus_krg = np.clip(1.0 - krg_values, 0.0, None)
-        kro_g_shaped = one_minus_krg**oil_corey_exponent
+        kro_g_shaped = one_minus_krg**oil_exponent
         d_kro_g_d_sg = np.where(
             one_minus_krg > 0.0,
-            oil_corey_exponent
-            * (one_minus_krg ** max(oil_corey_exponent - 1.0, 0.0))
+            oil_exponent
+            * (one_minus_krg ** max(oil_exponent - 1.0, 0.0))
             * (-d_krg_d_sg),
             0.0,
         )
@@ -2901,9 +2901,9 @@ class LETThreePhaseRelPermModel(
         krg_max = self.max_gas_relperm
 
         is_scalar = np.isscalar(water_saturation)
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
+        sw = np.atleast_1d(water_saturation)
+        so = np.atleast_1d(oil_saturation)
+        sg = np.atleast_1d(gas_saturation)
         sw, so, sg = np.broadcast_arrays(sw, so, sg)
         zeros = np.zeros_like(sw)
 

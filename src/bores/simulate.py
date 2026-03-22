@@ -2083,13 +2083,6 @@ def run(
                         phase_appearance_tolerance=config.phase_appearance_tolerance,
                     )
 
-                if scheme == "implicit":
-                    warnings.warn(
-                        "Fully implicit scheme selected but not yet supported. Falling back to sequential implicit scheme.",
-                        UserWarning,
-                    )
-                    scheme = "sequential_implicit"
-
                 if scheme == "impes":
                     result = _run_impes_step(
                         time_step=new_step,
@@ -2112,7 +2105,7 @@ def run(
                         boundary_conditions=boundary_conditions,
                         pad_width=pad_width,
                     )
-                elif scheme == "sequential_implicit":
+                elif scheme == "implicit":
                     result = _run_sequential_implicit_step(
                         time_step=new_step,
                         grid_shape=grid_shape,

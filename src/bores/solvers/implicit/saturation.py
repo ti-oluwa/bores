@@ -4,6 +4,7 @@ import typing
 import attrs
 import numba
 import numpy as np
+import numpy.typing as npt
 from scipy.sparse import coo_matrix, csr_matrix
 
 from bores._precision import get_dtype
@@ -11,11 +12,7 @@ from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
-from bores.grids.base import (
-    CapillaryPressureGrids,
-    RelativeMobilityGrids,
-    RelPermGrids,
-)
+from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
@@ -71,7 +68,7 @@ def saturations_to_vector(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
-) -> np.typing.NDArray:
+) -> npt.NDArray:
     """
     Pack Sw and Sg from 3D grids into a 1D vector.
 
@@ -91,7 +88,7 @@ def saturations_to_vector(
 
 @numba.njit(cache=True)
 def vector_to_saturation_grids(
-    saturation_vector: np.typing.NDArray,
+    saturation_vector: npt.NDArray,
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -117,7 +114,7 @@ def vector_to_saturation_grids(
 
 
 @numba.njit(cache=True)
-def project_to_feasible(saturation_vector: np.typing.NDArray) -> np.typing.NDArray:
+def project_to_feasible(saturation_vector: npt.NDArray) -> npt.NDArray:
     """
     Project saturation vector onto the feasible set:
         0 <= Sw, 0 <= Sg, and Sw + Sg <= 1.
@@ -139,9 +136,9 @@ def project_to_feasible(saturation_vector: np.typing.NDArray) -> np.typing.NDArr
 
 @numba.njit(cache=True)
 def interleave_residuals(
-    residual_water: np.typing.NDArray,
-    residual_gas: np.typing.NDArray,
-) -> np.typing.NDArray:
+    residual_water: npt.NDArray,
+    residual_gas: npt.NDArray,
+) -> npt.NDArray:
     """
     Interleave water and gas residual arrays into a single vector.
 
@@ -192,7 +189,7 @@ def compute_saturation_residual(
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
-) -> typing.Tuple[np.typing.NDArray, np.typing.NDArray]:
+) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
     Compute the residual vector R(S) for the implicit saturation equations.
 
@@ -226,7 +223,6 @@ def compute_saturation_residual(
                 cell_porosity = porosity_grid[i, j, k]
                 cell_pore_volume = cell_total_volume * cell_porosity
 
-                # Accumulation term: (phi * V / dt) * (S_new - S_old)
                 accumulation_coefficient = cell_pore_volume / time_step_in_days
                 water_accumulation = accumulation_coefficient * (
                     water_saturation_grid[i, j, k] - old_water_saturation_grid[i, j, k]
@@ -235,13 +231,9 @@ def compute_saturation_residual(
                     gas_saturation_grid[i, j, k] - old_gas_saturation_grid[i, j, k]
                 )
 
-                # Inter-cell flux terms — reuse the existing per-face flux function
-                # which reads from the mobility/Pc grids we pass in (evaluated at
-                # the current Newton iterate).
                 net_water_flux = 0.0
                 net_gas_flux = 0.0
 
-                # X-direction: East neighbor (i+1, j, k)
                 flow_length_x = cell_size_x
                 east_neighbour_thickness = thickness_grid[i + 1, j, k]
                 harmonic_thickness = compute_harmonic_mean(
@@ -268,7 +260,6 @@ def compute_saturation_residual(
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                # X-direction: West neighbor (i-1, j, k)
                 west_neighbour_thickness = thickness_grid[i - 1, j, k]
                 harmonic_thickness = compute_harmonic_mean(
                     cell_thickness, west_neighbour_thickness
@@ -294,7 +285,6 @@ def compute_saturation_residual(
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                # Y-direction: North neighbor (i, j-1, k)
                 flow_length_y = cell_size_y
                 north_neighbour_thickness = thickness_grid[i, j - 1, k]
                 harmonic_thickness = compute_harmonic_mean(
@@ -321,7 +311,6 @@ def compute_saturation_residual(
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                # Y-direction: South neighbor (i, j+1, k)
                 south_neighbour_thickness = thickness_grid[i, j + 1, k]
                 harmonic_thickness = compute_harmonic_mean(
                     cell_thickness, south_neighbour_thickness
@@ -347,7 +336,6 @@ def compute_saturation_residual(
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                # Z-direction: Top neighbor (i, j, k-1)
                 flow_area_z = cell_size_x * cell_size_y
                 top_neighbour_thickness = thickness_grid[i, j, k - 1]
                 harmonic_thickness = compute_harmonic_mean(
@@ -374,7 +362,6 @@ def compute_saturation_residual(
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                # Z-direction: Bottom neighbor (i, j, k+1)
                 bottom_neighbour_thickness = thickness_grid[i, j, k + 1]
                 harmonic_thickness = compute_harmonic_mean(
                     cell_thickness, bottom_neighbour_thickness
@@ -400,13 +387,9 @@ def compute_saturation_residual(
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                # Well source/sink contribution (already in ft³/day)
                 water_well_source = net_water_well_rate_grid[i, j, k]
                 gas_well_source = net_gas_well_rate_grid[i, j, k]
 
-                # PVT volume correction: ΔSα_pvt = -Sα * (cα + cf) * ΔP
-                # Expressed as a rate (divided by dt and multiplied by pore volume)
-                # to match the accumulation and flux units.
                 delta_pressure = pressure_change_grid[i, j, k]
                 negative_delta_pressure = -delta_pressure
 
@@ -423,7 +406,6 @@ def compute_saturation_residual(
                     * accumulation_coefficient
                 )
 
-                # Residual = Accumulation - Fluxes - Wells - PVT correction
                 idx = to_1D_index_interior_only(
                     i, j, k, cell_count_x, cell_count_y, cell_count_z
                 )
@@ -443,7 +425,7 @@ def compute_saturation_residual(
     return residual_water, residual_gas
 
 
-def recompute_saturation_dependent_properties(
+def compute_saturation_dependent_properties(
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -451,7 +433,6 @@ def recompute_saturation_dependent_properties(
     fluid_properties: FluidProperties[ThreeDimensions],
     config: Config,
 ) -> typing.Tuple[
-    RelPermGrids[ThreeDimensions],
     RelativeMobilityGrids[ThreeDimensions],
     CapillaryPressureGrids[ThreeDimensions],
     typing.Tuple[
@@ -461,25 +442,20 @@ def recompute_saturation_dependent_properties(
     ],
 ]:
     """
-    Recompute all saturation-dependent quantities at fixed pressure.
+    Compute all saturation-dependent quantities at fixed pressure.
 
-    Called at each Newton iteration. Returns updated relative permeabilities,
-    relative mobilities, capillary pressures, and directional mobility grids.
+    Called at each Newton iteration. Returns updated relative mobilities,
+    capillary pressures, and directional mobility grids.
     """
-    # Clamp to valid range before relperm evaluation — the Newton line search
-    # can produce trial states with tiny out-of-bounds values due to floating
-    # point residuals in project_to_feasible.
     water_saturation_clamped_grid = np.clip(water_saturation_grid, 0.0, 1.0)
     gas_saturation_clamped_grid = np.clip(gas_saturation_grid, 0.0, 1.0)
     oil_saturation_clamped_grid = np.clip(oil_saturation_grid, 0.0, 1.0)
 
-    # Re-normalize so they sum to exactly 1 at each cell
     total_saturation_grid = (
         water_saturation_clamped_grid
         + oil_saturation_clamped_grid
         + gas_saturation_clamped_grid
     )
-    # Avoid division by zero in degenerate cells
     total_saturation_grid = np.where(
         total_saturation_grid > 0.0, total_saturation_grid, 1.0
     )
@@ -489,7 +465,7 @@ def recompute_saturation_dependent_properties(
     oil_saturation_clamped_grid = oil_saturation_clamped_grid / total_saturation_grid
     gas_saturation_clamped_grid = gas_saturation_clamped_grid / total_saturation_grid
 
-    relperm_grids, relative_mobility_grids, capillary_pressure_grids = (
+    _, relative_mobility_grids, capillary_pressure_grids = (
         build_rock_fluid_properties_grids(
             water_saturation_grid=water_saturation_clamped_grid,  # type: ignore
             oil_saturation_grid=oil_saturation_clamped_grid,  # type: ignore
@@ -526,15 +502,137 @@ def recompute_saturation_dependent_properties(
         gas_relative_mobility_grid=gas_relative_mobility_grid,
         md_per_cp_to_ft2_per_psi_per_day=c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY,
     )
-    return (
-        relperm_grids,
-        relative_mobility_grids,
-        capillary_pressure_grids,
-        mobility_grids,
+    return (relative_mobility_grids, capillary_pressure_grids, mobility_grids)
+
+
+def _compute_residual(
+    water_saturation_grid: ThreeDimensionalGrid,
+    gas_saturation_grid: ThreeDimensionalGrid,
+    old_water_saturation_grid: ThreeDimensionalGrid,
+    old_gas_saturation_grid: ThreeDimensionalGrid,
+    oil_pressure_grid: ThreeDimensionalGrid,
+    pressure_change_grid: ThreeDimensionalGrid,
+    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
+    capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
+    mobility_grids: typing.Tuple[
+        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
+        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
+        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
+    ],
+    rock_properties: RockProperties[ThreeDimensions],
+    fluid_properties: FluidProperties[ThreeDimensions],
+    wells: Wells[ThreeDimensions],
+    config: Config,
+    cell_count_x: int,
+    cell_count_y: int,
+    cell_count_z: int,
+    thickness_grid: ThreeDimensionalGrid,
+    cell_size_x: float,
+    cell_size_y: float,
+    elevation_grid: ThreeDimensionalGrid,
+    porosity_grid: ThreeDimensionalGrid,
+    time: float,
+    time_step_in_days: float,
+    gravitational_constant: float,
+    water_compressibility_grid: ThreeDimensionalGrid,
+    gas_compressibility_grid: ThreeDimensionalGrid,
+    rock_compressibility: float,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
+    injection_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
+    production_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
+    pad_width: int,
+    dtype: npt.DTypeLike,
+) -> typing.Tuple[npt.NDArray, npt.NDArray]:
+    """
+    Compute the residual from pre-computed saturation-dependent properties.
+
+    :return: `(residual_water, residual_gas)` as 1D arrays of length N.
+    """
+    (
+        water_relative_mobility_grid,
+        oil_relative_mobility_grid,
+        gas_relative_mobility_grid,
+    ) = relative_mobility_grids
+    oil_water_capillary_pressure_grid, gas_oil_capillary_pressure_grid = (
+        capillary_pressure_grids
+    )
+    (
+        (water_mobility_grid_x, oil_mobility_grid_x, gas_mobility_grid_x),
+        (water_mobility_grid_y, oil_mobility_grid_y, gas_mobility_grid_y),
+        (water_mobility_grid_z, oil_mobility_grid_z, gas_mobility_grid_z),
+    ) = mobility_grids
+
+    net_water_well_rate_grid, _, net_gas_well_rate_grid = compute_well_rate_grids(
+        cell_count_x=cell_count_x,
+        cell_count_y=cell_count_y,
+        cell_count_z=cell_count_z,
+        wells=wells,
+        oil_pressure_grid=oil_pressure_grid,
+        temperature_grid=fluid_properties.temperature_grid,
+        absolute_permeability=rock_properties.absolute_permeability,
+        water_relative_mobility_grid=water_relative_mobility_grid,
+        oil_relative_mobility_grid=oil_relative_mobility_grid,
+        gas_relative_mobility_grid=gas_relative_mobility_grid,
+        water_compressibility_grid=water_compressibility_grid,
+        oil_compressibility_grid=fluid_properties.oil_compressibility_grid,
+        gas_compressibility_grid=gas_compressibility_grid,
+        fluid_properties=fluid_properties,
+        thickness_grid=thickness_grid,
+        cell_size_x=cell_size_x,
+        cell_size_y=cell_size_y,
+        time=time,
+        config=config,
+        boundary_conditions=boundary_conditions,
+        pad_width=pad_width,
+        injection_grid=injection_grid,
+        production_grid=production_grid,
+        dtype=dtype,
+    )
+
+    return compute_saturation_residual(
+        oil_pressure_grid=oil_pressure_grid,
+        cell_count_x=cell_count_x,
+        cell_count_y=cell_count_y,
+        cell_count_z=cell_count_z,
+        thickness_grid=thickness_grid,
+        cell_size_x=cell_size_x,
+        cell_size_y=cell_size_y,
+        water_mobility_grid_x=water_mobility_grid_x,
+        water_mobility_grid_y=water_mobility_grid_y,
+        water_mobility_grid_z=water_mobility_grid_z,
+        oil_mobility_grid_x=oil_mobility_grid_x,
+        oil_mobility_grid_y=oil_mobility_grid_y,
+        oil_mobility_grid_z=oil_mobility_grid_z,
+        gas_mobility_grid_x=gas_mobility_grid_x,
+        gas_mobility_grid_y=gas_mobility_grid_y,
+        gas_mobility_grid_z=gas_mobility_grid_z,
+        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+        oil_density_grid=fluid_properties.oil_effective_density_grid,
+        water_density_grid=fluid_properties.water_density_grid,
+        gas_density_grid=fluid_properties.gas_density_grid,
+        elevation_grid=elevation_grid,
+        gravitational_constant=gravitational_constant,
+        water_saturation_grid=water_saturation_grid,
+        gas_saturation_grid=gas_saturation_grid,
+        old_water_saturation_grid=old_water_saturation_grid,
+        old_gas_saturation_grid=old_gas_saturation_grid,
+        porosity_grid=porosity_grid,
+        time_step_in_days=time_step_in_days,
+        net_water_well_rate_grid=net_water_well_rate_grid,
+        net_gas_well_rate_grid=net_gas_well_rate_grid,
+        pressure_change_grid=pressure_change_grid,
+        water_compressibility_grid=water_compressibility_grid,
+        gas_compressibility_grid=gas_compressibility_grid,
+        rock_compressibility=rock_compressibility,
     )
 
 
-def evaluate_residual(
+def compute_residual(
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -568,21 +666,25 @@ def evaluate_residual(
         SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
     ],
     pad_width: int,
-    dtype: np.typing.DTypeLike,
-) -> typing.Tuple[np.typing.NDArray, np.typing.NDArray]:
+    dtype: npt.DTypeLike,
+) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
-    Full residual evaluation: recomputes saturation-dependent properties,
-    well rates, and then calls the Numba residual kernel.
+    Computes full residual. Re-computes saturation-dependent properties,
+    well rates, and then calls the saturation residual kernel.
 
-    Returns (residual_water, residual_gas) as 1D arrays.
+    This function is self-contained and always recomputes saturation-dependent
+    properties internally. It is used by the numerical Jacobian assembler
+    (which must evaluate the residual at many perturbed saturation states) and
+    as a convenience wrapper wherever a standalone residual evaluation is
+    needed.
+
+    :return: `(residual_water, residual_gas)` as 1D arrays of length N.
     """
-    # Recompute kr, mobility, Pc at current saturation iterate
     (
-        _,
         relative_mobility_grids,
         capillary_pressure_grids,
         mobility_grids,
-    ) = recompute_saturation_dependent_properties(
+    ) = compute_saturation_dependent_properties(
         water_saturation_grid=water_saturation_grid,
         oil_saturation_grid=oil_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
@@ -590,96 +692,45 @@ def evaluate_residual(
         fluid_properties=fluid_properties,
         config=config,
     )
-
-    (
-        water_relative_mobility_grid,
-        oil_relative_mobility_grid,
-        gas_relative_mobility_grid,
-    ) = relative_mobility_grids
-    oil_water_capillary_pressure_grid, gas_oil_capillary_pressure_grid = (
-        capillary_pressure_grids
-    )
-
-    (
-        (water_mobility_grid_x, oil_mobility_grid_x, gas_mobility_grid_x),
-        (water_mobility_grid_y, oil_mobility_grid_y, gas_mobility_grid_y),
-        (water_mobility_grid_z, oil_mobility_grid_z, gas_mobility_grid_z),
-    ) = mobility_grids
-
-    # Recompute well rates at current iteration mobilities
-    net_water_well_rate_grid, _, net_gas_well_rate_grid = compute_well_rate_grids(
-        cell_count_x=cell_count_x,
-        cell_count_y=cell_count_y,
-        cell_count_z=cell_count_z,
-        wells=wells,
-        oil_pressure_grid=oil_pressure_grid,
-        temperature_grid=fluid_properties.temperature_grid,
-        absolute_permeability=rock_properties.absolute_permeability,
-        water_relative_mobility_grid=water_relative_mobility_grid,
-        oil_relative_mobility_grid=oil_relative_mobility_grid,
-        gas_relative_mobility_grid=gas_relative_mobility_grid,
-        water_compressibility_grid=water_compressibility_grid,
-        oil_compressibility_grid=fluid_properties.oil_compressibility_grid,
-        gas_compressibility_grid=gas_compressibility_grid,
-        fluid_properties=fluid_properties,
-        thickness_grid=thickness_grid,
-        cell_size_x=cell_size_x,
-        cell_size_y=cell_size_y,
-        time=time,
-        config=config,
-        boundary_conditions=boundary_conditions,
-        pad_width=pad_width,
-        injection_grid=injection_grid,
-        production_grid=production_grid,
-        dtype=dtype,
-    )
-
-    oil_density_grid = fluid_properties.oil_effective_density_grid
-    water_density_grid = fluid_properties.water_density_grid
-    gas_density_grid = fluid_properties.gas_density_grid
-
-    return compute_saturation_residual(
-        oil_pressure_grid=oil_pressure_grid,
-        cell_count_x=cell_count_x,
-        cell_count_y=cell_count_y,
-        cell_count_z=cell_count_z,
-        thickness_grid=thickness_grid,
-        cell_size_x=cell_size_x,
-        cell_size_y=cell_size_y,
-        water_mobility_grid_x=water_mobility_grid_x,
-        water_mobility_grid_y=water_mobility_grid_y,
-        water_mobility_grid_z=water_mobility_grid_z,
-        oil_mobility_grid_x=oil_mobility_grid_x,
-        oil_mobility_grid_y=oil_mobility_grid_y,
-        oil_mobility_grid_z=oil_mobility_grid_z,
-        gas_mobility_grid_x=gas_mobility_grid_x,
-        gas_mobility_grid_y=gas_mobility_grid_y,
-        gas_mobility_grid_z=gas_mobility_grid_z,
-        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-        oil_density_grid=oil_density_grid,
-        water_density_grid=water_density_grid,
-        gas_density_grid=gas_density_grid,
-        elevation_grid=elevation_grid,
-        gravitational_constant=gravitational_constant,
+    return _compute_residual(
         water_saturation_grid=water_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
         old_water_saturation_grid=old_water_saturation_grid,
         old_gas_saturation_grid=old_gas_saturation_grid,
-        porosity_grid=porosity_grid,
-        time_step_in_days=time_step_in_days,
-        net_water_well_rate_grid=net_water_well_rate_grid,
-        net_gas_well_rate_grid=net_gas_well_rate_grid,
+        oil_pressure_grid=oil_pressure_grid,
         pressure_change_grid=pressure_change_grid,
+        relative_mobility_grids=relative_mobility_grids,
+        capillary_pressure_grids=capillary_pressure_grids,
+        mobility_grids=mobility_grids,
+        rock_properties=rock_properties,
+        fluid_properties=fluid_properties,
+        wells=wells,
+        config=config,
+        cell_count_x=cell_count_x,
+        cell_count_y=cell_count_y,
+        cell_count_z=cell_count_z,
+        thickness_grid=thickness_grid,
+        cell_size_x=cell_size_x,
+        cell_size_y=cell_size_y,
+        elevation_grid=elevation_grid,
+        porosity_grid=porosity_grid,
+        time=time,
+        time_step_in_days=time_step_in_days,
+        gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
+        boundary_conditions=boundary_conditions,
+        injection_grid=injection_grid,
+        production_grid=production_grid,
+        pad_width=pad_width,
+        dtype=dtype,
     )
 
 
 def assemble_numerical_jacobian(
-    saturation_vector: np.typing.NDArray,
-    residual_base: np.typing.NDArray,
+    saturation_vector: npt.NDArray,
+    residual_base: npt.NDArray,
     interior_cell_count: int,
     cell_count_x: int,
     cell_count_y: int,
@@ -714,106 +765,28 @@ def assemble_numerical_jacobian(
         SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
     ],
     pad_width: int,
-    dtype: np.typing.DTypeLike,
+    dtype: npt.DTypeLike,
 ) -> csr_matrix:
     """
-    Assemble the saturation Jacobian matrix using column-wise forward finite differences.
+    Assemble the saturation Jacobian using column-wise forward finite differences.
 
-    Exploits the known 7-point stencil sparsity pattern of the residual: perturbing
-    Sw or Sg at cell `(i, j, k)` can only affect the residuals of that cell and its
-    six immediate face-neighbours. Only those rows are evaluated, so the cost scales
-    as `O(N)` residual evaluations rather than `O(N²)`.
+    Exploits the 7-point stencil: perturbing Sw or Sg at cell (i,j,k) can only
+    affect the residuals of that cell and its six face-neighbours.
 
-    All arithmetic is performed in `float64` regardless of the working precision
-    (`dtype`) to avoid round-off artifacts in the finite-difference quotients.
-    Perturbation is applied **in-place** on the shared float64 grids and immediately
-    restored after each column evaluation, eliminating the `6N` full-grid copies
-    that a copy-based approach would require.
-
-    The perturbation sign is chosen adaptively:
-
-    * **Forward** (`+epsilon`) by default.
-    * **Backward** (`-epsilon`) when a forward step would make `So = 1 - Sw - Sg`
-      negative (i.e. the cell is near the `So = 0` boundary).
-    * A further safety clamp is applied when even the backward step would drive
-      the perturbed variable below zero (simplex vertex case).
-
-    :param saturation_vector: Current saturation vector of length `2N`, interleaved
-        as `[Sw_0, Sg_0, Sw_1, Sg_1, ..., Sw_{N-1}, Sg_{N-1}]`.
-    :param residual_base: Pre-computed residual vector at the current iterate,
-        interleaved as `[Rw_0, Rg_0, ..., Rw_{N-1}, Rg_{N-1}]`. Length `2N`.
-        Must be evaluated at the same saturation state as `saturation_vector`.
-    :param interior_cell_count: Number of interior (non-ghost) cells `N`.
-    :param cell_count_x: Total number of cells in the x-direction including ghost cells.
-    :param cell_count_y: Total number of cells in the y-direction including ghost cells.
-    :param cell_count_z: Total number of cells in the z-direction including ghost cells.
-    :param water_saturation_grid: 3D grid of current water saturations (fraction).
-        Modified in-place during Jacobian assembly and fully restored on exit.
-    :param oil_saturation_grid: 3D grid of current oil saturations (fraction).
-        Modified in-place during Jacobian assembly and fully restored on exit.
-    :param gas_saturation_grid: 3D grid of current gas saturations (fraction).
-        Modified in-place during Jacobian assembly and fully restored on exit.
-    :param old_water_saturation_grid: 3D grid of water saturations at the start of
-        the time step (fraction). Used in the residual accumulation term.
-    :param old_gas_saturation_grid: 3D grid of gas saturations at the start of
-        the time step (fraction). Used in the residual accumulation term.
-    :param oil_pressure_grid: 3D grid of oil-phase pressures fixed from the implicit
-        pressure solve (psi). Not modified.
-    :param pressure_change_grid: 3D grid of `P_new - P_old` (psi) used for the
-        PVT volume correction term in the residual.
-    :param rock_properties: Rock properties container (permeability, porosity,
-        residual saturations, compressibility).
-    :param fluid_properties: Fluid properties container at the current pressure level
-        (viscosities, FVFs, compressibilities, densities).
-    :param wells: Well definitions including perforations and controls.
-    :param config: Simulation configuration (relperm tables, solver settings, etc.).
-    :param thickness_grid: 3D grid of cell thicknesses (ft).
-    :param cell_size_x: Cell size in the x-direction (ft).
-    :param cell_size_y: Cell size in the y-direction (ft).
-    :param elevation_grid: 3D grid of cell centre elevations (ft).
-    :param porosity_grid: 3D grid of cell porosities (fraction).
-    :param time: Elapsed simulation time at the current time step (s).
-    :param time_step_in_days: Current time step size (days).
-    :param gravitational_constant: `g / g_c` conversion factor (lbf/lbm),
-        equal to 1.0 in consistent imperial units on Earth.
-    :param water_compressibility_grid: 3D grid of water compressibilities (1/psi).
-    :param gas_compressibility_grid: 3D grid of gas compressibilities (1/psi).
-    :param rock_compressibility: Scalar pore (rock) compressibility (1/psi).
-    :param boundary_conditions: Pressure and saturation boundary conditions.
-    :param injection_grid: Optional grid to accumulate injection rates by phase
-        (oil, water, gas) in ft³/day. Written on each residual evaluation so the
-        final state reflects the last perturbed column; callers that need
-        physically meaningful rates should re-evaluate after Jacobian assembly.
-        Pass `None` to skip tracking.
-    :param production_grid: Optional grid to accumulate production rates by phase
-        (oil, water, gas) in ft³/day. Same semantics as `injection_grid`.
-        Pass `None` to skip tracking.
-    :param pad_width: Number of ghost-cell layers surrounding the active grid.
-        Well coordinates are offset by this amount internally.
-    :param dtype: Working floating-point dtype (`np.float32` or `np.float64`).
-        The finite-difference arithmetic is always performed in `float64`
-        regardless of this value.
-    :return: Sparse Jacobian matrix of shape `(2N, 2N)` in CSR format. Entry
-        `J[r, c]` approximates `∂R_r / ∂S_c` at the current Newton iterate.
+    :return: Sparse Jacobian matrix of shape (2N, 2N) in CSR format.
     """
     system_size = 2 * interior_cell_count
     rows_list = []
     cols_list = []
     vals_list = []
 
-    # Perturbation size: sqrt(machine_eps) gives the optimal balance between
-    # truncation error (too large) and cancellation error (too small) for
-    # forward finite differences. The saturation scale is 1.0 since Sw, Sg ∈ [0, 1].
     machine_eps = np.finfo(dtype).eps  # type: ignore
     base_epsilon = float(np.sqrt(machine_eps))
 
-    # Promote to float64 once. All perturb/restore operations work on these
-    # grids in-place, so no copies are needed inside the column loop.
     water_saturation_grid_f64 = water_saturation_grid.astype(np.float64, copy=True)
     oil_saturation_grid_f64 = oil_saturation_grid.astype(np.float64, copy=True)
     gas_saturation_grid_f64 = gas_saturation_grid.astype(np.float64, copy=True)
 
-    # Shared kwargs for every `evaluate_residual` call
     residual_kwargs = dict(  # noqa
         old_water_saturation_grid=old_water_saturation_grid,
         old_gas_saturation_grid=old_gas_saturation_grid,
@@ -849,8 +822,6 @@ def assemble_numerical_jacobian(
             cell_1d_idx, cell_count_x, cell_count_y, cell_count_z
         )
 
-        # Residual of cell (i,j,k) and its six face-neighbours are the only rows
-        # that can be non-zero in column `col` due to the 7-point stencil.
         affected_cell_indices = [cell_1d_idx]
         for ni, nj, nk in (
             (i + 1, j, k),
@@ -866,7 +837,6 @@ def assemble_numerical_jacobian(
             if neighbor_1d >= 0:
                 affected_cell_indices.append(neighbor_1d)
 
-        # Current saturations at the cell being perturbed — read once per cell.
         sw_cell = float(water_saturation_grid_f64[i, j, k])
         sg_cell = float(gas_saturation_grid_f64[i, j, k])
         so_cell = 1.0 - sw_cell - sg_cell
@@ -875,19 +845,13 @@ def assemble_numerical_jacobian(
             col = 2 * cell_1d_idx + var_offset
             s_j = saturation_vector[col]
 
-            # Perturbation magnitude — scaled to the saturation range [0, 1].
             epsilon = base_epsilon * max(abs(s_j), 1.0)
 
-            # Direction: switch to backward difference when a forward step
-            # would push So below zero (cell near the So = 0 boundary).
             if epsilon > so_cell:
                 epsilon = -epsilon
-                # Further safety: backward step must not drive the variable negative.
                 if s_j + epsilon < 0.0:
                     epsilon = (-s_j * 0.5) if s_j > 1e-15 else (base_epsilon * 0.01)
 
-            # In-place perturbation (no grid copies)
-            # Save the three scalar originals for the cell being perturbed.
             sw_orig = water_saturation_grid_f64[i, j, k]
             sg_orig = gas_saturation_grid_f64[i, j, k]
             so_orig = oil_saturation_grid_f64[i, j, k]
@@ -897,7 +861,6 @@ def assemble_numerical_jacobian(
             else:
                 gas_saturation_grid_f64[i, j, k] = sg_orig + epsilon
 
-            # Recompute So to maintain Sw + So + Sg = 1 at the perturbed cell.
             oil_saturation_grid_f64[i, j, k] = max(
                 0.0,
                 1.0
@@ -905,9 +868,7 @@ def assemble_numerical_jacobian(
                 - gas_saturation_grid_f64[i, j, k],
             )
 
-            # Evaluate residual with the shared float64 grids (now perturbed at
-            # exactly one cell). All other cells are unchanged.
-            residual_water_perturbed, residual_gas_perturbed = evaluate_residual(
+            residual_water_perturbed, residual_gas_perturbed = compute_residual(
                 water_saturation_grid=water_saturation_grid_f64,
                 oil_saturation_grid=oil_saturation_grid_f64,
                 gas_saturation_grid=gas_saturation_grid_f64,
@@ -918,12 +879,10 @@ def assemble_numerical_jacobian(
                 residual_gas=residual_gas_perturbed,
             )
 
-            # Restore in-place (three scalar writes)
             water_saturation_grid_f64[i, j, k] = sw_orig
             gas_saturation_grid_f64[i, j, k] = sg_orig
             oil_saturation_grid_f64[i, j, k] = so_orig
 
-            # Finite-difference derivative for each affected row.
             for affected_idx in affected_cell_indices:
                 row_water = 2 * affected_idx
                 dR_water = (
@@ -954,6 +913,818 @@ def assemble_numerical_jacobian(
         shape=(system_size, system_size),
     )
     return jacobian_coo.tocsr()
+
+
+def compute_relperm_and_capillary_pressure_derivative_grids(
+    water_saturation_grid: ThreeDimensionalGrid,
+    oil_saturation_grid: ThreeDimensionalGrid,
+    gas_saturation_grid: ThreeDimensionalGrid,
+    rock_properties: RockProperties[ThreeDimensions],
+    config: Config,
+) -> typing.Tuple[
+    ThreeDimensionalGrid,  # dkrw_dSw
+    ThreeDimensionalGrid,  # dkrw_dSo
+    ThreeDimensionalGrid,  # dkrw_dSg
+    ThreeDimensionalGrid,  # dkro_dSw
+    ThreeDimensionalGrid,  # dkro_dSo
+    ThreeDimensionalGrid,  # dkro_dSg
+    ThreeDimensionalGrid,  # dkrg_dSw
+    ThreeDimensionalGrid,  # dkrg_dSo
+    ThreeDimensionalGrid,  # dkrg_dSg
+    ThreeDimensionalGrid,  # dPcow_dSw_eff  (So eliminated: dPcow_dSw + dPcow_dSo*(-1))
+    ThreeDimensionalGrid,  # dPcow_dSg_eff  (                dPcow_dSo * (-1))
+    ThreeDimensionalGrid,  # dPcgo_dSw_eff  (                dPcgo_dSo * (-1))
+    ThreeDimensionalGrid,  # dPcgo_dSg_eff  (dPcgo_dSg + dPcgo_dSo*(-1))
+]:
+    """
+    Compute all relperm and capillary pressure derivative grids for the
+    analytical Jacobian.
+
+    Called once per Newton iteration before `assemble_analytical_jacobian`.
+    The Numba Jacobian kernel cannot call Python objects, so all derivative
+    evaluations must happen here.
+
+    **Relperm derivatives**
+
+    All nine raw partials `d kr_alpha / d S_beta` (with `beta in {Sw, So, Sg}`)
+    are returned unchanged. The Jacobian kernel projects out the oil saturation
+    dependence inline using `dSo/dSw = -1` and `dSo/dSg = -1`.
+
+    **Capillary pressure derivatives — projected onto (Sw, Sg) basis**
+
+    Capillary pressures may depend on oil saturation (e.g. a gas-oil table
+    indexed by So). The constraint `So = 1 - Sw - Sg` gives
+    `dSo/dSw_free = dSo/dSg_free = -1`, so the effective derivatives are:
+
+    ```
+    dPcow_dSw_eff = dPcow_dSw + dPcow_dSo * (-1)
+    dPcow_dSg_eff =              dPcow_dSo * (-1)
+    dPcgo_dSw_eff =              dPcgo_dSo * (-1)
+    dPcgo_dSg_eff = dPcgo_dSg + dPcgo_dSo * (-1)
+    ```
+
+    These are pre-projected here so the Numba kernel receives simple scalars
+    with no further chain-rule work.
+
+    :param water_saturation_grid: Current water saturation (3D, clamped).
+    :param oil_saturation_grid: Current oil saturation (3D, clamped).
+    :param gas_saturation_grid: Current gas saturation (3D, clamped).
+    :param rock_properties: Rock properties (residual saturations).
+    :param config: Simulation configuration (relperm and Pc tables).
+    :return: 13-tuple of derivative grids.
+    """
+    relperm_table = config.rock_fluid_tables.relative_permeability_table
+    capillary_table = config.rock_fluid_tables.capillary_pressure_table
+
+    irr_sw = rock_properties.irreducible_water_saturation_grid
+    res_ow = rock_properties.residual_oil_saturation_water_grid
+    res_og = rock_properties.residual_oil_saturation_gas_grid
+    res_gr = rock_properties.residual_gas_saturation_grid
+
+    kr_derivs = relperm_table.derivatives(
+        water_saturation=water_saturation_grid,
+        oil_saturation=oil_saturation_grid,
+        gas_saturation=gas_saturation_grid,
+        irreducible_water_saturation=irr_sw,
+        residual_oil_saturation_water=res_ow,
+        residual_oil_saturation_gas=res_og,
+        residual_gas_saturation=res_gr,
+    )
+
+    dkrw_dSw: ThreeDimensionalGrid = np.asarray(kr_derivs["dKrw_dSw"], dtype=np.float64)
+    dkrw_dSo: ThreeDimensionalGrid = np.asarray(kr_derivs["dKrw_dSo"], dtype=np.float64)
+    dkrw_dSg: ThreeDimensionalGrid = np.asarray(kr_derivs["dKrw_dSg"], dtype=np.float64)
+    dkro_dSw: ThreeDimensionalGrid = np.asarray(kr_derivs["dKro_dSw"], dtype=np.float64)
+    dkro_dSo: ThreeDimensionalGrid = np.asarray(kr_derivs["dKro_dSo"], dtype=np.float64)
+    dkro_dSg: ThreeDimensionalGrid = np.asarray(kr_derivs["dKro_dSg"], dtype=np.float64)
+    dkrg_dSw: ThreeDimensionalGrid = np.asarray(kr_derivs["dKrg_dSw"], dtype=np.float64)
+    dkrg_dSo: ThreeDimensionalGrid = np.asarray(kr_derivs["dKrg_dSo"], dtype=np.float64)
+    dkrg_dSg: ThreeDimensionalGrid = np.asarray(kr_derivs["dKrg_dSg"], dtype=np.float64)
+
+    if capillary_table is not None and not config.disable_capillary_effects:
+        pc_derivs = capillary_table.derivatives(
+            water_saturation=water_saturation_grid,
+            oil_saturation=oil_saturation_grid,
+            gas_saturation=gas_saturation_grid,
+            irreducible_water_saturation=irr_sw,
+            residual_oil_saturation_water=res_ow,
+            residual_oil_saturation_gas=res_og,
+            residual_gas_saturation=res_gr,
+        )
+        factor = config.capillary_strength_factor
+        raw_dPcow_dSw: npt.NDArray = (
+            np.asarray(pc_derivs["dPcow_dSw"], dtype=np.float64) * factor
+        )
+        raw_dPcow_dSo: npt.NDArray = (
+            np.asarray(pc_derivs["dPcow_dSo"], dtype=np.float64) * factor
+        )
+        raw_dPcgo_dSo: npt.NDArray = (
+            np.asarray(pc_derivs["dPcgo_dSo"], dtype=np.float64) * factor
+        )
+        raw_dPcgo_dSg: npt.NDArray = (
+            np.asarray(pc_derivs["dPcgo_dSg"], dtype=np.float64) * factor
+        )
+
+        dPcow_dSw_eff: npt.NDArray = raw_dPcow_dSw - raw_dPcow_dSo
+        dPcow_dSg_eff: npt.NDArray = -raw_dPcow_dSo
+        dPcgo_dSw_eff: npt.NDArray = -raw_dPcgo_dSo
+        dPcgo_dSg_eff: npt.NDArray = raw_dPcgo_dSg - raw_dPcgo_dSo
+    else:
+        zeros: npt.NDArray = np.zeros_like(water_saturation_grid, dtype=np.float64)
+        dPcow_dSw_eff = zeros
+        dPcow_dSg_eff = zeros.copy()
+        dPcgo_dSw_eff = zeros.copy()
+        dPcgo_dSg_eff = zeros.copy()
+
+    return (
+        dkrw_dSw,
+        dkrw_dSo,
+        dkrw_dSg,
+        dkro_dSw,
+        dkro_dSo,
+        dkro_dSg,
+        dkrg_dSw,
+        dkrg_dSo,
+        dkrg_dSg,
+        dPcow_dSw_eff,
+        dPcow_dSg_eff,
+        dPcgo_dSw_eff,
+        dPcgo_dSg_eff,
+    )
+
+
+@numba.njit(parallel=True, cache=True)
+def assemble_analytical_jacobian(
+    cell_count_x: int,
+    cell_count_y: int,
+    cell_count_z: int,
+    thickness_grid: ThreeDimensionalGrid,
+    cell_size_x: float,
+    cell_size_y: float,
+    oil_pressure_grid: ThreeDimensionalGrid,
+    water_density_grid: ThreeDimensionalGrid,
+    gas_density_grid: ThreeDimensionalGrid,
+    elevation_grid: ThreeDimensionalGrid,
+    gravitational_constant: float,
+    water_mobility_grid_x: ThreeDimensionalGrid,
+    water_mobility_grid_y: ThreeDimensionalGrid,
+    water_mobility_grid_z: ThreeDimensionalGrid,
+    gas_mobility_grid_x: ThreeDimensionalGrid,
+    gas_mobility_grid_y: ThreeDimensionalGrid,
+    gas_mobility_grid_z: ThreeDimensionalGrid,
+    oil_water_capillary_pressure_grid: ThreeDimensionalGrid,
+    gas_oil_capillary_pressure_grid: ThreeDimensionalGrid,
+    dkrw_dSw_grid: ThreeDimensionalGrid,
+    dkrw_dSo_grid: ThreeDimensionalGrid,
+    dkrw_dSg_grid: ThreeDimensionalGrid,
+    dkrg_dSw_grid: ThreeDimensionalGrid,
+    dkrg_dSo_grid: ThreeDimensionalGrid,
+    dkrg_dSg_grid: ThreeDimensionalGrid,
+    dPcow_dSw_eff_grid: ThreeDimensionalGrid,
+    dPcow_dSg_eff_grid: ThreeDimensionalGrid,
+    dPcgo_dSw_eff_grid: ThreeDimensionalGrid,
+    dPcgo_dSg_eff_grid: ThreeDimensionalGrid,
+    water_viscosity_grid: ThreeDimensionalGrid,
+    gas_viscosity_grid: ThreeDimensionalGrid,
+    absolute_permeability_x_grid: ThreeDimensionalGrid,
+    absolute_permeability_y_grid: ThreeDimensionalGrid,
+    absolute_permeability_z_grid: ThreeDimensionalGrid,
+    porosity_grid: ThreeDimensionalGrid,
+    time_step_in_days: float,
+) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    """
+    Assemble the (2N x 2N) saturation Jacobian in COO format using analytical
+    derivatives of the residual.
+
+    The residual equations are (per interior cell i)::
+
+        R_w[i] = (phi*V/dt)*(Sw_i - Sw_old) - sum_faces(F_w_face) - qw - PVT_w
+        R_g[i] = (phi*V/dt)*(Sg_i - Sg_old) - sum_faces(F_g_face) - qg - PVT_g
+
+    Face fluxes::
+
+        F_w = lambda_w_up * delta_Phi_w * T
+        F_g = lambda_g_up * delta_Phi_g * T
+
+        delta_Phi_w = (Po_j - Po_i) - (Pcow_j - Pcow_i) - rho_w*g*(z_j - z_i)
+        delta_Phi_g = (Po_j - Po_i) + (Pcgo_j - Pcgo_i) - rho_g*g*(z_j - z_i)
+
+    **Jacobian contributions per face**
+
+    Free variables are Sw and Sg only (So = 1 - Sw - Sg is derived).
+    For any phase alpha and free variable beta:
+
+    Effective relperm derivatives (So projected out via dSo/dSw = dSo/dSg = -1)::
+
+        dkr_alpha/dSw_eff = dkr_alpha/dSw + dkr_alpha/dSo * (-1)
+        dkr_alpha/dSg_eff = dkr_alpha/dSg + dkr_alpha/dSo * (-1)
+
+    Mobility derivative (upwind cell only)::
+
+        dF_alpha/dSbeta_up = (k_up/mu_alpha) * (dkr_alpha/dSbeta_eff_up) * delta_Phi_alpha * T
+
+    Capillary potential derivative (both face cells)::
+
+        dF_w/dSbeta = lambda_w_up * (-dPcow_i/dSbeta_eff) * T   when beta belongs to cell i
+        dF_w/dSbeta = lambda_w_up * (+dPcow_j/dSbeta_eff) * T   when beta belongs to cell j
+
+    Same pattern for gas with dPcgo.
+
+    Residual convention R = accum - sum_F - wells, so dR/dS = -dF/dS for flux
+    terms and +phi*V/dt for the accumulation diagonal.
+
+    Oil relative permeability derivatives (dkro grids) are not needed by the
+    water and gas residual equations directly, since the water and gas
+    mobilities depend only on krw and krg respectively.  They are omitted from
+    the function signature.
+
+    Note: well derivatives are omitted (second-order correction).
+
+    :return: (rows, cols, vals) COO arrays of length <= 28*N.
+    """
+    cells_per_slice = (cell_count_y - 2) * (cell_count_z - 2)
+    # Worst-case: 2 accumulation entries + 6 faces * 4 entries each = 26 per cell.
+    # We allocate 28 for headroom.
+    max_nnz_per_slice = 28 * cells_per_slice
+    slice_count = cell_count_x - 2
+
+    all_rows = np.empty((slice_count, max_nnz_per_slice), dtype=np.int32)
+    all_cols = np.empty((slice_count, max_nnz_per_slice), dtype=np.int32)
+    all_vals = np.empty((slice_count, max_nnz_per_slice), dtype=np.float64)
+    slice_fill = np.zeros(slice_count, dtype=np.int64)
+
+    for i in numba.prange(1, cell_count_x - 1):  # type: ignore
+        slice_idx = i - 1
+        local_ptr = 0
+
+        for j in range(1, cell_count_y - 1):
+            for k in range(1, cell_count_z - 1):
+                cell_idx = to_1D_index_interior_only(
+                    i, j, k, cell_count_x, cell_count_y, cell_count_z
+                )
+                row_w = 2 * cell_idx
+                row_g = 2 * cell_idx + 1
+                col_Sw_i = 2 * cell_idx
+                col_Sg_i = 2 * cell_idx + 1
+
+                cell_thickness = thickness_grid[i, j, k]
+                cell_volume = cell_size_x * cell_size_y * cell_thickness
+                accumulation_coeff = (
+                    porosity_grid[i, j, k] * cell_volume / time_step_in_days
+                )
+
+                # Accumulation — diagonal entries only
+                all_rows[slice_idx, local_ptr] = row_w
+                all_cols[slice_idx, local_ptr] = col_Sw_i
+                all_vals[slice_idx, local_ptr] = accumulation_coeff
+                local_ptr += 1
+
+                all_rows[slice_idx, local_ptr] = row_g
+                all_cols[slice_idx, local_ptr] = col_Sg_i
+                all_vals[slice_idx, local_ptr] = accumulation_coeff
+                local_ptr += 1
+
+                # Effective kr derivatives at cell i (So projected out)
+                # dkrα/dSw_eff = dkrα/dSw + dkrα/dSo * (-1)
+                # dkrα/dSg_eff = dkrα/dSg + dkrα/dSo * (-1)
+                dkrw_dSw_i_eff = dkrw_dSw_grid[i, j, k] - dkrw_dSo_grid[i, j, k]
+                dkrw_dSg_i_eff = dkrw_dSg_grid[i, j, k] - dkrw_dSo_grid[i, j, k]
+                dkrg_dSw_i_eff = dkrg_dSw_grid[i, j, k] - dkrg_dSo_grid[i, j, k]
+                dkrg_dSg_i_eff = dkrg_dSg_grid[i, j, k] - dkrg_dSo_grid[i, j, k]
+
+                # Projected capillary derivatives at cell i
+                dPcow_dSw_i = dPcow_dSw_eff_grid[i, j, k]
+                dPcow_dSg_i = dPcow_dSg_eff_grid[i, j, k]
+                dPcgo_dSw_i = dPcgo_dSw_eff_grid[i, j, k]
+                dPcgo_dSg_i = dPcgo_dSg_eff_grid[i, j, k]
+
+                # Face loop over 6 neighbours
+                for face in range(6):
+                    if face == 0:
+                        ni, nj, nk = i + 1, j, k
+                        flow_area = cell_size_y * (
+                            0.5 * (cell_thickness + thickness_grid[ni, nj, nk])
+                        )
+                        flow_length = cell_size_x
+                        lam_w_i = water_mobility_grid_x[i, j, k]
+                        lam_w_n = water_mobility_grid_x[ni, nj, nk]
+                        lam_g_i = gas_mobility_grid_x[i, j, k]
+                        lam_g_n = gas_mobility_grid_x[ni, nj, nk]
+                        k_abs_i = absolute_permeability_x_grid[i, j, k]
+                        k_abs_n = absolute_permeability_x_grid[ni, nj, nk]
+                        mu_w_i = water_viscosity_grid[i, j, k]
+                        mu_w_n = water_viscosity_grid[ni, nj, nk]
+                        mu_g_i = gas_viscosity_grid[i, j, k]
+                        mu_g_n = gas_viscosity_grid[ni, nj, nk]
+                    elif face == 1:
+                        ni, nj, nk = i - 1, j, k
+                        flow_area = cell_size_y * (
+                            0.5 * (cell_thickness + thickness_grid[ni, nj, nk])
+                        )
+                        flow_length = cell_size_x
+                        lam_w_i = water_mobility_grid_x[i, j, k]
+                        lam_w_n = water_mobility_grid_x[ni, nj, nk]
+                        lam_g_i = gas_mobility_grid_x[i, j, k]
+                        lam_g_n = gas_mobility_grid_x[ni, nj, nk]
+                        k_abs_i = absolute_permeability_x_grid[i, j, k]
+                        k_abs_n = absolute_permeability_x_grid[ni, nj, nk]
+                        mu_w_i = water_viscosity_grid[i, j, k]
+                        mu_w_n = water_viscosity_grid[ni, nj, nk]
+                        mu_g_i = gas_viscosity_grid[i, j, k]
+                        mu_g_n = gas_viscosity_grid[ni, nj, nk]
+                    elif face == 2:
+                        ni, nj, nk = i, j + 1, k
+                        flow_area = cell_size_x * (
+                            0.5 * (cell_thickness + thickness_grid[ni, nj, nk])
+                        )
+                        flow_length = cell_size_y
+                        lam_w_i = water_mobility_grid_y[i, j, k]
+                        lam_w_n = water_mobility_grid_y[ni, nj, nk]
+                        lam_g_i = gas_mobility_grid_y[i, j, k]
+                        lam_g_n = gas_mobility_grid_y[ni, nj, nk]
+                        k_abs_i = absolute_permeability_y_grid[i, j, k]
+                        k_abs_n = absolute_permeability_y_grid[ni, nj, nk]
+                        mu_w_i = water_viscosity_grid[i, j, k]
+                        mu_w_n = water_viscosity_grid[ni, nj, nk]
+                        mu_g_i = gas_viscosity_grid[i, j, k]
+                        mu_g_n = gas_viscosity_grid[ni, nj, nk]
+                    elif face == 3:
+                        ni, nj, nk = i, j - 1, k
+                        flow_area = cell_size_x * (
+                            0.5 * (cell_thickness + thickness_grid[ni, nj, nk])
+                        )
+                        flow_length = cell_size_y
+                        lam_w_i = water_mobility_grid_y[i, j, k]
+                        lam_w_n = water_mobility_grid_y[ni, nj, nk]
+                        lam_g_i = gas_mobility_grid_y[i, j, k]
+                        lam_g_n = gas_mobility_grid_y[ni, nj, nk]
+                        k_abs_i = absolute_permeability_y_grid[i, j, k]
+                        k_abs_n = absolute_permeability_y_grid[ni, nj, nk]
+                        mu_w_i = water_viscosity_grid[i, j, k]
+                        mu_w_n = water_viscosity_grid[ni, nj, nk]
+                        mu_g_i = gas_viscosity_grid[i, j, k]
+                        mu_g_n = gas_viscosity_grid[ni, nj, nk]
+                    elif face == 4:
+                        ni, nj, nk = i, j, k + 1
+                        ni_th = thickness_grid[ni, nj, nk]
+                        h_sum = cell_thickness + ni_th
+                        harmonic_th = (
+                            2.0 * cell_thickness * ni_th / h_sum if h_sum > 0.0 else 0.0
+                        )
+                        flow_area = cell_size_x * cell_size_y
+                        flow_length = harmonic_th if harmonic_th > 0.0 else 1.0
+                        lam_w_i = water_mobility_grid_z[i, j, k]
+                        lam_w_n = water_mobility_grid_z[ni, nj, nk]
+                        lam_g_i = gas_mobility_grid_z[i, j, k]
+                        lam_g_n = gas_mobility_grid_z[ni, nj, nk]
+                        k_abs_i = absolute_permeability_z_grid[i, j, k]
+                        k_abs_n = absolute_permeability_z_grid[ni, nj, nk]
+                        mu_w_i = water_viscosity_grid[i, j, k]
+                        mu_w_n = water_viscosity_grid[ni, nj, nk]
+                        mu_g_i = gas_viscosity_grid[i, j, k]
+                        mu_g_n = gas_viscosity_grid[ni, nj, nk]
+                    else:  # face == 5
+                        ni, nj, nk = i, j, k - 1
+                        ni_th = thickness_grid[ni, nj, nk]
+                        h_sum = cell_thickness + ni_th
+                        harmonic_th = (
+                            2.0 * cell_thickness * ni_th / h_sum if h_sum > 0.0 else 0.0
+                        )
+                        flow_area = cell_size_x * cell_size_y
+                        flow_length = harmonic_th if harmonic_th > 0.0 else 1.0
+                        lam_w_i = water_mobility_grid_z[i, j, k]
+                        lam_w_n = water_mobility_grid_z[ni, nj, nk]
+                        lam_g_i = gas_mobility_grid_z[i, j, k]
+                        lam_g_n = gas_mobility_grid_z[ni, nj, nk]
+                        k_abs_i = absolute_permeability_z_grid[i, j, k]
+                        k_abs_n = absolute_permeability_z_grid[ni, nj, nk]
+                        mu_w_i = water_viscosity_grid[i, j, k]
+                        mu_w_n = water_viscosity_grid[ni, nj, nk]
+                        mu_g_i = gas_viscosity_grid[i, j, k]
+                        mu_g_n = gas_viscosity_grid[ni, nj, nk]
+
+                    # Skip ghost cells
+                    if (
+                        ni < 1
+                        or ni >= cell_count_x - 1
+                        or nj < 1
+                        or nj >= cell_count_y - 1
+                        or nk < 1
+                        or nk >= cell_count_z - 1
+                    ):
+                        continue
+
+                    transmissibility = flow_area / flow_length
+
+                    # Phase potentials
+                    delta_po = (
+                        oil_pressure_grid[ni, nj, nk] - oil_pressure_grid[i, j, k]
+                    )
+                    delta_z = elevation_grid[ni, nj, nk] - elevation_grid[i, j, k]
+                    delta_pcow = (
+                        oil_water_capillary_pressure_grid[ni, nj, nk]
+                        - oil_water_capillary_pressure_grid[i, j, k]
+                    )
+                    delta_pcgo = (
+                        gas_oil_capillary_pressure_grid[ni, nj, nk]
+                        - gas_oil_capillary_pressure_grid[i, j, k]
+                    )
+                    delta_phi_w = (
+                        delta_po
+                        - delta_pcow
+                        - water_density_grid[i, j, k] * gravitational_constant * delta_z
+                    )
+                    delta_phi_g = (
+                        delta_po
+                        + delta_pcgo
+                        - gas_density_grid[i, j, k] * gravitational_constant * delta_z
+                    )
+
+                    # Neighbour 1D index
+                    neigh_idx = to_1D_index_interior_only(
+                        ni, nj, nk, cell_count_x, cell_count_y, cell_count_z
+                    )
+                    col_Sw_n = 2 * neigh_idx
+                    col_Sg_n = 2 * neigh_idx + 1
+
+                    # Effective kr derivatives at neighbour n
+                    dkrw_dSw_n_eff = (
+                        dkrw_dSw_grid[ni, nj, nk] - dkrw_dSo_grid[ni, nj, nk]
+                    )
+                    dkrw_dSg_n_eff = (
+                        dkrw_dSg_grid[ni, nj, nk] - dkrw_dSo_grid[ni, nj, nk]
+                    )
+                    dkrg_dSw_n_eff = (
+                        dkrg_dSw_grid[ni, nj, nk] - dkrg_dSo_grid[ni, nj, nk]
+                    )
+                    dkrg_dSg_n_eff = (
+                        dkrg_dSg_grid[ni, nj, nk] - dkrg_dSo_grid[ni, nj, nk]
+                    )
+
+                    # Projected capillary derivatives at neighbour n
+                    dPcow_dSw_n = dPcow_dSw_eff_grid[ni, nj, nk]
+                    dPcow_dSg_n = dPcow_dSg_eff_grid[ni, nj, nk]
+                    dPcgo_dSw_n = dPcgo_dSw_eff_grid[ni, nj, nk]
+                    dPcgo_dSg_n = dPcgo_dSg_eff_grid[ni, nj, nk]
+
+                    # WATER flux derivatives
+                    # dF_w = (mob_term) + (cap_term)
+                    # mob_term: only for upwind cell
+                    #   dF_w/dSbeta_up = (k_abs_up/mu_w) * dkrw/dSbeta_eff_up * delta_phi_w * T
+                    # cap_term: both cells
+                    #   dF_w/dSbeta_i = lam_w_up * (-dPcow_i/dSbeta_eff) * T
+                    #   dF_w/dSbeta_n = lam_w_up * (+dPcow_n/dSbeta_eff) * T
+                    # dR_w/dS = -dF_w/dS
+                    lam_w_up = lam_w_i if delta_phi_w >= 0.0 else lam_w_n
+
+                    if delta_phi_w >= 0.0:
+                        # i upwind: mob contribution to diagonal (i)
+                        inv_mu_w_i = 1.0 / mu_w_i if mu_w_i > 0.0 else 0.0
+                        dFw_mob_dSw_i = (
+                            k_abs_i
+                            * inv_mu_w_i
+                            * dkrw_dSw_i_eff
+                            * delta_phi_w
+                            * transmissibility
+                        )
+                        dFw_mob_dSg_i = (
+                            k_abs_i
+                            * inv_mu_w_i
+                            * dkrw_dSg_i_eff
+                            * delta_phi_w
+                            * transmissibility
+                        )
+                        dFw_mob_dSw_n = 0.0
+                        dFw_mob_dSg_n = 0.0
+                    else:
+                        # n upwind: mob contribution to off-diagonal (n)
+                        inv_mu_w_n = 1.0 / mu_w_n if mu_w_n > 0.0 else 0.0
+                        dFw_mob_dSw_i = 0.0
+                        dFw_mob_dSg_i = 0.0
+                        dFw_mob_dSw_n = (
+                            k_abs_n
+                            * inv_mu_w_n
+                            * dkrw_dSw_n_eff
+                            * delta_phi_w
+                            * transmissibility
+                        )
+                        dFw_mob_dSg_n = (
+                            k_abs_n
+                            * inv_mu_w_n
+                            * dkrw_dSg_n_eff
+                            * delta_phi_w
+                            * transmissibility
+                        )
+
+                    # Capillary contributions (always both cells)
+                    dFw_cap_dSw_i = lam_w_up * (-dPcow_dSw_i) * transmissibility
+                    dFw_cap_dSg_i = lam_w_up * (-dPcow_dSg_i) * transmissibility
+                    dFw_cap_dSw_n = lam_w_up * (+dPcow_dSw_n) * transmissibility
+                    dFw_cap_dSg_n = lam_w_up * (+dPcow_dSg_n) * transmissibility
+
+                    # Total dF_w/dS → dR_w/dS = -dF_w/dS
+                    dRw_dSw_i = -(dFw_mob_dSw_i + dFw_cap_dSw_i)
+                    dRw_dSg_i = -(dFw_mob_dSg_i + dFw_cap_dSg_i)
+                    dRw_dSw_n = -(dFw_mob_dSw_n + dFw_cap_dSw_n)
+                    dRw_dSg_n = -(dFw_mob_dSg_n + dFw_cap_dSg_n)
+
+                    # GAS flux derivatives (same structure as water)
+                    lam_g_up = lam_g_i if delta_phi_g >= 0.0 else lam_g_n
+
+                    if delta_phi_g >= 0.0:
+                        inv_mu_g_i = 1.0 / mu_g_i if mu_g_i > 0.0 else 0.0
+                        dFg_mob_dSw_i = (
+                            k_abs_i
+                            * inv_mu_g_i
+                            * dkrg_dSw_i_eff
+                            * delta_phi_g
+                            * transmissibility
+                        )
+                        dFg_mob_dSg_i = (
+                            k_abs_i
+                            * inv_mu_g_i
+                            * dkrg_dSg_i_eff
+                            * delta_phi_g
+                            * transmissibility
+                        )
+                        dFg_mob_dSw_n = 0.0
+                        dFg_mob_dSg_n = 0.0
+                    else:
+                        inv_mu_g_n = 1.0 / mu_g_n if mu_g_n > 0.0 else 0.0
+                        dFg_mob_dSw_i = 0.0
+                        dFg_mob_dSg_i = 0.0
+                        dFg_mob_dSw_n = (
+                            k_abs_n
+                            * inv_mu_g_n
+                            * dkrg_dSw_n_eff
+                            * delta_phi_g
+                            * transmissibility
+                        )
+                        dFg_mob_dSg_n = (
+                            k_abs_n
+                            * inv_mu_g_n
+                            * dkrg_dSg_n_eff
+                            * delta_phi_g
+                            * transmissibility
+                        )
+
+                    dFg_cap_dSw_i = lam_g_up * (-dPcgo_dSw_i) * transmissibility
+                    dFg_cap_dSg_i = lam_g_up * (-dPcgo_dSg_i) * transmissibility
+                    dFg_cap_dSw_n = lam_g_up * (+dPcgo_dSw_n) * transmissibility
+                    dFg_cap_dSg_n = lam_g_up * (+dPcgo_dSg_n) * transmissibility
+
+                    dRg_dSw_i = -(dFg_mob_dSw_i + dFg_cap_dSw_i)
+                    dRg_dSg_i = -(dFg_mob_dSg_i + dFg_cap_dSg_i)
+                    dRg_dSw_n = -(dFg_mob_dSw_n + dFg_cap_dSw_n)
+                    dRg_dSg_n = -(dFg_mob_dSg_n + dFg_cap_dSg_n)
+
+                    # Write diagonal entries (cell i)
+                    if dRw_dSw_i != 0.0:
+                        all_rows[slice_idx, local_ptr] = row_w
+                        all_cols[slice_idx, local_ptr] = col_Sw_i
+                        all_vals[slice_idx, local_ptr] = dRw_dSw_i
+                        local_ptr += 1
+                    if dRw_dSg_i != 0.0:
+                        all_rows[slice_idx, local_ptr] = row_w
+                        all_cols[slice_idx, local_ptr] = col_Sg_i
+                        all_vals[slice_idx, local_ptr] = dRw_dSg_i
+                        local_ptr += 1
+                    if dRg_dSw_i != 0.0:
+                        all_rows[slice_idx, local_ptr] = row_g
+                        all_cols[slice_idx, local_ptr] = col_Sw_i
+                        all_vals[slice_idx, local_ptr] = dRg_dSw_i
+                        local_ptr += 1
+                    if dRg_dSg_i != 0.0:
+                        all_rows[slice_idx, local_ptr] = row_g
+                        all_cols[slice_idx, local_ptr] = col_Sg_i
+                        all_vals[slice_idx, local_ptr] = dRg_dSg_i
+                        local_ptr += 1
+
+                    # Write off-diagonal entries (neighbour n, interior only)
+                    if neigh_idx >= 0:
+                        if dRw_dSw_n != 0.0:
+                            all_rows[slice_idx, local_ptr] = row_w
+                            all_cols[slice_idx, local_ptr] = col_Sw_n
+                            all_vals[slice_idx, local_ptr] = dRw_dSw_n
+                            local_ptr += 1
+                        if dRw_dSg_n != 0.0:
+                            all_rows[slice_idx, local_ptr] = row_w
+                            all_cols[slice_idx, local_ptr] = col_Sg_n
+                            all_vals[slice_idx, local_ptr] = dRw_dSg_n
+                            local_ptr += 1
+                        if dRg_dSw_n != 0.0:
+                            all_rows[slice_idx, local_ptr] = row_g
+                            all_cols[slice_idx, local_ptr] = col_Sw_n
+                            all_vals[slice_idx, local_ptr] = dRg_dSw_n
+                            local_ptr += 1
+                        if dRg_dSg_n != 0.0:
+                            all_rows[slice_idx, local_ptr] = row_g
+                            all_cols[slice_idx, local_ptr] = col_Sg_n
+                            all_vals[slice_idx, local_ptr] = dRg_dSg_n
+                            local_ptr += 1
+
+                # end face loop
+            # end k
+        # end j
+
+        slice_fill[slice_idx] = local_ptr
+    # end parallel i
+
+    # Sequential compaction
+    total_nnz = 0
+    for s in range(slice_count):
+        total_nnz += slice_fill[s]
+
+    out_rows = np.empty(total_nnz, dtype=np.int32)
+    out_cols = np.empty(total_nnz, dtype=np.int32)
+    out_vals = np.empty(total_nnz, dtype=np.float64)
+    write_ptr = 0
+    for s in range(slice_count):
+        count = slice_fill[s]
+        out_rows[write_ptr : write_ptr + count] = all_rows[s, :count]
+        out_cols[write_ptr : write_ptr + count] = all_cols[s, :count]
+        out_vals[write_ptr : write_ptr + count] = all_vals[s, :count]
+        write_ptr += count
+
+    return out_rows, out_cols, out_vals
+
+
+def assemble_jacobian(
+    config: Config,
+    saturation_vector: npt.NDArray,
+    residual_base: npt.NDArray,
+    interior_cell_count: int,
+    cell_count_x: int,
+    cell_count_y: int,
+    cell_count_z: int,
+    water_saturation_grid: ThreeDimensionalGrid,
+    oil_saturation_grid: ThreeDimensionalGrid,
+    gas_saturation_grid: ThreeDimensionalGrid,
+    old_water_saturation_grid: ThreeDimensionalGrid,
+    old_gas_saturation_grid: ThreeDimensionalGrid,
+    oil_pressure_grid: ThreeDimensionalGrid,
+    pressure_change_grid: ThreeDimensionalGrid,
+    rock_properties: RockProperties[ThreeDimensions],
+    fluid_properties: FluidProperties[ThreeDimensions],
+    wells: Wells[ThreeDimensions],
+    thickness_grid: ThreeDimensionalGrid,
+    cell_size_x: float,
+    cell_size_y: float,
+    elevation_grid: ThreeDimensionalGrid,
+    porosity_grid: ThreeDimensionalGrid,
+    time: float,
+    time_step_in_days: float,
+    gravitational_constant: float,
+    water_compressibility_grid: ThreeDimensionalGrid,
+    gas_compressibility_grid: ThreeDimensionalGrid,
+    rock_compressibility: float,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
+    injection_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
+    production_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
+    pad_width: int,
+    dtype: npt.DTypeLike,
+    capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
+    mobility_grids: typing.Tuple[
+        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
+        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
+        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
+    ],
+) -> csr_matrix:
+    """
+    Dispatch to the numerical or analytical Jacobian assembler based on
+    `config.jacobian_assembly_method`.
+
+    Both paths receive the pre-computed `capillary_pressure_grids` and
+    `mobility_grids` from the current Newton iteration.
+
+    The analytical path uses them to avoid recomputing the forward values
+    needed for upwind selection inside the Numba kernel. The numerical path
+    ignores them. Each perturbed residual evaluation recomputes internally.
+
+    :param capillary_pressure_grids: `(Pcow_grid, Pcgo_grid)` at the current
+        saturation iterate.  Used by the analytical Jacobian kernel for upwind
+        potential differences.
+    :param mobility_grids: Directional mobility grids at the current iterate.
+        Used by the analytical Jacobian kernel.
+    :return: Jacobian as a (2N x 2N) CSR sparse matrix.
+    """
+    if config.jacobian_assembly_method == "analytical":
+        (
+            dkrw_dSw_grid,
+            dkrw_dSo_grid,
+            dkrw_dSg_grid,
+            _,
+            _,
+            _,
+            dkrg_dSw_grid,
+            dkrg_dSo_grid,
+            dkrg_dSg_grid,
+            dPcow_dSw_eff_grid,
+            dPcow_dSg_eff_grid,
+            dPcgo_dSw_eff_grid,
+            dPcgo_dSg_eff_grid,
+        ) = compute_relperm_and_capillary_pressure_derivative_grids(
+            water_saturation_grid=water_saturation_grid,
+            oil_saturation_grid=oil_saturation_grid,
+            gas_saturation_grid=gas_saturation_grid,
+            rock_properties=rock_properties,
+            config=config,
+        )
+
+        oil_water_capillary_pressure_grid, gas_oil_capillary_pressure_grid = (
+            capillary_pressure_grids
+        )
+        (
+            (water_mobility_grid_x, _, gas_mobility_grid_x),
+            (water_mobility_grid_y, _, gas_mobility_grid_y),
+            (water_mobility_grid_z, _, gas_mobility_grid_z),
+        ) = mobility_grids
+
+        rows, cols, vals = assemble_analytical_jacobian(
+            cell_count_x=cell_count_x,
+            cell_count_y=cell_count_y,
+            cell_count_z=cell_count_z,
+            thickness_grid=thickness_grid,
+            cell_size_x=cell_size_x,
+            cell_size_y=cell_size_y,
+            oil_pressure_grid=oil_pressure_grid,
+            water_density_grid=fluid_properties.water_density_grid,
+            gas_density_grid=fluid_properties.gas_density_grid,
+            elevation_grid=elevation_grid,
+            gravitational_constant=gravitational_constant,
+            water_mobility_grid_x=water_mobility_grid_x,
+            water_mobility_grid_y=water_mobility_grid_y,
+            water_mobility_grid_z=water_mobility_grid_z,
+            gas_mobility_grid_x=gas_mobility_grid_x,
+            gas_mobility_grid_y=gas_mobility_grid_y,
+            gas_mobility_grid_z=gas_mobility_grid_z,
+            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+            dkrw_dSw_grid=dkrw_dSw_grid,
+            dkrw_dSo_grid=dkrw_dSo_grid,
+            dkrw_dSg_grid=dkrw_dSg_grid,
+            dkrg_dSw_grid=dkrg_dSw_grid,
+            dkrg_dSo_grid=dkrg_dSo_grid,
+            dkrg_dSg_grid=dkrg_dSg_grid,
+            dPcow_dSw_eff_grid=dPcow_dSw_eff_grid,
+            dPcow_dSg_eff_grid=dPcow_dSg_eff_grid,
+            dPcgo_dSw_eff_grid=dPcgo_dSw_eff_grid,
+            dPcgo_dSg_eff_grid=dPcgo_dSg_eff_grid,
+            water_viscosity_grid=fluid_properties.water_viscosity_grid,
+            gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
+            absolute_permeability_x_grid=rock_properties.absolute_permeability.x,
+            absolute_permeability_y_grid=rock_properties.absolute_permeability.y,
+            absolute_permeability_z_grid=rock_properties.absolute_permeability.z,
+            porosity_grid=porosity_grid,
+            time_step_in_days=time_step_in_days,
+        )
+        system_size = 2 * interior_cell_count
+        coo = coo_matrix(
+            (vals, (rows, cols)),
+            shape=(system_size, system_size),
+        )
+        return coo.tocsr()  # tocsr() sums duplicate entries automatically
+
+    # Numerical path
+    return assemble_numerical_jacobian(
+        saturation_vector=saturation_vector,
+        residual_base=residual_base,
+        interior_cell_count=interior_cell_count,
+        cell_count_x=cell_count_x,
+        cell_count_y=cell_count_y,
+        cell_count_z=cell_count_z,
+        water_saturation_grid=water_saturation_grid,
+        oil_saturation_grid=oil_saturation_grid,
+        gas_saturation_grid=gas_saturation_grid,
+        old_water_saturation_grid=old_water_saturation_grid,
+        old_gas_saturation_grid=old_gas_saturation_grid,
+        oil_pressure_grid=oil_pressure_grid,
+        pressure_change_grid=pressure_change_grid,
+        rock_properties=rock_properties,
+        fluid_properties=fluid_properties,
+        wells=wells,
+        config=config,
+        thickness_grid=thickness_grid,
+        cell_size_x=cell_size_x,
+        cell_size_y=cell_size_y,
+        elevation_grid=elevation_grid,
+        porosity_grid=porosity_grid,
+        time=time,
+        time_step_in_days=time_step_in_days,
+        gravitational_constant=gravitational_constant,
+        water_compressibility_grid=water_compressibility_grid,
+        gas_compressibility_grid=gas_compressibility_grid,
+        rock_compressibility=rock_compressibility,
+        boundary_conditions=boundary_conditions,
+        injection_grid=injection_grid,
+        production_grid=production_grid,
+        pad_width=pad_width,
+        dtype=dtype,
+    )
 
 
 def solve_implicit_saturation(
@@ -998,16 +1769,13 @@ def solve_implicit_saturation(
     with backtracking line search.
 
     Pressure is fixed from the implicit pressure solve. The Newton loop
-    iterates on saturation until either:
-      1. The relative residual norm drops below `newton_tolerance`, OR
-      2. The max saturation change per iteration drops below
-         `saturation_convergence_tolerance` and the relative residual
-         is below 1e-3 (i.e. the solution is effectively converged but
-         the upwind scheme discontinuity prevents further residual reduction).
+    iterates on saturations until either:
 
-    The Newton update is damped so that no single cell changes saturation
-    by more than `max_saturation_step` per iteration. This prevents
-    upwind direction flipping that causes limit-cycle oscillation.
+    - The relative residual norm drops below `newton_tolerance`, or
+    - The maximum saturation change per iteration drops below
+      `saturation_convergence_tolerance` and the relative residual is
+      below 1e-3 (effective convergence despite the upwind discontinuity
+      floor).
     """
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
     dtype = get_dtype()
@@ -1018,7 +1786,6 @@ def solve_implicit_saturation(
         / c.GRAVITATIONAL_CONSTANT_LBM_FT_PER_LBF_S2
     )
 
-    # Initial guess: old-time saturations
     water_saturation_grid = old_water_saturation_grid.copy()
     oil_saturation_grid = old_oil_saturation_grid.copy()
     gas_saturation_grid = old_gas_saturation_grid.copy()
@@ -1037,14 +1804,13 @@ def solve_implicit_saturation(
     final_iteration = 0
     final_residual_norm = 0.0
 
-    # Residual stagnation tracking: detect when Newton iterations stop making
-    # progress (e.g., phase appearance discontinuity makes Jacobian ineffective).
     best_residual_norm = float("inf")
     stagnation_count = 0
-    stagnation_patience = 3  # consecutive flat iterations before breaking
-    stagnation_improvement_threshold = 0.01  # require 1% improvement
+    stagnation_patience = 3
+    stagnation_improvement_threshold = 0.01
 
-    residual_kwargs = dict(  # noqa
+    # Shared kwargs the remains unchanged for `compute_residual`
+    shared_kwargs = dict(  # noqa
         old_water_saturation_grid=old_water_saturation_grid,
         old_gas_saturation_grid=old_gas_saturation_grid,
         oil_pressure_grid=oil_pressure_grid,
@@ -1075,12 +1841,28 @@ def solve_implicit_saturation(
     )
 
     for iteration in range(max_newton_iterations):
-        # Evaluate residual at current iterate
-        residual_water, residual_gas = evaluate_residual(
+        # (Re-)compute all saturation-dependent properties once per iteration
+        (
+            relative_mobility_grids,
+            capillary_pressure_grids,
+            mobility_grids,
+        ) = compute_saturation_dependent_properties(
             water_saturation_grid=water_saturation_grid,
             oil_saturation_grid=oil_saturation_grid,
             gas_saturation_grid=gas_saturation_grid,
-            **residual_kwargs,  # type: ignore
+            rock_properties=rock_properties,
+            fluid_properties=fluid_properties,
+            config=config,
+        )
+
+        # Evaluate residual using the pre-computed properties
+        residual_water, residual_gas = _compute_residual(
+            water_saturation_grid=water_saturation_grid,
+            gas_saturation_grid=gas_saturation_grid,
+            relative_mobility_grids=relative_mobility_grids,
+            capillary_pressure_grids=capillary_pressure_grids,
+            mobility_grids=mobility_grids,
+            **shared_kwargs,  # type: ignore[arg-type]
         )
         residual_vector = interleave_residuals(residual_water, residual_gas)
         residual_norm = np.linalg.norm(residual_vector)
@@ -1091,13 +1873,7 @@ def solve_implicit_saturation(
 
         relative_residual_norm = residual_norm / initial_residual_norm
 
-        # Check convergence using two criteria:
-        # Relative residual below tolerance, or
-        # Saturation changes negligible and residual is reasonable (<1e-3).
-        # This second criterion handles the upwind scheme discontinuity
-        # which creates an irreducible residual floor.
         residual_converged = relative_residual_norm < newton_tolerance and iteration > 0
-        # Use the last recorded saturation update for the combined check
         last_max_ds = (
             convergence_history[-1].max_saturation_update
             if convergence_history
@@ -1131,7 +1907,8 @@ def solve_implicit_saturation(
             break
 
         # Assemble Jacobian
-        jacobian = assemble_numerical_jacobian(
+        jacobian = assemble_jacobian(
+            config=config,
             saturation_vector=saturation_vector,
             residual_base=residual_vector,
             interior_cell_count=interior_cell_count,
@@ -1148,7 +1925,6 @@ def solve_implicit_saturation(
             rock_properties=rock_properties,
             fluid_properties=fluid_properties,
             wells=wells,
-            config=config,
             thickness_grid=thickness_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
@@ -1165,9 +1941,11 @@ def solve_implicit_saturation(
             production_grid=production_grid,
             pad_width=pad_width,
             dtype=dtype,
+            capillary_pressure_grids=capillary_pressure_grids,
+            mobility_grids=mobility_grids,
         )
 
-        # Solve linear system: J * delta_saturation = -R
+        # Solve the linear system: J * dS = -R
         negative_residual = -residual_vector
         delta_saturation, _ = solve_linear_system(
             A_csr=jacobian,
@@ -1179,9 +1957,7 @@ def solve_implicit_saturation(
             fallback_to_direct=True,
         )
 
-        # Damp the Newton step so no single cell changes saturation by
-        # more than max_saturation_step. This prevents large updates that
-        # flip upwind directions and cause limit-cycle oscillation.
+        # Damp Newton step
         max_raw_delta = float(np.max(np.abs(delta_saturation)))
         if max_raw_delta > max_saturation_step:
             damping_factor = max_saturation_step / max_raw_delta
@@ -1191,9 +1967,7 @@ def solve_implicit_saturation(
                 f"(max |delta_S| = {max_raw_delta:.4f} > {max_saturation_step})"
             )
 
-        # Backtracking line search: start with full Newton step, halve on failure.
-        # Initialize trial state with full step (alpha=1) so variables are always
-        # bound even if line_search_max_cuts is 0.
+        # Backtracking line search
         line_search_factor = 1.0
         saturation_vector_trial = saturation_vector + delta_saturation
         project_to_feasible(saturation_vector_trial)
@@ -1211,27 +1985,24 @@ def solve_implicit_saturation(
         )
 
         for _ in range(line_search_max_cuts):
-            # Evaluate residual at trial point
-            residual_water_trial, residual_gas_trial = evaluate_residual(
+            residual_water_trial, residual_gas_trial = compute_residual(
                 water_saturation_grid=water_saturation_grid_trial,
                 oil_saturation_grid=oil_saturation_grid_trial,
                 gas_saturation_grid=gas_saturation_grid_trial,
-                **residual_kwargs,  # type: ignore
+                **shared_kwargs,  # type: ignore[arg-type]
             )
             residual_trial = interleave_residuals(
                 residual_water=residual_water_trial,
                 residual_gas=residual_gas_trial,
             )
-            residual_norm_trial = np.linalg.norm(residual_trial)
-
-            if residual_norm_trial < residual_norm:
+            if np.linalg.norm(residual_trial) < residual_norm:
                 break
 
-            # Cut step size in half and recompute trial
             line_search_factor *= 0.5
             saturation_vector_trial = (
                 saturation_vector + line_search_factor * delta_saturation
             )
+            project_to_feasible(saturation_vector_trial)
             water_saturation_grid_trial = water_saturation_grid.copy()
             oil_saturation_grid_trial = oil_saturation_grid.copy()
             gas_saturation_grid_trial = gas_saturation_grid.copy()
@@ -1249,7 +2020,6 @@ def solve_implicit_saturation(
             np.max(np.abs(saturation_vector_trial - saturation_vector))
         )
 
-        # Update state
         saturation_vector = saturation_vector_trial
         water_saturation_grid = water_saturation_grid_trial
         oil_saturation_grid = oil_saturation_grid_trial
@@ -1276,9 +2046,6 @@ def solve_implicit_saturation(
         final_iteration = iteration + 1
         final_residual_norm = residual_norm
 
-        # Detect stagnation with two mechanisms.
-        # Saturation stagnation: Newton step produces negligible updates.
-        # If the residual is acceptable, declare converged; otherwise break.
         if max_saturation_update < 1e-10:
             if relative_residual_norm < 1e-3:
                 converged = True
@@ -1295,11 +2062,6 @@ def solve_implicit_saturation(
                 )
             break
 
-        # Check for residual stagnation, i.e. when residual stops improving across iterations.
-        # This check catches cases where the Jacobian is ineffective (e.g., phase
-        # appearance discontinuity). The solver produces small but non-zero
-        # saturation changes that don't reduce the residual, so breaking early
-        # avoids wasting iterations and lets the timer cut dt.
         if residual_norm < best_residual_norm * (
             1.0 - stagnation_improvement_threshold
         ):
@@ -1324,7 +2086,6 @@ def solve_implicit_saturation(
                 )
             break
 
-    # Compute saturation changes from old to final
     max_water_saturation_change = float(
         np.max(np.abs(water_saturation_grid - old_water_saturation_grid))
     )
@@ -1392,10 +2153,10 @@ def evolve_saturation(
     :param cell_dimension: (cell_size_x, cell_size_y) in feet.
     :param thickness_grid: 3D grid of cell thicknesses (ft).
     :param elevation_grid: 3D grid of cell elevations (ft).
-    :param time_step: Current time step index.
+    :param time_step: Current time step index (unused, kept for interface symmetry).
     :param time_step_size: Time step size in seconds.
     :param rock_properties: Rock properties (permeability, porosity, etc.).
-    :param fluid_properties: Fluid properties at new pressure level.
+    :param fluid_properties: Fluid properties at the new pressure level.
     :param wells: Well definitions.
     :param config: Simulation configuration.
     :param pressure_change_grid: P_new - P_old (psi) for PVT volume correction.

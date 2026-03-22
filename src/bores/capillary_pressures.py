@@ -170,115 +170,177 @@ class TwoPhaseCapillaryPressureTable(Serializable):
     """
     Two-phase capillary pressure lookup table.
 
-    Interpolates capillary pressure for two fluid phases based on saturation values.
-    Uses `np.interp` for fast vectorized interpolation.
+    Interpolates capillary pressure for two fluid phases based on a
+    **reference saturation** value. The reference saturation can be either
+    the wetting or non-wetting phase saturation, depending on how the table
+    was constructed — e.g. a gas-oil table may be indexed by oil saturation
+    (wetting) or by gas saturation (non-wetting).
 
-    Supports both scalar and array inputs up to 3D.
+    Uses `np.interp` for fast vectorized interpolation.
+    Supports both scalar and array inputs.
     """
 
     wetting_phase: typing.Union[FluidPhase, str] = attrs.field(converter=FluidPhase)
-    """The first fluid phase (typically the wetting phase), e.g., 'water' or 'oil'."""
+    """The wetting fluid phase, e.g. WATER (oil-water system) or OIL (gas-oil system)."""
+
     non_wetting_phase: typing.Union[FluidPhase, str] = attrs.field(converter=FluidPhase)
-    """The second fluid phase (typically the non-wetting phase), e.g., 'oil' or 'gas'."""
-    wetting_phase_saturation: npt.NDArray = attrs.field(converter=bores_array)
-    """The saturation values for the wetting phase (phase1), ranging from 0 to 1."""
+    """The non-wetting fluid phase, e.g. OIL (oil-water system) or GAS (gas-oil system)."""
+
+    reference_saturation: npt.NDArray = attrs.field(converter=bores_array)
+    """
+    Saturation values used as the x-axis for interpolation, monotonically
+    increasing.  May represent either the wetting or non-wetting phase
+    saturation depending on `reference_phase`.
+    """
+
     capillary_pressure: npt.NDArray = attrs.field(converter=bores_array)
-    """Capillary pressure values (Pc = P_non-wetting - P_wetting) corresponding to saturations."""
+    """
+    Capillary pressure values `Pc = P_non_wetting - P_wetting` corresponding
+    to each `reference_saturation` point.
+    """
+
+    reference_phase: typing.Literal["wetting", "non_wetting"] = attrs.field(
+        default="wetting"
+    )
+    """
+    Which phase the `reference_saturation` axis represents.
+ 
+    - `"wetting"` — the x-axis holds wetting-phase saturation values.
+      This is the standard convention for oil-water tables (Sw axis) and for
+      gas-oil tables indexed by So.
+    - `"non_wetting"` — the x-axis holds non-wetting-phase saturation values.
+      Use this for gas-oil tables indexed by Sg.
+ 
+    This attribute does not change the interpolation mechanics.  It only
+    records which physical saturation must be supplied by the caller so that
+    `ThreePhaseCapillaryPressureTable` (and any other consumer) can dispatch
+    the correct saturation without hard-coding assumptions.
+    """
 
     def __attrs_post_init__(self) -> None:
-        """Validate table data."""
-        if len(self.wetting_phase_saturation) != len(self.capillary_pressure):
+        if self.reference_phase not in ("wetting", "non_wetting"):
             raise ValidationError(
-                f"Saturation and pressure arrays must have same length. "
-                f"Got {len(self.wetting_phase_saturation)} vs {len(self.capillary_pressure)}"
+                f"`reference_phase` must be 'wetting' or 'non_wetting', "
+                f"got {self.reference_phase!r}"
             )
-        if len(self.wetting_phase_saturation) < 2:
-            raise ValidationError("At least 2 points required for interpolation")
+        if len(self.reference_saturation) != len(self.capillary_pressure):
+            raise ValidationError(
+                f"reference_saturation and capillary_pressure arrays must have the "
+                f"same length.  Got {len(self.reference_saturation)} vs "
+                f"{len(self.capillary_pressure)}"
+            )
+        if len(self.reference_saturation) < 2:
+            raise ValidationError("At least 2 points required for interpolation.")
+        if not np.all(np.diff(self.reference_saturation) >= 0):
+            raise ValidationError(
+                "reference_saturation must be monotonically increasing."
+            )
 
-        # Ensure arrays are sorted by saturation (required for np.interp)
-        if not np.all(np.diff(self.wetting_phase_saturation) >= 0):
-            raise ValidationError(
-                "Wetting phase saturation must be monotonically increasing"
-            )
+    def _resolve_reference(
+        self,
+        wetting_saturation: FloatOrArray,
+        non_wetting_saturation: FloatOrArray,
+    ) -> FloatOrArray:
+        """
+        Return whichever saturation array corresponds to the reference axis.
+
+        :param wetting_saturation: Current wetting-phase saturation.
+        :param non_wetting_saturation: Current non-wetting-phase saturation.
+        :return: The saturation to use as the interpolation x-value.
+        """
+        if self.reference_phase == "non_wetting":
+            return non_wetting_saturation
+        return wetting_saturation
 
     def get_capillary_pressure(
-        self, wetting_phase_saturation: FloatOrArray
+        self,
+        wetting_saturation: FloatOrArray,
+        non_wetting_saturation: typing.Optional[FloatOrArray] = None,
     ) -> FloatOrArray:
         """
-        Get capillary pressure at given wetting phase saturation(s).
+        Get capillary pressure at the given saturation(s).
 
-        Uses `np.interp` for fast linear interpolation. Supports both scalar
-        and array inputs up to 3D. For out-of-bounds values, uses constant
-        extrapolation (returns edge values).
+        When `reference_phase="wetting"`, only `wetting_saturation` is
+        needed. When `reference_phase="non_wetting"`,
+        `non_wetting_saturation` must be supplied.
 
-        :param wetting_phase_saturation: Saturation of the wetting phase (scalar or array).
-        :return: Capillary pressure value(s) - type matches input type.
+        Uses `np.interp` for fast linear interpolation with constant
+        extrapolation at the boundaries.
 
-        Examples:
-        ```python
-        # Scalar input
-        pc = table.get_capillary_pressure(0.5)  # Returns float
-
-        # Array input
-        sw_grid = np.array([[0.2, 0.3], [0.4, 0.5]])
-        pc_grid = table.get_capillary_pressure(sw_grid)  # Returns same shape array
-        ```
+        :param wetting_saturation: Wetting-phase saturation (scalar or array).
+        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or
+            array). Required when `reference_phase="non_wetting"`.
+        :return: Capillary pressure value(s) matching the input shape.
         """
-        # Handle scalar input
-        is_scalar = np.isscalar(wetting_phase_saturation)
-        saturation = np.atleast_1d(wetting_phase_saturation)
-
-        # Store original shape for multi-dimensional arrays
-        original_shape = saturation.shape
-
-        # Flatten to 1D for `np.interp` (required)
-        saturation_flat = saturation.ravel(order="C")
-
-        # Fast linear interpolation using np.interp
-        # left/right specify extrapolation values for out-of-bounds
-        capillary_pressure_flat = np.interp(
-            x=saturation_flat,
-            xp=self.wetting_phase_saturation,  # type: ignore[arg-type]
-            fp=self.capillary_pressure,  # type: ignore[arg-type]
-            left=self.capillary_pressure[0],  # Extrapolate low saturations
-            right=self.capillary_pressure[-1],  # Extrapolate high saturations
+        ref = self._resolve_reference(
+            wetting_saturation,
+            non_wetting_saturation
+            if non_wetting_saturation is not None
+            else wetting_saturation,
         )
+        is_scalar = np.isscalar(ref)
+        sat = np.atleast_1d(ref)
+        original_shape = sat.shape
 
-        # Reshape back to original dimensions
-        capillary_pressure = capillary_pressure_flat.reshape(original_shape)
-        return capillary_pressure[0] if is_scalar else capillary_pressure
-
-    def __call__(
-        self, wetting_phase_saturation: FloatOrArray, **kwargs: typing.Any
-    ) -> FloatOrArray:
-        """
-        Get capillary pressure at given wetting phase saturation(s).
-
-        :param wetting_phase_saturation: Saturation of the wetting phase (scalar or array).
-        :return: Capillary pressure value(s).
-        """
-        return self.get_capillary_pressure(wetting_phase_saturation)
+        pc_flat = np.interp(
+            x=sat.ravel(),
+            xp=self.reference_saturation,  # type: ignore[arg-type]
+            fp=self.capillary_pressure,  # type: ignore[arg-type]
+            left=self.capillary_pressure[0],
+            right=self.capillary_pressure[-1],
+        )
+        pc = pc_flat.reshape(original_shape)
+        return float(pc[0]) if is_scalar else pc
 
     def get_capillary_pressure_derivative(
         self,
-        wetting_phase_saturation: FloatOrArray,
+        wetting_saturation: FloatOrArray,
+        non_wetting_saturation: typing.Optional[FloatOrArray] = None,
     ) -> FloatOrArray:
         """
-        Derivative of capillary pressure with respect to wetting-phase saturation:
-        `dPc / d(wetting-phase saturation)`.
+        Derivative of capillary pressure with respect to the reference
+        saturation axis of this table: `dPc / d(reference_saturation)`.
 
-        Uses the exact piecewise-linear slope of the tabulated capillary pressure
-        curve, the same interpolant used by `get_capillary_pressure`.  Zero
-        outside the tabulated saturation range (constant extrapolation).
+        When `reference_phase="wetting"` this is `dPc/dSw` (or `dPc/dSo`
+        for oil-wet tables).  When `reference_phase="non_wetting"` this is
+        `dPc/dSg` (for gas-oil tables indexed by Sg).
 
-        :param wetting_phase_saturation: Wetting-phase saturation (scalar or array).
+        Uses the exact piecewise-linear slope of the tabulated curve — the same
+        interpolant used by `get_capillary_pressure`.  Zero outside the
+        tabulated range (constant extrapolation).
+
+        :param wetting_saturation: Wetting-phase saturation (scalar or array).
+        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or
+            array).  Required when `reference_phase="non_wetting"`.
         :return: Derivative value(s) with the same shape as the input.
         """
+        ref = self._resolve_reference(
+            wetting_saturation,
+            non_wetting_saturation
+            if non_wetting_saturation is not None
+            else wetting_saturation,
+        )
         return piecewise_linear_slope(
-            query=wetting_phase_saturation,
-            table_x=self.wetting_phase_saturation,
+            query=ref,
+            table_x=self.reference_saturation,
             table_y=self.capillary_pressure,
         )
+
+    def __call__(
+        self,
+        wetting_saturation: FloatOrArray,
+        non_wetting_saturation: typing.Optional[FloatOrArray] = None,
+        **kwargs: typing.Any,
+    ) -> FloatOrArray:
+        """
+        Get capillary pressure at the given saturation(s).
+
+        :param wetting_saturation: Wetting-phase saturation (scalar or array).
+        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or array).
+            Required when `reference_phase="non_wetting"`.
+        :return: Capillary pressure value(s).
+        """
+        return self.get_capillary_pressure(wetting_saturation, non_wetting_saturation)
 
 
 @capillary_pressure_table
@@ -345,26 +407,57 @@ class ThreePhaseCapillaryPressureTable(
         **kwargs: typing.Any,
     ) -> CapillaryPressures:
         """
-        Compute capillary pressures for three-phase system.
+        Compute capillary pressures for the three-phase system.
 
-        Supports both scalar and array inputs.
+        Each sub-table is queried using its declared `reference_phase`:
 
-        :param water_saturation: Water saturation (fraction, 0-1) - scalar or array.
-        :param oil_saturation: Oil saturation (fraction, 0-1) - scalar or array.
-        :param gas_saturation: Gas saturation (fraction, 0-1) - scalar or array.
-        :return: `CapillaryPressures` dictionary (matching input type).
+        - `reference_phase="wetting"` — the wetting-phase saturation is passed.
+        - `reference_phase="non_wetting"` — the non-wetting-phase saturation is
+        passed.
+
+        For the oil-water table the wetting phase is either WATER or OIL.
+        For the gas-oil table the wetting phase is always OIL, but the table may
+        be indexed by So (`reference_phase="wetting"`) or by Sg
+        (`reference_phase="non_wetting"`).
+
+        :param water_saturation: Water saturation (fraction, 0-1).
+        :param oil_saturation: Oil saturation (fraction, 0-1).
+        :param gas_saturation: Gas saturation (fraction, 0-1).
+        :return: `CapillaryPressures` dictionary.
         """
-        # Oil-water capillary pressure (based on wetting phase saturation)
-        if self.oil_water_table.wetting_phase == FluidPhase.WATER:
-            pcow = self.oil_water_table(water_saturation)
-        else:
-            pcow = self.oil_water_table(oil_saturation)
+        oil_water_table = self.oil_water_table
+        gas_oil_table = self.gas_oil_table
 
-        # Gas-oil capillary pressure (based on oil saturation - wetting phase)
-        pcgo = self.gas_oil_table(oil_saturation)
+        # Oil-water capillary pressure. Dispatch to the wetting-phase saturation
+        if oil_water_table.wetting_phase == FluidPhase.WATER:
+            pcow = oil_water_table.get_capillary_pressure(
+                wetting_saturation=water_saturation,
+                non_wetting_saturation=oil_saturation,
+            )
+        else:
+            # Oil is the wetting phase
+            pcow = oil_water_table.get_capillary_pressure(
+                wetting_saturation=oil_saturation,
+                non_wetting_saturation=water_saturation,
+            )
+
+        # Gas-oil capillary pressure. Dispatch to the correct saturation
+        # depending on the table's reference_phase axis.
+        if gas_oil_table.wetting_phase == FluidPhase.OIL:
+            pcgo = gas_oil_table.get_capillary_pressure(
+                wetting_saturation=oil_saturation,
+                non_wetting_saturation=gas_saturation,
+            )
+        else:
+            # Gas is the wetting phase (uncommon but supported)
+            pcgo = gas_oil_table.get_capillary_pressure(
+                wetting_saturation=gas_saturation,
+                non_wetting_saturation=oil_saturation,
+            )
+
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
-    def get_capillary_pressures_derivatives(
+    def get_capillary_pressure_derivatives(
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -375,61 +468,104 @@ class ThreePhaseCapillaryPressureTable(
         Compute the partial derivatives of the oil-water and gas-oil capillary
         pressures with respect to saturation.
 
-        Returns a dictionary containing:
+        Returns a `CapillaryPressureDerivatives` dictionary with four entries:
 
-        ```
-        (dPcow/dSw, dPcow/dSo, dPcgo/dSo)
-        ```
+        - `dPcow_dSw`: non-zero when the oil-water table's reference axis is
+        water saturation (`wetting_phase=WATER, reference_phase="wetting"`).
+        - `dPcow_dSo`: non-zero when the oil-water table's reference axis is oil
+        saturation (`wetting_phase=OIL, reference_phase="wetting"`).
+        - `dPcgo_dSo`: non-zero when the gas-oil table's reference axis is oil
+        saturation (`reference_phase="wetting"`, the wetting phase being OIL).
+        - `dPcgo_dSg`: non-zero when the gas-oil table's reference axis is gas
+        saturation (`reference_phase="non_wetting"`, or gas is the wetting
+        phase with `reference_phase="wetting"`).
 
-        - `dPcow/dSw`: non-zero when the oil-water table uses water saturation
-        as its reference axis (water-wet convention).
-        - `dPcow/dSo`: non-zero when the oil-water table uses oil saturation
-        as its reference axis (oil-wet convention).
-        - `dPcgo/dSo`: the gas-oil table always uses oil saturation as its
-        wetting-phase reference axis, so this is always the active gas-oil
-        derivative.
-
-        Note: `dPcgo/dSg` is not returned because this table type indexes the
-        gas-oil curve by oil saturation. There is no direct gas saturation axis.
-        Callers that need `dPcgo/dSg` should apply the saturation constraint
-        `So = 1 - Sw - Sg` with the chain rule.
-
-        All derivatives are exact piecewise-linear slopes from the underlying
-        two-phase tables.
+        At most one of `dPcow_dSw` / `dPcow_dSo` is non-zero, and at most one
+        of `dPcgo_dSo` / `dPcgo_dSg` is non-zero, for a given table
+        configuration.  All derivatives are exact piecewise-linear slopes from the
+        underlying two-phase tables.
 
         :param water_saturation: Water saturation (scalar or array).
         :param oil_saturation: Oil saturation (scalar or array).
-        :param gas_saturation: Gas saturation (not used directly by this table
-            type; included for a consistent three-phase calling convention).
-        :return: `CapillaryPressureDerivatives` dictionary containing the partial derivatives as described above.
+        :param gas_saturation: Gas saturation (scalar or array).
+        :return: `CapillaryPressureDerivatives` dictionary.
         """
         oil_water_table = self.oil_water_table
         gas_oil_table = self.gas_oil_table
 
         is_scalar = np.isscalar(water_saturation)
-        zero_scalar = 0.0
-        zero_array = np.zeros_like(
-            np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        )
+        zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
 
+        # Oil-water derivatives
         if oil_water_table.wetting_phase == FluidPhase.WATER:
+            # Reference axis is water saturation regardless of reference_phase
+            # (reference_phase only matters for tables where wetting != WATER,
+            # e.g. an oil-wet table indexed by So; here WATER is always wetting
+            # so the derivative is always dPcow/dSw).
             d_pcow_d_sw = oil_water_table.get_capillary_pressure_derivative(
-                wetting_phase_saturation=water_saturation,
+                wetting_saturation=water_saturation,
+                non_wetting_saturation=oil_saturation,
             )
-            d_pcow_d_so = zero_scalar if is_scalar else zero_array.copy()
+            d_pcow_d_so = zero
         else:
-            d_pcow_d_sw = zero_scalar if is_scalar else zero_array.copy()
-            d_pcow_d_so = oil_water_table.get_capillary_pressure_derivative(
-                wetting_phase_saturation=oil_saturation,
-            )
+            # Oil is the wetting phase.  The reference_phase attribute then
+            # controls whether the table is indexed by So ("wetting") or Sw
+            # ("non_wetting").  Either way the derivative is with respect to
+            # whichever saturation is the reference axis.
+            if oil_water_table.reference_phase == "wetting":
+                # Table indexed by So → derivative is dPcow/dSo
+                d_pcow_d_sw = zero
+                d_pcow_d_so = oil_water_table.get_capillary_pressure_derivative(
+                    wetting_saturation=oil_saturation,
+                    non_wetting_saturation=water_saturation,
+                )
+            else:
+                # reference_phase="non_wetting" and wetting_phase=OIL means the
+                # table is indexed by water saturation (the non-wetting phase here
+                # is water) → derivative is dPcow/dSw
+                d_pcow_d_sw = oil_water_table.get_capillary_pressure_derivative(
+                    wetting_saturation=oil_saturation,
+                    non_wetting_saturation=water_saturation,
+                )
+                d_pcow_d_so = zero
 
-        d_pcgo_d_so = gas_oil_table.get_capillary_pressure_derivative(
-            wetting_phase_saturation=oil_saturation,
-        )
+        # Gas-oil derivatives
+        if gas_oil_table.wetting_phase == FluidPhase.OIL:
+            if gas_oil_table.reference_phase == "wetting":
+                # Table indexed by So → derivative is dPcgo/dSo
+                d_pcgo_d_so = gas_oil_table.get_capillary_pressure_derivative(
+                    wetting_saturation=oil_saturation,
+                    non_wetting_saturation=gas_saturation,
+                )
+                d_pcgo_d_sg = zero
+            else:
+                # reference_phase="non_wetting" → table indexed by Sg
+                d_pcgo_d_so = zero
+                d_pcgo_d_sg = gas_oil_table.get_capillary_pressure_derivative(
+                    wetting_saturation=oil_saturation,
+                    non_wetting_saturation=gas_saturation,
+                )
+        else:
+            # Gas is the wetting phase (uncommon). reference_phase="wetting"
+            # means indexed by Sg, "non_wetting" means indexed by So.
+            if gas_oil_table.reference_phase == "wetting":
+                d_pcgo_d_so = zero
+                d_pcgo_d_sg = gas_oil_table.get_capillary_pressure_derivative(
+                    wetting_saturation=gas_saturation,
+                    non_wetting_saturation=oil_saturation,
+                )
+            else:
+                d_pcgo_d_so = gas_oil_table.get_capillary_pressure_derivative(
+                    wetting_saturation=gas_saturation,
+                    non_wetting_saturation=oil_saturation,
+                )
+                d_pcgo_d_sg = zero
+
         return CapillaryPressureDerivatives(
             dPcow_dSw=d_pcow_d_sw,
             dPcow_dSo=d_pcow_d_so,
-            dPcgo_dSg=d_pcgo_d_so,
+            dPcgo_dSo=d_pcgo_d_so,
+            dPcgo_dSg=d_pcgo_d_sg,
         )
 
 
@@ -719,7 +855,7 @@ class BrooksCoreyCapillaryPressureModel(
         )
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
-    def get_capillary_pressures_derivatives(
+    def get_capillary_pressure_derivatives(  # type: ignore[override]
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -824,8 +960,9 @@ class BrooksCoreyCapillaryPressureModel(
 
         wettability = self.wettability
         is_scalar = np.isscalar(water_saturation)
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
+        zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
+        sw = np.atleast_1d(water_saturation)
+        sg = np.atleast_1d(gas_saturation)
 
         # dPcow/dSw via chain rule:  dPcow/dSw = (dPcow/dSe_w) * (1 / mobile_water_range)
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
@@ -896,11 +1033,13 @@ class BrooksCoreyCapillaryPressureModel(
                 dPcow_dSw=float(np.ravel(d_pcow_d_sw)[0]),
                 dPcow_dSo=float(np.ravel(d_pcow_d_so)[0]),
                 dPcgo_dSg=float(np.ravel(d_pcgo_d_sg)[0]),
+                dPcgo_dSo=zero,
             )
         return CapillaryPressureDerivatives(
             dPcow_dSw=d_pcow_d_sw,
             dPcow_dSo=d_pcow_d_so,
             dPcgo_dSg=d_pcgo_d_sg,
+            dPcgo_dSo=zero,
         )
 
     def __call__(
@@ -1285,7 +1424,7 @@ class VanGenuchtenCapillaryPressureModel(
         )
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
-    def get_capillary_pressures_derivatives(
+    def get_capillary_pressure_derivatives(  # type: ignore[override]
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -1369,8 +1508,9 @@ class VanGenuchtenCapillaryPressureModel(
 
         wettability = self.wettability
         is_scalar = np.isscalar(water_saturation)
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
+        zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
+        sw = np.atleast_1d(water_saturation)
+        sg = np.atleast_1d(gas_saturation)
 
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
         if mobile_water_range > 1e-9:
@@ -1439,11 +1579,13 @@ class VanGenuchtenCapillaryPressureModel(
                 dPcow_dSw=float(np.ravel(d_pcow_d_sw)[0]),
                 dPcow_dSo=float(np.ravel(d_pcow_d_so)[0]),
                 dPcgo_dSg=float(np.ravel(d_pcgo_d_sg)[0]),
+                dPcgo_dSo=zero,
             )
         return CapillaryPressureDerivatives(
             dPcow_dSw=d_pcow_d_sw,
             dPcow_dSo=d_pcow_d_so,
             dPcgo_dSg=d_pcgo_d_sg,
+            dPcgo_dSo=zero,
         )
 
     def __call__(
@@ -1813,7 +1955,7 @@ class LeverettJCapillaryPressureModel(
         )
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
-    def get_capillary_pressures_derivatives(
+    def get_capillary_pressure_derivatives(  # type: ignore[override]
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -1919,8 +2061,9 @@ class LeverettJCapillaryPressureModel(
         mixed_wet_water_fraction = self.mixed_wet_water_fraction
 
         is_scalar = np.isscalar(water_saturation)
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
+        zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
+        sw = np.atleast_1d(water_saturation)
+        sg = np.atleast_1d(gas_saturation)
 
         leverett_rock_factor = (
             np.sqrt(porosity / absolute_permeability)
@@ -1988,11 +2131,13 @@ class LeverettJCapillaryPressureModel(
                 dPcow_dSw=float(np.ravel(d_pcow_d_sw)[0]),
                 dPcow_dSo=float(np.ravel(d_pcow_d_so)[0]),
                 dPcgo_dSg=float(np.ravel(d_pcgo_d_sg)[0]),
+                dPcgo_dSo=zero,
             )
         return CapillaryPressureDerivatives(
             dPcow_dSw=d_pcow_d_sw,
             dPcow_dSo=d_pcow_d_so,
             dPcgo_dSg=d_pcgo_d_sg,
+            dPcgo_dSo=zero,
         )
 
     def __call__(
