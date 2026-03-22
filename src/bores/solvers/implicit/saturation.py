@@ -30,6 +30,7 @@ from bores.solvers.explicit.saturation import (
     compute_well_rate_grids,
 )
 from bores.types import (
+    SupportsSetItem,
     ThreeDimensionalGrid,
     ThreeDimensions,
 )
@@ -465,11 +466,34 @@ def recompute_saturation_dependent_properties(
     Called at each Newton iteration. Returns updated relative permeabilities,
     relative mobilities, capillary pressures, and directional mobility grids.
     """
+    # Clamp to valid range before relperm evaluation — the Newton line search
+    # can produce trial states with tiny out-of-bounds values due to floating
+    # point residuals in project_to_feasible.
+    water_saturation_clamped_grid = np.clip(water_saturation_grid, 0.0, 1.0)
+    gas_saturation_clamped_grid = np.clip(gas_saturation_grid, 0.0, 1.0)
+    oil_saturation_clamped_grid = np.clip(oil_saturation_grid, 0.0, 1.0)
+
+    # Re-normalize so they sum to exactly 1 at each cell
+    total_saturation_grid = (
+        water_saturation_clamped_grid
+        + oil_saturation_clamped_grid
+        + gas_saturation_clamped_grid
+    )
+    # Avoid division by zero in degenerate cells
+    total_saturation_grid = np.where(
+        total_saturation_grid > 0.0, total_saturation_grid, 1.0
+    )
+    water_saturation_clamped_grid = (
+        water_saturation_clamped_grid / total_saturation_grid
+    )
+    oil_saturation_clamped_grid = oil_saturation_clamped_grid / total_saturation_grid
+    gas_saturation_clamped_grid = gas_saturation_clamped_grid / total_saturation_grid
+
     relperm_grids, relative_mobility_grids, capillary_pressure_grids = (
         build_rock_fluid_properties_grids(
-            water_saturation_grid=water_saturation_grid,  # type: ignore
-            oil_saturation_grid=oil_saturation_grid,  # type: ignore
-            gas_saturation_grid=gas_saturation_grid,  # type: ignore
+            water_saturation_grid=water_saturation_clamped_grid,  # type: ignore
+            oil_saturation_grid=oil_saturation_clamped_grid,  # type: ignore
+            gas_saturation_grid=gas_saturation_clamped_grid,  # type: ignore
             irreducible_water_saturation_grid=rock_properties.irreducible_water_saturation_grid,
             residual_oil_saturation_water_grid=rock_properties.residual_oil_saturation_water_grid,
             residual_oil_saturation_gas_grid=rock_properties.residual_oil_saturation_gas_grid,
@@ -537,6 +561,12 @@ def evaluate_residual(
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
+    injection_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
+    production_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
     pad_width: int,
     dtype: np.typing.DTypeLike,
 ) -> typing.Tuple[np.typing.NDArray, np.typing.NDArray]:
@@ -599,8 +629,8 @@ def evaluate_residual(
         config=config,
         boundary_conditions=boundary_conditions,
         pad_width=pad_width,
-        injection_grid=None,
-        production_grid=None,
+        injection_grid=injection_grid,
+        production_grid=production_grid,
         dtype=dtype,
     )
 
@@ -649,6 +679,7 @@ def evaluate_residual(
 
 def assemble_numerical_jacobian(
     saturation_vector: np.typing.NDArray,
+    residual_base: np.typing.NDArray,
     interior_cell_count: int,
     cell_count_x: int,
     cell_count_y: int,
@@ -676,48 +707,114 @@ def assemble_numerical_jacobian(
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
+    injection_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
+    production_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
     pad_width: int,
     dtype: np.typing.DTypeLike,
 ) -> csr_matrix:
     """
-    Assemble the Jacobian matrix using column-wise finite differences.
+    Assemble the saturation Jacobian matrix using column-wise forward finite differences.
 
-    For each cell, perturbs Sw and Sg independently and computes the
-    resulting change in the residual. Uses the known sparsity pattern
-    (7-point stencil) to only store non-zero entries.
+    Exploits the known 7-point stencil sparsity pattern of the residual: perturbing
+    Sw or Sg at cell `(i, j, k)` can only affect the residuals of that cell and its
+    six immediate face-neighbours. Only those rows are evaluated, so the cost scales
+    as `O(N)` residual evaluations rather than `O(N²)`.
 
-    J[:,j] = (R(S + eps * e_j) - R(S)) / eps
+    All arithmetic is performed in `float64` regardless of the working precision
+    (`dtype`) to avoid round-off artifacts in the finite-difference quotients.
+    Perturbation is applied **in-place** on the shared float64 grids and immediately
+    restored after each column evaluation, eliminating the `6N` full-grid copies
+    that a copy-based approach would require.
 
-    The perturbation size is chosen as sqrt(machine_epsilon) scaled by the
-    variable magnitude, following the standard recommendation for forward
-    finite differences. Perturbed grids are constructed in float64 to
-    prevent precision loss when the simulation runs in float32 mode.
+    The perturbation sign is chosen adaptively:
 
-    Returns a (2N x 2N) sparse matrix in CSR format.
+    * **Forward** (`+epsilon`) by default.
+    * **Backward** (`-epsilon`) when a forward step would make `So = 1 - Sw - Sg`
+      negative (i.e. the cell is near the `So = 0` boundary).
+    * A further safety clamp is applied when even the backward step would drive
+      the perturbed variable below zero (simplex vertex case).
+
+    :param saturation_vector: Current saturation vector of length `2N`, interleaved
+        as `[Sw_0, Sg_0, Sw_1, Sg_1, ..., Sw_{N-1}, Sg_{N-1}]`.
+    :param residual_base: Pre-computed residual vector at the current iterate,
+        interleaved as `[Rw_0, Rg_0, ..., Rw_{N-1}, Rg_{N-1}]`. Length `2N`.
+        Must be evaluated at the same saturation state as `saturation_vector`.
+    :param interior_cell_count: Number of interior (non-ghost) cells `N`.
+    :param cell_count_x: Total number of cells in the x-direction including ghost cells.
+    :param cell_count_y: Total number of cells in the y-direction including ghost cells.
+    :param cell_count_z: Total number of cells in the z-direction including ghost cells.
+    :param water_saturation_grid: 3D grid of current water saturations (fraction).
+        Modified in-place during Jacobian assembly and fully restored on exit.
+    :param oil_saturation_grid: 3D grid of current oil saturations (fraction).
+        Modified in-place during Jacobian assembly and fully restored on exit.
+    :param gas_saturation_grid: 3D grid of current gas saturations (fraction).
+        Modified in-place during Jacobian assembly and fully restored on exit.
+    :param old_water_saturation_grid: 3D grid of water saturations at the start of
+        the time step (fraction). Used in the residual accumulation term.
+    :param old_gas_saturation_grid: 3D grid of gas saturations at the start of
+        the time step (fraction). Used in the residual accumulation term.
+    :param oil_pressure_grid: 3D grid of oil-phase pressures fixed from the implicit
+        pressure solve (psi). Not modified.
+    :param pressure_change_grid: 3D grid of `P_new - P_old` (psi) used for the
+        PVT volume correction term in the residual.
+    :param rock_properties: Rock properties container (permeability, porosity,
+        residual saturations, compressibility).
+    :param fluid_properties: Fluid properties container at the current pressure level
+        (viscosities, FVFs, compressibilities, densities).
+    :param wells: Well definitions including perforations and controls.
+    :param config: Simulation configuration (relperm tables, solver settings, etc.).
+    :param thickness_grid: 3D grid of cell thicknesses (ft).
+    :param cell_size_x: Cell size in the x-direction (ft).
+    :param cell_size_y: Cell size in the y-direction (ft).
+    :param elevation_grid: 3D grid of cell centre elevations (ft).
+    :param porosity_grid: 3D grid of cell porosities (fraction).
+    :param time: Elapsed simulation time at the current time step (s).
+    :param time_step_in_days: Current time step size (days).
+    :param gravitational_constant: `g / g_c` conversion factor (lbf/lbm),
+        equal to 1.0 in consistent imperial units on Earth.
+    :param water_compressibility_grid: 3D grid of water compressibilities (1/psi).
+    :param gas_compressibility_grid: 3D grid of gas compressibilities (1/psi).
+    :param rock_compressibility: Scalar pore (rock) compressibility (1/psi).
+    :param boundary_conditions: Pressure and saturation boundary conditions.
+    :param injection_grid: Optional grid to accumulate injection rates by phase
+        (oil, water, gas) in ft³/day. Written on each residual evaluation so the
+        final state reflects the last perturbed column; callers that need
+        physically meaningful rates should re-evaluate after Jacobian assembly.
+        Pass `None` to skip tracking.
+    :param production_grid: Optional grid to accumulate production rates by phase
+        (oil, water, gas) in ft³/day. Same semantics as `injection_grid`.
+        Pass `None` to skip tracking.
+    :param pad_width: Number of ghost-cell layers surrounding the active grid.
+        Well coordinates are offset by this amount internally.
+    :param dtype: Working floating-point dtype (`np.float32` or `np.float64`).
+        The finite-difference arithmetic is always performed in `float64`
+        regardless of this value.
+    :return: Sparse Jacobian matrix of shape `(2N, 2N)` in CSR format. Entry
+        `J[r, c]` approximates `∂R_r / ∂S_c` at the current Newton iterate.
     """
     system_size = 2 * interior_cell_count
     rows_list = []
     cols_list = []
     vals_list = []
 
-    # Adaptive epsilon based on working precision: sqrt(machine_eps)
-    # gives optimal balance between truncation and round-off error
-    # for forward finite differences.
+    # Perturbation size: sqrt(machine_eps) gives the optimal balance between
+    # truncation error (too large) and cancellation error (too small) for
+    # forward finite differences. The saturation scale is 1.0 since Sw, Sg ∈ [0, 1].
     machine_eps = np.finfo(dtype).eps  # type: ignore
     base_epsilon = float(np.sqrt(machine_eps))
 
-    # Recompute the base residual from float64 saturation grids so that
-    # both base and perturbed evaluations use the same precision path.
-    # This prevents systematic float32/float64 artifacts from contaminating
-    # the finite-difference derivatives.
+    # Promote to float64 once. All perturb/restore operations work on these
+    # grids in-place, so no copies are needed inside the column loop.
     water_saturation_grid_f64 = water_saturation_grid.astype(np.float64, copy=True)
     oil_saturation_grid_f64 = oil_saturation_grid.astype(np.float64, copy=True)
     gas_saturation_grid_f64 = gas_saturation_grid.astype(np.float64, copy=True)
 
-    residual_water_base, residual_gas_base = evaluate_residual(
-        water_saturation_grid=water_saturation_grid_f64,
-        oil_saturation_grid=oil_saturation_grid_f64,
-        gas_saturation_grid=gas_saturation_grid_f64,
+    # Shared kwargs for every `evaluate_residual` call
+    residual_kwargs = dict(  # noqa
         old_water_saturation_grid=old_water_saturation_grid,
         old_gas_saturation_grid=old_gas_saturation_grid,
         oil_pressure_grid=oil_pressure_grid,
@@ -741,122 +838,93 @@ def assemble_numerical_jacobian(
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
         boundary_conditions=boundary_conditions,
+        injection_grid=injection_grid,
+        production_grid=production_grid,
         pad_width=pad_width,
         dtype=dtype,
     )
-    residual_base = interleave_residuals(residual_water_base, residual_gas_base)
 
-    # For each cell, perturbing Sw or Sg affects, the cell itself (diagonal block),
-    # and up to 6 neighbors (off-diagonal blocks)
-    # We perturb one variable at a time and collect affected residual entries.
-    for cell_idx in range(interior_cell_count):
+    for cell_1d_idx in range(interior_cell_count):
         i, j, k = from_1D_index_interior_only(
-            cell_idx, cell_count_x, cell_count_y, cell_count_z
+            cell_1d_idx, cell_count_x, cell_count_y, cell_count_z
         )
 
-        # Collect indices of cells affected by perturbing cell (i,j,k):
-        # the cell itself and its 6 neighbors
-        affected_cell_indices = [cell_idx]
-        neighbor_offsets = [
+        # Residual of cell (i,j,k) and its six face-neighbours are the only rows
+        # that can be non-zero in column `col` due to the 7-point stencil.
+        affected_cell_indices = [cell_1d_idx]
+        for ni, nj, nk in (
             (i + 1, j, k),
             (i - 1, j, k),
             (i, j + 1, k),
             (i, j - 1, k),
             (i, j, k + 1),
             (i, j, k - 1),
-        ]
-        for ni, nj, nk in neighbor_offsets:
+        ):
             neighbor_1d = to_1D_index_interior_only(
                 ni, nj, nk, cell_count_x, cell_count_y, cell_count_z
             )
             if neighbor_1d >= 0:
                 affected_cell_indices.append(neighbor_1d)
 
-        # Perturb Sw (var_offset=0) and Sg (var_offset=1)
-        for var_offset in range(2):
-            col = 2 * cell_idx + var_offset
+        # Current saturations at the cell being perturbed — read once per cell.
+        sw_cell = float(water_saturation_grid_f64[i, j, k])
+        sg_cell = float(gas_saturation_grid_f64[i, j, k])
+        so_cell = 1.0 - sw_cell - sg_cell
 
-            # Standard finite-difference perturbation: sqrt(eps) * max(|x|, x_scale).
-            # For saturations in [0, 1], the characteristic scale is 1.0. Since
-            # all saturations are <= 1, this simplifies to epsilon = base_epsilon.
-            # Using the correct scale is critical at phase boundaries: when Sg = 0
-            # (gas hasn't appeared), the old formula base_epsilon * max(|Sg|, base_epsilon)
-            # gave ~1e-7, far too small to cross relperm thresholds.
+        for var_offset in range(2):
+            col = 2 * cell_1d_idx + var_offset
             s_j = saturation_vector[col]
+
+            # Perturbation magnitude — scaled to the saturation range [0, 1].
             epsilon = base_epsilon * max(abs(s_j), 1.0)
 
-            # Ensure the perturbation keeps all saturations non-negative.
-            # When Sw + Sg is close to 1 (So ≈ 0), a forward perturbation
-            # on Sw or Sg makes So = 1 - Sw - Sg negative, violating the
-            # saturation bounds validated in the relperm functions.
-            # Switch to a backward finite difference in that case.
-            sw_cell = saturation_vector[2 * cell_idx]
-            sg_cell = saturation_vector[2 * cell_idx + 1]
-            so_cell = 1.0 - sw_cell - sg_cell
+            # Direction: switch to backward difference when a forward step
+            # would push So below zero (cell near the So = 0 boundary).
             if epsilon > so_cell:
                 epsilon = -epsilon
-                # Safety: backward perturbation must not make the variable negative
+                # Further safety: backward step must not drive the variable negative.
                 if s_j + epsilon < 0.0:
-                    # At a simplex vertex (e.g., Sw≈0, So≈0); use half the
-                    # available range as perturbation
-                    epsilon = -s_j * 0.5 if s_j > 1e-15 else base_epsilon * 0.01
+                    epsilon = (-s_j * 0.5) if s_j > 1e-15 else (base_epsilon * 0.01)
 
-            saturation_vector_perturbed = saturation_vector.copy()
-            saturation_vector_perturbed[col] += epsilon
+            # In-place perturbation (no grid copies)
+            # Save the three scalar originals for the cell being perturbed.
+            sw_orig = water_saturation_grid_f64[i, j, k]
+            sg_orig = gas_saturation_grid_f64[i, j, k]
+            so_orig = oil_saturation_grid_f64[i, j, k]
 
-            # Copy the float64 base grids so the perturbation is preserved
-            # (critical when working precision is float32).
-            water_saturation_grid_perturbed = water_saturation_grid_f64.copy()
-            oil_saturation_grid_perturbed = oil_saturation_grid_f64.copy()
-            gas_saturation_grid_perturbed = gas_saturation_grid_f64.copy()
-            vector_to_saturation_grids(
-                saturation_vector_perturbed,
-                water_saturation_grid_perturbed,
-                oil_saturation_grid_perturbed,
-                gas_saturation_grid_perturbed,
-                cell_count_x,
-                cell_count_y,
-                cell_count_z,
+            if var_offset == 0:
+                water_saturation_grid_f64[i, j, k] = sw_orig + epsilon
+            else:
+                gas_saturation_grid_f64[i, j, k] = sg_orig + epsilon
+
+            # Recompute So to maintain Sw + So + Sg = 1 at the perturbed cell.
+            oil_saturation_grid_f64[i, j, k] = max(
+                0.0,
+                1.0
+                - water_saturation_grid_f64[i, j, k]
+                - gas_saturation_grid_f64[i, j, k],
             )
 
-            # Evaluate residual at perturbed state
+            # Evaluate residual with the shared float64 grids (now perturbed at
+            # exactly one cell). All other cells are unchanged.
             residual_water_perturbed, residual_gas_perturbed = evaluate_residual(
-                water_saturation_grid=water_saturation_grid_perturbed,
-                oil_saturation_grid=oil_saturation_grid_perturbed,
-                gas_saturation_grid=gas_saturation_grid_perturbed,
-                old_water_saturation_grid=old_water_saturation_grid,
-                old_gas_saturation_grid=old_gas_saturation_grid,
-                oil_pressure_grid=oil_pressure_grid,
-                pressure_change_grid=pressure_change_grid,
-                rock_properties=rock_properties,
-                fluid_properties=fluid_properties,
-                wells=wells,
-                config=config,
-                cell_count_x=cell_count_x,
-                cell_count_y=cell_count_y,
-                cell_count_z=cell_count_z,
-                thickness_grid=thickness_grid,
-                cell_size_x=cell_size_x,
-                cell_size_y=cell_size_y,
-                elevation_grid=elevation_grid,
-                porosity_grid=porosity_grid,
-                time=time,
-                time_step_in_days=time_step_in_days,
-                gravitational_constant=gravitational_constant,
-                water_compressibility_grid=water_compressibility_grid,
-                gas_compressibility_grid=gas_compressibility_grid,
-                rock_compressibility=rock_compressibility,
-                boundary_conditions=boundary_conditions,
-                pad_width=pad_width,
-                dtype=dtype,
+                water_saturation_grid=water_saturation_grid_f64,
+                oil_saturation_grid=oil_saturation_grid_f64,
+                gas_saturation_grid=gas_saturation_grid_f64,
+                **residual_kwargs,  # type: ignore[arg-type]
             )
             residual_perturbed = interleave_residuals(
-                residual_water_perturbed, residual_gas_perturbed
+                residual_water=residual_water_perturbed,
+                residual_gas=residual_gas_perturbed,
             )
 
-            # Extract non-zero Jacobian entries for affected cells only
+            # Restore in-place (three scalar writes)
+            water_saturation_grid_f64[i, j, k] = sw_orig
+            gas_saturation_grid_f64[i, j, k] = sg_orig
+            oil_saturation_grid_f64[i, j, k] = so_orig
+
+            # Finite-difference derivative for each affected row.
             for affected_idx in affected_cell_indices:
-                # Water residual row for this affected cell
                 row_water = 2 * affected_idx
                 dR_water = (
                     residual_perturbed[row_water] - residual_base[row_water]
@@ -866,7 +934,6 @@ def assemble_numerical_jacobian(
                     cols_list.append(col)
                     vals_list.append(dR_water)
 
-                # Gas residual row for this affected cell
                 row_gas = 2 * affected_idx + 1
                 dR_gas = (
                     residual_perturbed[row_gas] - residual_base[row_gas]
@@ -876,12 +943,14 @@ def assemble_numerical_jacobian(
                     cols_list.append(col)
                     vals_list.append(dR_gas)
 
-    rows_array = np.array(rows_list, dtype=np.int32)
-    cols_array = np.array(cols_list, dtype=np.int32)
-    vals_array = np.array(vals_list, dtype=np.float64)
-
     jacobian_coo = coo_matrix(
-        (vals_array, (rows_array, cols_array)),
+        (
+            np.array(vals_list, dtype=np.float64),
+            (
+                np.array(rows_list, dtype=np.int32),
+                np.array(cols_list, dtype=np.int32),
+            ),
+        ),
         shape=(system_size, system_size),
     )
     return jacobian_coo.tocsr()
@@ -908,6 +977,12 @@ def solve_implicit_saturation(
     wells: Wells[ThreeDimensions],
     config: Config,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
+    injection_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
+    production_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
@@ -949,11 +1024,11 @@ def solve_implicit_saturation(
     gas_saturation_grid = old_gas_saturation_grid.copy()
 
     saturation_vector = saturations_to_vector(
-        water_saturation_grid,
-        gas_saturation_grid,
-        cell_count_x,
-        cell_count_y,
-        cell_count_z,
+        water_saturation_grid=water_saturation_grid,
+        gas_saturation_grid=gas_saturation_grid,
+        cell_count_x=cell_count_x,
+        cell_count_y=cell_count_y,
+        cell_count_z=cell_count_z,
     )
 
     convergence_history: typing.List[NewtonConvergenceInfo] = []
@@ -993,11 +1068,13 @@ def solve_implicit_saturation(
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
         boundary_conditions=boundary_conditions,
+        injection_grid=injection_grid,
+        production_grid=production_grid,
         pad_width=pad_width,
         dtype=dtype,
     )
 
-    for newton_iter in range(max_newton_iterations):
+    for iteration in range(max_newton_iterations):
         # Evaluate residual at current iterate
         residual_water, residual_gas = evaluate_residual(
             water_saturation_grid=water_saturation_grid,
@@ -1008,20 +1085,18 @@ def solve_implicit_saturation(
         residual_vector = interleave_residuals(residual_water, residual_gas)
         residual_norm = np.linalg.norm(residual_vector)
 
-        if newton_iter == 0:
+        if iteration == 0:
             initial_residual_norm = max(residual_norm, 1e-30)
             logger.info(f"Newton iteration 0: ||R0|| = {initial_residual_norm:.4e}")
 
         relative_residual_norm = residual_norm / initial_residual_norm
 
-        # Check convergence using dual criteria:
-        # - Relative residual below tolerance, or
-        # - Saturation changes negligible and residual is reasonable (<1e-3).
-        #   This second criterion handles the upwind scheme discontinuity
-        #   which creates an irreducible residual floor.
-        residual_converged = (
-            relative_residual_norm < newton_tolerance and newton_iter > 0
-        )
+        # Check convergence using two criteria:
+        # Relative residual below tolerance, or
+        # Saturation changes negligible and residual is reasonable (<1e-3).
+        # This second criterion handles the upwind scheme discontinuity
+        # which creates an irreducible residual floor.
+        residual_converged = relative_residual_norm < newton_tolerance and iteration > 0
         # Use the last recorded saturation update for the combined check
         last_max_ds = (
             convergence_history[-1].max_saturation_update
@@ -1031,16 +1106,16 @@ def solve_implicit_saturation(
         saturation_converged = (
             last_max_ds < saturation_convergence_tolerance
             and relative_residual_norm < 1e-3
-            and newton_iter > 1
+            and iteration > 1
         )
 
         if residual_converged or saturation_converged:
             converged = True
-            final_iteration = newton_iter
+            final_iteration = iteration
             final_residual_norm = residual_norm
             convergence_history.append(
                 NewtonConvergenceInfo(
-                    iteration=newton_iter,
+                    iteration=iteration,
                     residual_norm=residual_norm,  # type: ignore
                     relative_residual_norm=relative_residual_norm,  # type: ignore
                     max_saturation_update=0.0,
@@ -1049,7 +1124,7 @@ def solve_implicit_saturation(
             )
             reason = "residual" if residual_converged else "saturation change"
             logger.info(
-                f"Newton converged at iteration {newton_iter} ({reason}): "
+                f"Newton converged at iteration {iteration} ({reason}): "
                 f"||R||/||R0|| = {relative_residual_norm:.2e}, "
                 f"max |dS| = {last_max_ds:.2e}"
             )
@@ -1058,6 +1133,7 @@ def solve_implicit_saturation(
         # Assemble Jacobian
         jacobian = assemble_numerical_jacobian(
             saturation_vector=saturation_vector,
+            residual_base=residual_vector,
             interior_cell_count=interior_cell_count,
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
@@ -1085,6 +1161,8 @@ def solve_implicit_saturation(
             gas_compressibility_grid=gas_compressibility_grid,
             rock_compressibility=rock_compressibility,
             boundary_conditions=boundary_conditions,
+            injection_grid=injection_grid,
+            production_grid=production_grid,
             pad_width=pad_width,
             dtype=dtype,
         )
@@ -1123,13 +1201,13 @@ def solve_implicit_saturation(
         oil_saturation_grid_trial = oil_saturation_grid.copy()
         gas_saturation_grid_trial = gas_saturation_grid.copy()
         vector_to_saturation_grids(
-            saturation_vector_trial,
-            water_saturation_grid_trial,
-            oil_saturation_grid_trial,
-            gas_saturation_grid_trial,
-            cell_count_x,
-            cell_count_y,
-            cell_count_z,
+            saturation_vector=saturation_vector_trial,
+            water_saturation_grid=water_saturation_grid_trial,
+            oil_saturation_grid=oil_saturation_grid_trial,
+            gas_saturation_grid=gas_saturation_grid_trial,
+            cell_count_x=cell_count_x,
+            cell_count_y=cell_count_y,
+            cell_count_z=cell_count_z,
         )
 
         for _ in range(line_search_max_cuts):
@@ -1141,7 +1219,8 @@ def solve_implicit_saturation(
                 **residual_kwargs,  # type: ignore
             )
             residual_trial = interleave_residuals(
-                residual_water_trial, residual_gas_trial
+                residual_water=residual_water_trial,
+                residual_gas=residual_gas_trial,
             )
             residual_norm_trial = np.linalg.norm(residual_trial)
 
@@ -1153,18 +1232,17 @@ def solve_implicit_saturation(
             saturation_vector_trial = (
                 saturation_vector + line_search_factor * delta_saturation
             )
-            project_to_feasible(saturation_vector_trial)
             water_saturation_grid_trial = water_saturation_grid.copy()
             oil_saturation_grid_trial = oil_saturation_grid.copy()
             gas_saturation_grid_trial = gas_saturation_grid.copy()
             vector_to_saturation_grids(
-                saturation_vector_trial,
-                water_saturation_grid_trial,
-                oil_saturation_grid_trial,
-                gas_saturation_grid_trial,
-                cell_count_x,
-                cell_count_y,
-                cell_count_z,
+                saturation_vector=saturation_vector_trial,
+                water_saturation_grid=water_saturation_grid_trial,
+                oil_saturation_grid=oil_saturation_grid_trial,
+                gas_saturation_grid=gas_saturation_grid_trial,
+                cell_count_x=cell_count_x,
+                cell_count_y=cell_count_y,
+                cell_count_z=cell_count_z,
             )
 
         max_saturation_update = float(
@@ -1179,7 +1257,7 @@ def solve_implicit_saturation(
 
         convergence_history.append(
             NewtonConvergenceInfo(
-                iteration=newton_iter,
+                iteration=iteration,
                 residual_norm=residual_norm,  # type: ignore
                 relative_residual_norm=relative_residual_norm,  # type: ignore
                 max_saturation_update=max_saturation_update,
@@ -1188,41 +1266,40 @@ def solve_implicit_saturation(
         )
 
         logger.info(
-            f"Newton iteration {newton_iter}: "
+            f"Newton iteration {iteration}: "
             f"||R|| = {residual_norm:.2e}, "
             f"||R||/||R0|| = {relative_residual_norm:.2e}, "
             f"max |dS| = {max_saturation_update:.2e}, "
             f"alpha = {line_search_factor:.3f}"
         )
 
-        final_iteration = newton_iter + 1
+        final_iteration = iteration + 1
         final_residual_norm = residual_norm
 
-        # Stagnation detection: two mechanisms.
-        #
-        # 1. Saturation stagnation: Newton step produces negligible updates.
-        #    If the residual is acceptable, declare converged; otherwise break.
+        # Detect stagnation with two mechanisms.
+        # Saturation stagnation: Newton step produces negligible updates.
+        # If the residual is acceptable, declare converged; otherwise break.
         if max_saturation_update < 1e-10:
             if relative_residual_norm < 1e-3:
                 converged = True
                 logger.info(
-                    f"Newton converged (saturation stagnation) at iteration {newton_iter}: "
+                    f"Newton converged (saturation stagnation) at iteration {iteration}: "
                     f"max |dS| = {max_saturation_update:.2e}, "
                     f"||R||/||R0|| = {relative_residual_norm:.2e}"
                 )
             else:
                 logger.info(
-                    f"Newton stagnated (negligible dS) at iteration {newton_iter}: "
+                    f"Newton stagnated (negligible dS) at iteration {iteration}: "
                     f"max |dS| = {max_saturation_update:.2e}, "
                     f"||R||/||R0|| = {relative_residual_norm:.2e}"
                 )
             break
 
-        # 2. Residual stagnation: residual stops improving across iterations.
-        #    This catches cases where the Jacobian is ineffective (e.g., phase
-        #    appearance discontinuity) — the solver produces small but non-zero
-        #    saturation changes that don't reduce the residual. Breaking early
-        #    avoids wasting iterations and lets the timer cut dt.
+        # Check for residual stagnation, i.e. when residual stops improving across iterations.
+        # This check catches cases where the Jacobian is ineffective (e.g., phase
+        # appearance discontinuity). The solver produces small but non-zero
+        # saturation changes that don't reduce the residual, so breaking early
+        # avoids wasting iterations and lets the timer cut dt.
         if residual_norm < best_residual_norm * (
             1.0 - stagnation_improvement_threshold
         ):
@@ -1231,20 +1308,17 @@ def solve_implicit_saturation(
         else:
             stagnation_count += 1
 
-        if (
-            stagnation_count >= stagnation_patience
-            and newton_iter >= stagnation_patience
-        ):
+        if stagnation_count >= stagnation_patience and iteration >= stagnation_patience:
             if relative_residual_norm < 1e-3:
                 converged = True
                 logger.info(
-                    f"Newton converged (residual plateau) at iteration {newton_iter}: "
+                    f"Newton converged (residual plateau) at iteration {iteration}: "
                     f"||R||/||R0|| = {relative_residual_norm:.2e}, "
                     f"no improvement for {stagnation_count} iterations"
                 )
             else:
                 logger.info(
-                    f"Newton stagnated (residual flat) at iteration {newton_iter}: "
+                    f"Newton stagnated (residual flat) at iteration {iteration}: "
                     f"||R||/||R0|| = {relative_residual_norm:.2e}, "
                     f"no improvement for {stagnation_count} iterations"
                 )
@@ -1303,6 +1377,12 @@ def evolve_saturation(
     wells: Wells[ThreeDimensions],
     config: Config,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
+    injection_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
+    production_grid: typing.Optional[
+        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
+    ],
     pressure_change_grid: ThreeDimensionalGrid,
     pad_width: int = 1,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
@@ -1347,6 +1427,8 @@ def evolve_saturation(
         wells=wells,
         config=config,
         boundary_conditions=boundary_conditions,
+        injection_grid=injection_grid,
+        production_grid=production_grid,
         water_compressibility_grid=fluid_properties.water_compressibility_grid,
         gas_compressibility_grid=fluid_properties.gas_compressibility_grid,
         rock_compressibility=rock_properties.compressibility,

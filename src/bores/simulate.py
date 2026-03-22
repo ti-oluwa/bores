@@ -121,7 +121,7 @@ class StepResult(typing.Generic[NDimension]):
     """Kwargs that should be passed to the simulation timer on accepting or rejecting a step."""
 
 
-@attrs.frozen
+@attrs.frozen(slots=True)
 class SaturationChangeCheckResult:
     violated: bool
     max_phase_saturation_change: float
@@ -601,7 +601,6 @@ def _run_impes_step(
         wells=wells,
         config=config,
         boundary_conditions=boundary_conditions,
-        # Wrap the grids in a proxy to allow item assignment
         injection_grid=_RateGridsProxy(
             oil=oil_injection_grid,
             water=water_injection_grid,
@@ -788,7 +787,7 @@ def _run_sequential_implicit_step(
     """
     Execute one time step using Sequential Implicit (SI) scheme.
 
-    Pressure is solved implicitly (same as IMPES), then saturation is solved
+    Pressure is solved implicitly, then saturation is solved
     implicitly using Newton-Raphson iteration. This eliminates the CFL
     stability constraint on saturation transport, allowing larger timesteps.
 
@@ -1012,6 +1011,14 @@ def _run_sequential_implicit_step(
     logger.debug("Evolving saturation (implicit, Newton-Raphson)...")
     pressure_change_grid = padded_pressure_grid - old_pressure_grid
 
+    # Build zeros grids to track production and injection at each time step
+    oil_injection_grid = padded_zeros_grid.copy()
+    water_injection_grid = padded_zeros_grid.copy()
+    gas_injection_grid = padded_zeros_grid.copy()
+    oil_production_grid = padded_zeros_grid.copy()
+    water_production_grid = padded_zeros_grid.copy()
+    gas_production_grid = padded_zeros_grid.copy()
+
     saturation_result = implicit.evolve_saturation(
         cell_dimension=cell_dimension,
         thickness_grid=padded_thickness_grid,
@@ -1024,6 +1031,16 @@ def _run_sequential_implicit_step(
         wells=wells,
         config=config,
         boundary_conditions=boundary_conditions,
+        injection_grid=_RateGridsProxy(
+            oil=oil_injection_grid,
+            water=water_injection_grid,
+            gas=gas_injection_grid,
+        ),
+        production_grid=_RateGridsProxy(
+            oil=oil_production_grid,
+            water=water_production_grid,
+            gas=gas_production_grid,
+        ),
         pressure_change_grid=pressure_change_grid,
         pad_width=pad_width,
     )
@@ -1051,12 +1068,12 @@ def _run_sequential_implicit_step(
             f"Implicit saturation evolution failed at time step {time_step}: \n{saturation_result.message}"
         )
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
+            oil_injection_grid=oil_injection_grid,
+            water_injection_grid=water_injection_grid,
+            gas_injection_grid=gas_injection_grid,
+            oil_production_grid=oil_production_grid,
+            water_production_grid=water_production_grid,
+            gas_production_grid=gas_production_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -1076,12 +1093,12 @@ def _run_sequential_implicit_step(
         """
         logger.debug(message)
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
+            oil_injection_grid=oil_injection_grid,
+            water_injection_grid=water_injection_grid,
+            gas_injection_grid=gas_injection_grid,
+            oil_production_grid=oil_production_grid,
+            water_production_grid=water_production_grid,
+            gas_production_grid=gas_production_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -1149,12 +1166,12 @@ def _run_sequential_implicit_step(
 
     logger.debug("Sequential implicit step completed!")
     return StepResult(
-        oil_injection_grid=padded_zeros_grid,
-        water_injection_grid=padded_zeros_grid,
-        gas_injection_grid=padded_zeros_grid,
-        oil_production_grid=padded_zeros_grid,
-        water_production_grid=padded_zeros_grid,
-        gas_production_grid=padded_zeros_grid,
+        oil_injection_grid=oil_injection_grid,
+        water_injection_grid=water_injection_grid,
+        gas_injection_grid=gas_injection_grid,
+        oil_production_grid=oil_production_grid,
+        water_production_grid=water_production_grid,
+        gas_production_grid=gas_production_grid,
         fluid_properties=padded_fluid_properties,
         rock_properties=padded_rock_properties,
         saturation_history=padded_saturation_history,

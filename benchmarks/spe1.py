@@ -714,7 +714,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     # Timer
     # -------------------------------------------------------------------------
     timer = bores.Timer(
-        initial_step_size=bores.Time(days=3.0),
+        initial_step_size=bores.Time(days=1.0),
         max_step_size=bores.Time(days=30.0),
         min_step_size=bores.Time(minutes=10.0),
         simulation_time=bores.Time(years=10.0),
@@ -728,31 +728,16 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     # -------------------------------------------------------------------------
     # Config
     # -------------------------------------------------------------------------
-    preconditioner_factory = bores.CachedPreconditionerFactory(
-        factory="ilu",
-        name="pilu",
-        update_frequency=10,
-        recompute_threshold=0.3,
-    )
-    preconditioner_factory.register(override=True)
-
-    preconditioner_factory = bores.CachedPreconditionerFactory(
-        factory="ilu",
-        name="silu",
-        update_frequency=10,
-        recompute_threshold=0.3,
-    )
-    preconditioner_factory.register(override=True)
 
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="impes",
+        scheme="sequential_implicit",
         output_frequency=1,
         pressure_solver="direct",
-        pressure_preconditioner="pilu",
+        pressure_preconditioner=None,
         saturation_solver="direct",
-        saturation_preconditioner="silu",
+        saturation_preconditioner=None,
         log_interval=10,
         pvt_tables=pvt_tables,
         wells=wells,
