@@ -1,5 +1,3 @@
-import functools
-import itertools
 import logging
 import typing
 
@@ -10,7 +8,6 @@ import numpy.typing as npt
 from scipy.sparse import coo_matrix, csr_matrix
 
 from bores._precision import get_dtype
-from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
@@ -441,6 +438,7 @@ def compute_rock_fluid_properties(
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     config: Config,
+    normalize_saturations: bool = False,
 ) -> typing.Tuple[
     RelativeMobilityGrids[ThreeDimensions],
     CapillaryPressureGrids[ThreeDimensions],
@@ -456,30 +454,27 @@ def compute_rock_fluid_properties(
     Called at each Newton iteration. Returns updated relative mobilities,
     capillary pressures, and directional mobility grids.
     """
-    # Clamp and normalize saturations
-    water_saturation_clamped_grid = np.clip(water_saturation_grid, 0.0, 1.0)
-    gas_saturation_clamped_grid = np.clip(gas_saturation_grid, 0.0, 1.0)
-    oil_saturation_clamped_grid = np.clip(oil_saturation_grid, 0.0, 1.0)
+    if normalize_saturations:
+        # Clamp and normalize saturations
+        water_sat_grid = np.clip(water_saturation_grid, 0.0, 1.0)
+        gas_sat_grid = np.clip(gas_saturation_grid, 0.0, 1.0)
+        oil_sat_grid = np.clip(oil_saturation_grid, 0.0, 1.0)
 
-    total_saturation_grid = (
-        water_saturation_clamped_grid
-        + oil_saturation_clamped_grid
-        + gas_saturation_clamped_grid
-    )
-    total_saturation_grid = np.where(
-        total_saturation_grid > 0.0, total_saturation_grid, 1.0
-    )
-    water_saturation_clamped_grid = (
-        water_saturation_clamped_grid / total_saturation_grid
-    )
-    oil_saturation_clamped_grid = oil_saturation_clamped_grid / total_saturation_grid
-    gas_saturation_clamped_grid = gas_saturation_clamped_grid / total_saturation_grid
+        total_sat_grid = water_sat_grid + oil_sat_grid + gas_sat_grid
+        total_sat_grid = np.where(total_sat_grid > 0.0, total_sat_grid, 1.0)
+        water_sat_grid = water_sat_grid / total_sat_grid
+        oil_sat_grid = oil_sat_grid / total_sat_grid
+        gas_sat_grid = gas_sat_grid / total_sat_grid
+    else:
+        water_sat_grid = water_saturation_grid
+        oil_sat_grid = oil_saturation_grid
+        gas_sat_grid = gas_saturation_grid
 
     _, relative_mobility_grids, capillary_pressure_grids = (
         build_rock_fluid_properties_grids(
-            water_saturation_grid=water_saturation_clamped_grid,  # type: ignore
-            oil_saturation_grid=oil_saturation_clamped_grid,  # type: ignore
-            gas_saturation_grid=gas_saturation_clamped_grid,  # type: ignore
+            water_saturation_grid=water_sat_grid,  # type: ignore
+            oil_saturation_grid=oil_sat_grid,  # type: ignore
+            gas_saturation_grid=gas_sat_grid,  # type: ignore
             irreducible_water_saturation_grid=rock_properties.irreducible_water_saturation_grid,
             residual_oil_saturation_water_grid=rock_properties.residual_oil_saturation_water_grid,
             residual_oil_saturation_gas_grid=rock_properties.residual_oil_saturation_gas_grid,
@@ -1445,74 +1440,50 @@ def _assemble_analytical_jacobian(
                         - gas_oil_capillary_pressure_grid[i, j, k]
                     )
 
-                    # Water phase potential from each cell's perspective.
-                    # residual uses upwind_water_density = neighbour if pot > 0 else cell i.
-                    # Estimate with each cell's density to determine upwind direction.
-                    cell_water_gravity_potential = (
-                        water_density_grid[i, j, k]
+                    water_pressure_difference = (
+                        oil_pressure_difference
+                        - oil_water_capillary_pressure_difference
+                    )
+
+                    # Pick upwind density on pressure difference sign
+                    if water_pressure_difference > 0.0:
+                        upwind_water_density = water_density_grid[ni, nj, nk]
+                    else:
+                        upwind_water_density = water_density_grid[i, j, k]
+
+                    # Compute potential with upwind density (matching residual stage 2)
+                    water_gravity_potential = (
+                        upwind_water_density
                         * gravitational_constant
                         * elevation_difference
                         / 144.0
                     )
-                    neighbour_water_gravity_potential = (
-                        water_density_grid[ni, nj, nk]
-                        * gravitational_constant
-                        * elevation_difference
-                        / 144.0
+                    water_potential = (
+                        water_pressure_difference + water_gravity_potential
                     )
-                    water_potential_from_cell_perspective = (
-                        oil_pressure_difference
-                        - oil_water_capillary_pressure_difference
-                        + cell_water_gravity_potential
-                    )
-                    water_potential_from_neigbour_perspective = (
-                        oil_pressure_difference
-                        - oil_water_capillary_pressure_difference
-                        + neighbour_water_gravity_potential
-                    )
+
                     # Residual: upwind = neighbour when potential > 0 (flow neighbour->i),
                     # upwind = cell i when potential <= 0 (flow i->neighbour).
                     # Use neighbour's perspective when neighbour is upwind, cell i's when i is upwind.
-                    water_neighbour_is_upwind = (
-                        water_potential_from_neigbour_perspective > 0.0
-                    )
-                    water_potential = (
-                        water_potential_from_neigbour_perspective
-                        if water_neighbour_is_upwind
-                        else water_potential_from_cell_perspective
-                    )
+                    water_neighbour_is_upwind = water_potential > 0.0
 
                     # Gas phase potential — same pattern.
-                    cell_gas_gravity_potential = (
-                        gas_density_grid[i, j, k]
+                    gas_pressure_difference = (
+                        oil_pressure_difference + gas_oil_capillary_pressure_difference
+                    )
+                    if gas_pressure_difference > 0.0:
+                        upwind_gas_density = gas_density_grid[ni, nj, nk]
+                    else:
+                        upwind_gas_density = gas_density_grid[i, j, k]
+
+                    gas_gravity_potential = (
+                        upwind_gas_density
                         * gravitational_constant
                         * elevation_difference
                         / 144.0
                     )
-                    neighbour_gas_gravity_potential = (
-                        gas_density_grid[ni, nj, nk]
-                        * gravitational_constant
-                        * elevation_difference
-                        / 144.0
-                    )
-                    gas_potential_from_cell_perspective = (
-                        oil_pressure_difference
-                        + gas_oil_capillary_pressure_difference
-                        + cell_gas_gravity_potential
-                    )
-                    gas_potential_from_neighbour_perspective = (
-                        oil_pressure_difference
-                        + gas_oil_capillary_pressure_difference
-                        + neighbour_gas_gravity_potential
-                    )
-                    gas_neighbour_is_upwind = (
-                        gas_potential_from_neighbour_perspective > 0.0
-                    )
-                    gas_potential = (
-                        gas_potential_from_neighbour_perspective
-                        if gas_neighbour_is_upwind
-                        else gas_potential_from_cell_perspective
-                    )
+                    gas_potential = gas_pressure_difference + gas_gravity_potential
+                    gas_neighbour_is_upwind = gas_potential > 0.0
 
                     # Neighbour 1D index
                     neighbour_idx = to_1D_index_interior_only(
@@ -1781,7 +1752,6 @@ def _assemble_jacobian_well_contributions(
     gas_relative_mobility_grid: ThreeDimensionalGrid,
     water_viscosity_grid: ThreeDimensionalGrid,
     gas_viscosity_grid: ThreeDimensionalGrid,
-    absolute_permeability_x_grid: ThreeDimensionalGrid,
     dkrw_dSw_grid: ThreeDimensionalGrid,
     dkrw_dSo_grid: ThreeDimensionalGrid,
     dkrw_dSg_grid: ThreeDimensionalGrid,
@@ -1979,9 +1949,6 @@ def _assemble_jacobian_well_contributions(
             else:
                 # Water injection: only water rate has kr sensitivity
                 water_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
-                cell_absolute_permeability = typing.cast(
-                    float, absolute_permeability_x_grid[i, j, k]
-                )
                 inverse_water_viscosity = (
                     1.0 / water_viscosity if water_viscosity > 0.0 else 0.0
                 )
@@ -1989,7 +1956,6 @@ def _assemble_jacobian_well_contributions(
                 dkrw_dSg_eff = dkrw_dSg_grid[i, j, k] - dkrw_dSo_grid[i, j, k]
                 dqw_dSw = (
                     well_index
-                    * cell_absolute_permeability
                     * md_per_cp_to_ft2_per_psi_per_day
                     * inverse_water_viscosity
                     * dkrw_dSw_eff
@@ -1997,7 +1963,6 @@ def _assemble_jacobian_well_contributions(
                 )
                 dqw_dSg = (
                     well_index
-                    * cell_absolute_permeability
                     * md_per_cp_to_ft2_per_psi_per_day
                     * inverse_water_viscosity
                     * dkrw_dSg_eff
@@ -2023,9 +1988,6 @@ def _assemble_jacobian_well_contributions(
             allocation_fraction = well_indices.allocation_fraction(perforation_index)
             cell_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
-            cell_absolute_permeability = typing.cast(
-                float, absolute_permeability_x_grid[i, j, k]
-            )
 
             primary_phase_context = {}
             if is_couple_controlled:
@@ -2230,12 +2192,11 @@ def assemble_analytical_jacobian(
 
     Combines:
     - Inter-cell flux derivatives.
-    - Well rate derivatives (diagonal only, Python loop mirroring the
-    implicit pressure solver's `compute_well_contributions` pattern).
+    - Well rate derivatives.
 
     Both parts are assembled as COO triplets and merged into a single CSR
-    matrix via `coo_matrix.tocsr()`, which automatically sums duplicate
-    entries so diagonal contributions from multiple faces/wells add correctly.
+    matrix, which automatically sums duplicate entries so diagonal contributions
+    from multiple faces/wells add correctly.
     """
     (
         dkrw_dSw_grid,
@@ -2328,7 +2289,6 @@ def assemble_analytical_jacobian(
         gas_relative_mobility_grid=gas_relative_mobility_grid,
         water_viscosity_grid=water_viscosity_grid,
         gas_viscosity_grid=gas_viscosity_grid,
-        absolute_permeability_x_grid=absolute_permeability_x_grid,
         dkrw_dSw_grid=dkrw_dSw_grid,
         dkrw_dSo_grid=dkrw_dSo_grid,
         dkrw_dSg_grid=dkrw_dSg_grid,
@@ -2528,7 +2488,7 @@ def solve_implicit_saturation(
     max_newton_iterations: int = 12,
     newton_tolerance: float = 1e-6,
     line_search_max_cuts: int = 4,
-    max_saturation_step: float = 0.05,
+    max_saturation_change: float = 0.05,
     saturation_convergence_tolerance: float = 1e-4,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
@@ -2614,6 +2574,9 @@ def solve_implicit_saturation(
             rock_properties=rock_properties,
             fluid_properties=fluid_properties,
             config=config,
+            # We only normalize for "numerical" Jacobian assembly, as perturbations may cause
+            # saturation sum to excedd 1.0 sometimes
+            normalize_saturations=config.jacobian_assembly_method == "numerical",
         )
 
         # Evaluate residual using the pre-computed properties
@@ -2706,7 +2669,6 @@ def solve_implicit_saturation(
             relative_mobility_grids=relative_mobility_grids,
             mobility_grids=mobility_grids,
         )
-
         # Solve the linear system: J * dS = -R
         saturation_change, _ = solve_linear_system(
             A_csr=jacobian,
@@ -2720,12 +2682,12 @@ def solve_implicit_saturation(
 
         # Damp Newton step
         max_raw_change = float(np.max(np.abs(saturation_change)))
-        if max_raw_change > max_saturation_step:
-            damping_factor = max_saturation_step / max_raw_change
+        if max_raw_change > max_saturation_change:
+            damping_factor = max_saturation_change / max_raw_change
             saturation_change = saturation_change * damping_factor
             logger.debug(
                 f"Damped Newton step by {damping_factor:.3f} "
-                f"(max |∆S| = {max_raw_change:.4f} > {max_saturation_step})"
+                f"(max |∆S| = {max_raw_change:.4f} > {max_saturation_change})"
             )
 
         # Backtracking line search
@@ -2958,6 +2920,6 @@ def evolve_saturation(
         max_newton_iterations=config.max_newton_iterations,
         newton_tolerance=config.newton_tolerance,
         line_search_max_cuts=config.line_search_max_cuts,
-        max_saturation_step=config.max_saturation_step,
+        max_saturation_change=config.max_saturation_change,
         saturation_convergence_tolerance=config.saturation_convergence_tolerance,
     )

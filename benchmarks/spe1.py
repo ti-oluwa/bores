@@ -734,7 +734,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="implicit",
+        scheme="impes",
         output_frequency=1,
         pressure_solver="direct",
         pressure_preconditioner=None,
@@ -828,7 +828,7 @@ def setup_analysis(bores, np, states):
     water_rate_history = []
 
     for s in states:
-        time_step = s.step
+        time_step = s.time_in_days
         fluid_properties = s.model.fluid_properties
         avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid)
         avg_water_sat = np.mean(fluid_properties.water_saturation_grid)
@@ -1196,7 +1196,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 @app.cell
 def _(analyst):
     mbe = analyst.material_balance_error(to_step=100)
-    print(mbe.water_mbe)
+    print(mbe.oil_mbe)
     return
 
 
@@ -1232,9 +1232,9 @@ def _(bores, states, viz, wells):
         cmax=1.0,
     )
 
-    property = "oil-sat"
+    property = "gas-sat"
     figures = []
-    timesteps = [200]
+    timesteps = [272]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

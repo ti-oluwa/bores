@@ -173,7 +173,7 @@ class TwoPhaseCapillaryPressureTable(Serializable):
     Interpolates capillary pressure for two fluid phases based on a
     **reference saturation** value. The reference saturation can be either
     the wetting or non-wetting phase saturation, depending on how the table
-    was constructed — e.g. a gas-oil table may be indexed by oil saturation
+    was constructed - e.g. a gas-oil table may be indexed by oil saturation
     (wetting) or by gas saturation (non-wetting).
 
     Uses `np.interp` for fast vectorized interpolation.
@@ -189,7 +189,7 @@ class TwoPhaseCapillaryPressureTable(Serializable):
     reference_saturation: npt.NDArray = attrs.field(converter=bores_array)
     """
     Saturation values used as the x-axis for interpolation, monotonically
-    increasing.  May represent either the wetting or non-wetting phase
+    increasing. May represent either the wetting or non-wetting phase
     saturation depending on `reference_phase`.
     """
 
@@ -205,10 +205,10 @@ class TwoPhaseCapillaryPressureTable(Serializable):
     """
     Which phase the `reference_saturation` axis represents.
  
-    - `"wetting"` — the x-axis holds wetting-phase saturation values.
+    - `"wetting"` - the x-axis holds wetting-phase saturation values.
       This is the standard convention for oil-water tables (Sw axis) and for
       gas-oil tables indexed by So.
-    - `"non_wetting"` — the x-axis holds non-wetting-phase saturation values.
+    - `"non_wetting"` - the x-axis holds non-wetting-phase saturation values.
       Use this for gas-oil tables indexed by Sg.
  
     This attribute does not change the interpolation mechanics.  It only
@@ -305,7 +305,7 @@ class TwoPhaseCapillaryPressureTable(Serializable):
         for oil-wet tables).  When `reference_phase="non_wetting"` this is
         `dPc/dSg` (for gas-oil tables indexed by Sg).
 
-        Uses the exact piecewise-linear slope of the tabulated curve — the same
+        Uses the exact piecewise-linear slope of the tabulated curve - the same
         interpolant used by `get_capillary_pressure`.  Zero outside the
         tabulated range (constant extrapolation).
 
@@ -412,8 +412,8 @@ class ThreePhaseCapillaryPressureTable(
 
         Each sub-table is queried using its declared `reference_phase`:
 
-        - `reference_phase="wetting"` — the wetting-phase saturation is passed.
-        - `reference_phase="non_wetting"` — the non-wetting-phase saturation is
+        - `reference_phase="wetting"` - the wetting-phase saturation is passed.
+        - `reference_phase="non_wetting"` - the non-wetting-phase saturation is
         passed.
 
         For the oil-water table the wetting phase is either WATER or OIL.
@@ -973,67 +973,69 @@ class BrooksCoreyCapillaryPressureModel(
 
         # dPcow/dSw via chain rule:  dPcow/dSw = (dPcow/dSe_w) * (1 / mobile_water_range)
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
-        if mobile_water_range > 1e-9:
-            se_w = np.clip(
-                (sw - Swc) / mobile_water_range,  # type: ignore
-                1e-6,
-                1.0,
+        se_w = np.clip(
+            (sw - Swc) / np.where(mobile_water_range > 1e-9, mobile_water_range, 1.0),
+            1e-6,
+            1.0,
+        )
+        valid_water = mobile_water_range > 1e-9
+
+        if wettability == Wettability.MIXED_WET:
+            water_wet_fraction = self.mixed_wet_water_fraction
+            exp_ww = -1.0 / self.oil_water_pore_size_distribution_index_water_wet
+            exp_ow = -1.0 / self.oil_water_pore_size_distribution_index_oil_wet
+            d_se_w_ww = (
+                self.oil_water_entry_pressure_water_wet
+                * exp_ww
+                * (se_w ** (exp_ww - 1.0))
             )
-            if wettability == Wettability.MIXED_WET:
-                water_wet_fraction = self.mixed_wet_water_fraction
-                exp_ww = -1.0 / self.oil_water_pore_size_distribution_index_water_wet
-                exp_ow = -1.0 / self.oil_water_pore_size_distribution_index_oil_wet
-                d_se_w_ww = (
-                    self.oil_water_entry_pressure_water_wet
-                    * exp_ww
-                    * (se_w ** (exp_ww - 1.0))
-                )
-                d_se_w_ow = -(
-                    self.oil_water_entry_pressure_oil_wet
-                    * exp_ow
-                    * (se_w ** (exp_ow - 1.0))
-                )
-                d_pcow_d_se_w = (
-                    water_wet_fraction * d_se_w_ww
-                    + (1.0 - water_wet_fraction) * d_se_w_ow
-                )
-            else:
-                if wettability == Wettability.WATER_WET:
-                    pore_distribution_index = (
-                        self.oil_water_pore_size_distribution_index_water_wet
-                    )
-                    entry_pressure = self.oil_water_entry_pressure_water_wet
-                    sign = 1.0
-                else:  # OIL_WET
-                    pore_distribution_index = (
-                        self.oil_water_pore_size_distribution_index_oil_wet
-                    )
-                    entry_pressure = self.oil_water_entry_pressure_oil_wet
-                    sign = -1.0
-                exp = -1.0 / pore_distribution_index
-                d_pcow_d_se_w = sign * entry_pressure * exp * (se_w ** (exp - 1.0))
-
-            d_pcow_d_sw = d_pcow_d_se_w / mobile_water_range
+            d_se_w_ow = -(
+                self.oil_water_entry_pressure_oil_wet
+                * exp_ow
+                * (se_w ** (exp_ow - 1.0))
+            )
+            d_pcow_d_se_w = (
+                water_wet_fraction * d_se_w_ww + (1.0 - water_wet_fraction) * d_se_w_ow
+            )
         else:
-            d_pcow_d_sw = np.zeros_like(sw)
+            if wettability == Wettability.WATER_WET:
+                pore_distribution_index = (
+                    self.oil_water_pore_size_distribution_index_water_wet
+                )
+                entry_pressure = self.oil_water_entry_pressure_water_wet
+                sign = 1.0
+            else:  # OIL_WET
+                pore_distribution_index = (
+                    self.oil_water_pore_size_distribution_index_oil_wet
+                )
+                entry_pressure = self.oil_water_entry_pressure_oil_wet
+                sign = -1.0
+            exp = -1.0 / pore_distribution_index
+            d_pcow_d_se_w = sign * entry_pressure * exp * (se_w ** (exp - 1.0))
 
-        d_pcow_d_so = np.zeros_like(sw)  # Pcow has no So dependence in this model
+        d_pcow_d_sw = np.where(
+            valid_water,
+            d_pcow_d_se_w / mobile_water_range,
+            np.zeros_like(sw),
+        )
+        d_pcow_d_so = np.zeros_like(sw)
 
         # dPcgo/dSg via chain rule:  dPcgo/dSg = (dPcgo/dSe_g) * (1 / mobile_gas_range)
         mobile_gas_range = 1.0 - Swc - Sorg - Sgr  # type: ignore
-        if mobile_gas_range > 1e-9:
-            se_g = np.clip(
-                (sg - Sgr) / mobile_gas_range,  # type: ignore
-                1e-6,
-                1.0,
-            )
-            exp_go = -1.0 / self.gas_oil_pore_size_distribution_index
-            d_pcgo_d_se_g = (
-                self.gas_oil_entry_pressure * exp_go * (se_g ** (exp_go - 1.0))
-            )
-            d_pcgo_d_sg = d_pcgo_d_se_g / mobile_gas_range
-        else:
-            d_pcgo_d_sg = np.zeros_like(sg)
+        se_g = np.clip(
+            (sg - Sgr) / np.where(mobile_gas_range > 1e-9, mobile_gas_range, 1.0),
+            1e-6,
+            1.0,
+        )
+        valid_gas = mobile_gas_range > 1e-9
+
+        exp_go = -1.0 / self.gas_oil_pore_size_distribution_index
+        d_pcgo_d_se_g = self.gas_oil_entry_pressure * exp_go * (se_g ** (exp_go - 1.0))
+        d_pcgo_d_sg = np.where(
+            valid_gas,
+            d_pcgo_d_se_g / mobile_gas_range,
+            np.zeros_like(sg),
+        )
 
         if is_scalar:
             return CapillaryPressureDerivatives(
@@ -1520,66 +1522,70 @@ class VanGenuchtenCapillaryPressureModel(
         sg = np.atleast_1d(gas_saturation)
 
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
-        if mobile_water_range > 1e-9:
-            se_w = np.clip(
-                (sw - Swc) / mobile_water_range,  # type: ignore
-                1e-6,
-                1.0 - 1e-6,
+        valid_water = mobile_water_range > 1e-9
+        se_w = np.clip(
+            (sw - Swc) / np.where(valid_water, mobile_water_range, 1.0),
+            1e-6,
+            1.0 - 1e-6,
+        )
+
+        if wettability == Wettability.WATER_WET:
+            d_pcow_d_se_w = _van_genuchten_pc_slope_wrt_effective_saturation(
+                se_w,
+                self.oil_water_alpha_water_wet,
+                self.oil_water_n_water_wet,
+                sign=+1.0,
             )
-            if wettability == Wettability.WATER_WET:
-                d_pcow_d_se_w = _van_genuchten_pc_slope_wrt_effective_saturation(
-                    se_w,
-                    self.oil_water_alpha_water_wet,
-                    self.oil_water_n_water_wet,
-                    sign=+1.0,
-                )
-            elif wettability == Wettability.OIL_WET:
-                d_pcow_d_se_w = _van_genuchten_pc_slope_wrt_effective_saturation(
-                    se_w,
-                    self.oil_water_alpha_oil_wet,
-                    self.oil_water_n_oil_wet,
-                    sign=-1.0,
-                )
-            else:  # MIXED_WET
-                water_wet_fraction = self.mixed_wet_water_fraction
-                d_ww = _van_genuchten_pc_slope_wrt_effective_saturation(
-                    se_w,
-                    self.oil_water_alpha_water_wet,
-                    self.oil_water_n_water_wet,
-                    sign=+1.0,
-                )
-                d_ow = _van_genuchten_pc_slope_wrt_effective_saturation(
-                    se_w,
-                    self.oil_water_alpha_oil_wet,
-                    self.oil_water_n_oil_wet,
-                    sign=-1.0,
-                )
-                d_pcow_d_se_w = (
-                    water_wet_fraction * d_ww + (1.0 - water_wet_fraction) * d_ow
-                )
+        elif wettability == Wettability.OIL_WET:
+            d_pcow_d_se_w = _van_genuchten_pc_slope_wrt_effective_saturation(
+                se_w,
+                self.oil_water_alpha_oil_wet,
+                self.oil_water_n_oil_wet,
+                sign=-1.0,
+            )
+        else:  # MIXED_WET
+            water_wet_fraction = self.mixed_wet_water_fraction
+            d_ww = _van_genuchten_pc_slope_wrt_effective_saturation(
+                se_w,
+                self.oil_water_alpha_water_wet,
+                self.oil_water_n_water_wet,
+                sign=+1.0,
+            )
+            d_ow = _van_genuchten_pc_slope_wrt_effective_saturation(
+                se_w,
+                self.oil_water_alpha_oil_wet,
+                self.oil_water_n_oil_wet,
+                sign=-1.0,
+            )
+            d_pcow_d_se_w = (
+                water_wet_fraction * d_ww + (1.0 - water_wet_fraction) * d_ow
+            )
 
-            d_pcow_d_sw = d_pcow_d_se_w / mobile_water_range
-        else:
-            d_pcow_d_sw = np.zeros_like(sw)
-
+        d_pcow_d_sw = np.where(
+            valid_water,
+            d_pcow_d_se_w / mobile_water_range,
+            np.zeros_like(sw),
+        )
         d_pcow_d_so = np.zeros_like(sw)
 
         mobile_gas_range = 1.0 - Swc - Sorg - Sgr  # type: ignore
-        if mobile_gas_range > 1e-9:
-            se_g = np.clip(
-                (sg - Sgr) / mobile_gas_range,  # type: ignore
-                1e-6,
-                1.0 - 1e-6,
-            )
-            d_pcgo_d_se_g = _van_genuchten_pc_slope_wrt_effective_saturation(
-                se_g,
-                self.gas_oil_alpha,
-                self.gas_oil_n,
-                sign=+1.0,
-            )
-            d_pcgo_d_sg = d_pcgo_d_se_g / mobile_gas_range
-        else:
-            d_pcgo_d_sg = np.zeros_like(sg)
+        valid_gas = mobile_gas_range > 1e-9
+        se_g = np.clip(
+            (sg - Sgr) / np.where(valid_gas, mobile_gas_range, 1.0),
+            1e-6,
+            1.0 - 1e-6,
+        )
+        d_pcgo_d_se_g = _van_genuchten_pc_slope_wrt_effective_saturation(
+            se_g,
+            self.gas_oil_alpha,
+            self.gas_oil_n,
+            sign=+1.0,
+        )
+        d_pcgo_d_sg = np.where(
+            valid_gas,
+            d_pcgo_d_se_g / mobile_gas_range,
+            np.zeros_like(sg),
+        )
 
         if is_scalar:
             return CapillaryPressureDerivatives(
@@ -2077,61 +2083,65 @@ class LeverettJCapillaryPressureModel(
             if absolute_permeability > 0.0 and porosity > 0.0
             else 0.0
         )
-        dyne_per_cm_to_psi = 4.725  # matches the forward model
+        dyne_per_cm_to_psi = 4.725
 
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
-        if mobile_water_range > 1e-9 and leverett_rock_factor > 0.0:
-            se_w = np.clip(
-                (sw - Swc) / mobile_water_range,  # type: ignore
-                1e-6,
-                1.0 - 1e-6,
-            )
-            d_j_d_se_w = (
-                -j_function_coefficient
-                * j_function_exponent
-                * (se_w ** (-j_function_exponent - 1.0))
-            )
-            cos_ow = np.cos(np.deg2rad(oil_water_contact_angle_deg))
-            ow_scale = (
-                oil_water_interfacial_tension
-                * dyne_per_cm_to_psi
-                * cos_ow
-                * leverett_rock_factor
-            )
-            if wettability == Wettability.WATER_WET:
-                wettability_sign = 1.0
-            elif wettability == Wettability.OIL_WET:
-                wettability_sign = -1.0
-            else:  # MIXED_WET
-                wettability_sign = 2.0 * mixed_wet_water_fraction - 1.0
-            d_pcow_d_sw = wettability_sign * ow_scale * d_j_d_se_w / mobile_water_range
-        else:
-            d_pcow_d_sw = np.zeros_like(sw)
+        valid_water = (mobile_water_range > 1e-9) & (leverett_rock_factor > 0.0)
+        se_w = np.clip(
+            (sw - Swc) / np.where(mobile_water_range > 1e-9, mobile_water_range, 1.0),
+            1e-6,
+            1.0 - 1e-6,
+        )
+        d_j_d_se_w = (
+            -j_function_coefficient
+            * j_function_exponent
+            * (se_w ** (-j_function_exponent - 1.0))
+        )
+        cos_ow = np.cos(np.deg2rad(oil_water_contact_angle_deg))
+        ow_scale = (
+            oil_water_interfacial_tension
+            * dyne_per_cm_to_psi
+            * cos_ow
+            * leverett_rock_factor
+        )
+        if wettability == Wettability.WATER_WET:
+            wettability_sign = 1.0
+        elif wettability == Wettability.OIL_WET:
+            wettability_sign = -1.0
+        else:  # MIXED_WET
+            wettability_sign = 2.0 * mixed_wet_water_fraction - 1.0
 
+        d_pcow_d_sw = np.where(
+            valid_water,
+            wettability_sign * ow_scale * d_j_d_se_w / mobile_water_range,
+            np.zeros_like(sw),
+        )
         d_pcow_d_so = np.zeros_like(sw)
 
         mobile_gas_range = 1.0 - Swc - Sorg - Sgr  # type: ignore
-        if mobile_gas_range > 1e-9 and leverett_rock_factor > 0.0:
-            se_g = np.clip(
-                (sg - Sgr) / mobile_gas_range,  # type: ignore
-                1e-6,
-                1.0 - 1e-6,
-            )
-            d_j_d_se_g = (
-                -j_function_coefficient
-                * j_function_exponent
-                * (se_g ** (-j_function_exponent - 1.0))
-            )
-            cos_go = np.cos(np.deg2rad(gas_oil_contact_angle_deg))
-            go_scale = (
-                gas_oil_interfacial_tension
-                * dyne_per_cm_to_psi
-                * cos_go
-                * leverett_rock_factor
-            )
-            d_pcgo_d_sg = go_scale * d_j_d_se_g / mobile_gas_range
-        else:
-            d_pcgo_d_sg = np.zeros_like(sg)
+        valid_gas = (mobile_gas_range > 1e-9) & (leverett_rock_factor > 0.0)
+        se_g = np.clip(
+            (sg - Sgr) / np.where(mobile_gas_range > 1e-9, mobile_gas_range, 1.0),
+            1e-6,
+            1.0 - 1e-6,
+        )
+        d_j_d_se_g = (
+            -j_function_coefficient
+            * j_function_exponent
+            * (se_g ** (-j_function_exponent - 1.0))
+        )
+        cos_go = np.cos(np.deg2rad(gas_oil_contact_angle_deg))
+        go_scale = (
+            gas_oil_interfacial_tension
+            * dyne_per_cm_to_psi
+            * cos_go
+            * leverett_rock_factor
+        )
+        d_pcgo_d_sg = np.where(
+            valid_gas,
+            go_scale * d_j_d_se_g / mobile_gas_range,
+            np.zeros_like(sg),
+        )
 
         if is_scalar:
             return CapillaryPressureDerivatives(

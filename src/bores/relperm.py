@@ -43,7 +43,7 @@ __all__ = [
     "linear_interpolation_rule",
     "list_relperm_tables",
     "max_rule",
-    "min_rule",
+    "max_rule",
     "mixing_rule",
     "product_saturation_weighted_rule",
     "relperm_table",
@@ -729,9 +729,9 @@ def _mixing_rule_partial_derivatives(
 ) -> typing.Tuple[
     FloatOrArray,  # d_kro_d_kro_w
     FloatOrArray,  # d_kro_d_kro_g
-    FloatOrArray,  # d_kro_d_water_saturation_explicit
-    FloatOrArray,  # d_kro_d_oil_saturation_explicit
-    FloatOrArray,  # d_kro_d_gas_saturation_explicit
+    FloatOrArray,  # d_kro_d_sw_explicit
+    FloatOrArray,  # d_kro_d_so_explicit
+    FloatOrArray,  # d_kro_d_sg_explicit
 ]:
     """
     Compute partial derivatives of the three-phase mixing rule with respect
@@ -749,11 +749,11 @@ def _mixing_rule_partial_derivatives(
       the oil-water two-phase oil relative permeability changes.
     - `d_kro_d_kro_g`: how the mixed oil relative permeability changes when
       the gas-oil two-phase oil relative permeability changes.
-    - `d_kro_d_water_saturation_explicit`: how the mixed oil relative
+    - `d_kro_d_sw_explicit`: how the mixed oil relative
       permeability changes through the explicit water saturation argument of
       the mixing rule (e.g. the saturation weighting in `eclipse_rule`).
-    - `d_kro_d_oil_saturation_explicit`: same for oil saturation.
-    - `d_kro_d_gas_saturation_explicit`: same for gas saturation.
+    - `d_kro_d_so_explicit`: same for oil saturation.
+    - `d_kro_d_sg_explicit`: same for gas saturation.
 
     The cost is ten mixing rule evaluations (five central difference pairs),
     each O(1), regardless of grid size.
@@ -803,7 +803,7 @@ def _mixing_rule_partial_derivatives(
         )
     ) / (2.0 * epsilon)
 
-    d_kro_d_water_saturation_explicit = (
+    d_kro_d_sw_explicit = (
         mixing_rule(
             kro_w=kro_water_two_phase,
             kro_g=kro_gas_two_phase,
@@ -820,7 +820,7 @@ def _mixing_rule_partial_derivatives(
         )
     ) / (2.0 * epsilon)
 
-    d_kro_d_oil_saturation_explicit = (
+    d_kro_d_so_explicit = (
         mixing_rule(
             kro_w=kro_water_two_phase,
             kro_g=kro_gas_two_phase,
@@ -837,7 +837,7 @@ def _mixing_rule_partial_derivatives(
         )
     ) / (2.0 * epsilon)
 
-    d_kro_d_gas_saturation_explicit = (
+    d_kro_d_sg_explicit = (
         mixing_rule(
             kro_w=kro_water_two_phase,
             kro_g=kro_gas_two_phase,
@@ -857,9 +857,9 @@ def _mixing_rule_partial_derivatives(
     return (
         d_kro_d_kro_w,
         d_kro_d_kro_g,
-        d_kro_d_water_saturation_explicit,
-        d_kro_d_oil_saturation_explicit,
-        d_kro_d_gas_saturation_explicit,
+        d_kro_d_sw_explicit,
+        d_kro_d_so_explicit,
+        d_kro_d_sg_explicit,
     )
 
 
@@ -1291,7 +1291,7 @@ class ThreePhaseRelPermTable(
     "non_wetting"), so the correct saturation is dispatched automatically —
     no assumptions are hard-coded about whether a table is indexed by So or Sg.
 
-    Supported mixing rules: `min_rule`, `stone_I_rule`, `stone_II_rule`, etc.
+    Supported mixing rules: `max_rule`, `stone_I_rule`, `stone_II_rule`, etc.
     """
 
     __type__ = "three_phase_relperm_table"
@@ -1664,21 +1664,21 @@ class ThreePhaseRelPermTable(
         # Three-phase oil mixing rule derivatives
         mixing_rule = self.mixing_rule
         if mixing_rule is None:
-            # min_rule: kro = min(kro_w, kro_g)
+            # max_rule: kro = min(kro_w, kro_g)
             kro_w_arr = np.asarray(kro_w, dtype=np.float64)
             kro_g_arr = np.asarray(kro_g, dtype=np.float64)
             d_kro_d_kro_w = np.where(kro_w_arr <= kro_g_arr, 1.0, 0.0)
             d_kro_d_kro_g = np.where(kro_g_arr <= kro_w_arr, 1.0, 0.0)
-            d_kro_d_water_saturation_explicit = zeros.copy()
-            d_kro_d_oil_saturation_explicit = zeros.copy()
-            d_kro_d_gas_saturation_explicit = zeros.copy()
+            d_kro_d_sw_explicit = zeros.copy()
+            d_kro_d_so_explicit = zeros.copy()
+            d_kro_d_sg_explicit = zeros.copy()
         else:
             (
                 d_kro_d_kro_w,
                 d_kro_d_kro_g,
-                d_kro_d_water_saturation_explicit,
-                d_kro_d_oil_saturation_explicit,
-                d_kro_d_gas_saturation_explicit,
+                d_kro_d_sw_explicit,
+                d_kro_d_so_explicit,
+                d_kro_d_sg_explicit,
             ) = _mixing_rule_partial_derivatives(
                 mixing_rule=mixing_rule,  # type: ignore[arg-type]
                 kro_water_two_phase=kro_w,
@@ -1694,22 +1694,18 @@ class ThreePhaseRelPermTable(
         d_kro_d_sw = (
             d_kro_d_kro_w * d_kro_w_d_sw
             + d_kro_d_kro_g * d_kro_g_d_sw
-            + d_kro_d_water_saturation_explicit
+            + d_kro_d_sw_explicit
         )
         d_kro_d_so = (
             d_kro_d_kro_w * d_kro_w_d_so
             + d_kro_d_kro_g * d_kro_g_d_so
-            + d_kro_d_oil_saturation_explicit
+            + d_kro_d_so_explicit
         )
         d_kro_d_sg = (
             d_kro_d_kro_w * d_kro_w_d_sg
             + d_kro_d_kro_g * d_kro_g_d_sg
-            + d_kro_d_gas_saturation_explicit
+            + d_kro_d_sg_explicit
         )
-
-        # ========================================================================
-        # Return results
-        # ========================================================================
 
         results = (
             d_krw_d_sw,
@@ -1722,7 +1718,6 @@ class ThreePhaseRelPermTable(
             d_kro_d_sg,
             d_krg_d_sg,
         )
-
         if is_scalar:
             results = tuple(float(np.ravel(r)[0]) for r in results)
             return RelativePermeabilityDerivatives(
@@ -1854,13 +1849,13 @@ def compute_corey_three_phase_relative_permeabilities(
         movable_oil_range = (
             1.0 - residual_oil_saturation_water - residual_oil_saturation_gas
         )
-        min_residual = np.minimum(
+        max_residual = np.minimum(
             residual_oil_saturation_water, residual_oil_saturation_gas
         )
         effective_oil_saturation = np.where(
             movable_oil_range <= 1e-6,
             np.zeros_like(so),
-            np.clip((so - min_residual) / movable_oil_range, 0.0, 1.0),
+            np.clip((so - max_residual) / movable_oil_range, 0.0, 1.0),
         )
         kro = effective_oil_saturation**oil_exponent
 
@@ -2186,49 +2181,53 @@ class BrooksCoreyThreePhaseRelPermModel(
                 (krg_sg_fwd - krg_sg_bwd) * inv_2_epsilon,
             )
             if is_scalar:
-                return tuple(float(np.ravel(r)[0]) for r in results)  # type: ignore[return-value]
-            return results  # type: ignore[return-value]
+                results = tuple(float(np.ravel(r)[0]) for r in results)
+            return RelativePermeabilityDerivatives(
+                dKrw_dSw=results[0],
+                dKro_dSw=results[1],
+                dKrg_dSw=results[2],
+                dKrw_dSo=results[3],
+                dKro_dSo=results[4],
+                dKrg_dSo=results[5],
+                dKrw_dSg=results[6],
+                dKro_dSg=results[7],
+                dKrg_dSg=results[8],
+            )
 
         # Water-wet path
         # krw = Se_w ^ nw
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
-        if mobile_water_range > 1e-9:
-            se_w = np.clip(
-                (sw - Swc) / mobile_water_range,
-                0.0,
-                1.0,
-            )
-            d_krw_d_sw = np.where(
-                se_w > 0.0,
-                water_exponent
-                * (se_w ** max(water_exponent - 1.0, 0.0))
-                / mobile_water_range,
-                0.0,
-            )
-            krw_values = se_w**water_exponent
-        else:
-            d_krw_d_sw = zeros.copy()
-            se_w = zeros.copy()
-            krw_values = zeros.copy()
+        valid_water = mobile_water_range > 1e-9
+        se_w = np.clip(
+            (sw - Swc) / np.where(valid_water, mobile_water_range, 1.0),
+            0.0,
+            1.0,
+        )
+        krw_values = se_w**water_exponent
+        d_krw_d_sw = np.where(
+            valid_water & (se_w > 0.0),
+            water_exponent
+            * (se_w ** max(water_exponent - 1.0, 0.0))
+            / mobile_water_range,
+            zeros,
+        )
         d_krw_d_so = zeros.copy()
         d_krw_d_sg = zeros.copy()
 
         # krg = Se_g ^ ng
         mobile_gas_range = 1.0 - Swc - Sgr - Sorg  # type: ignore
-        if mobile_gas_range > 1e-9:
-            se_g = np.clip((sg - Sgr) / mobile_gas_range, 0.0, 1.0)
-            d_krg_d_sg = np.where(
-                se_g > 0.0,
-                gas_exponent
-                * (se_g ** max(gas_exponent - 1.0, 0.0))
-                / mobile_gas_range,
-                0.0,
-            )
-            krg_values = se_g**gas_exponent
-        else:
-            d_krg_d_sg = zeros.copy()
-            se_g = zeros.copy()
-            krg_values = zeros.copy()
+        valid_gas = mobile_gas_range > 1e-9
+        se_g = np.clip(
+            (sg - Sgr) / np.where(valid_gas, mobile_gas_range, 1.0),
+            0.0,
+            1.0,
+        )
+        krg_values = se_g**gas_exponent
+        d_krg_d_sg = np.where(
+            valid_gas & (se_g > 0.0),
+            gas_exponent * (se_g ** max(gas_exponent - 1.0, 0.0)) / mobile_gas_range,
+            zeros,
+        )
         d_krg_d_sw = zeros.copy()
         d_krg_d_so = zeros.copy()
 
@@ -2240,7 +2239,7 @@ class BrooksCoreyThreePhaseRelPermModel(
             oil_exponent
             * (one_minus_krw ** max(oil_exponent - 1.0, 0.0))
             * (-d_krw_d_sw),
-            0.0,
+            zeros,
         )
         d_kro_w_d_so = zeros.copy()
         d_kro_w_d_sg = zeros.copy()
@@ -2253,7 +2252,7 @@ class BrooksCoreyThreePhaseRelPermModel(
             oil_exponent
             * (one_minus_krg ** max(oil_exponent - 1.0, 0.0))
             * (-d_krg_d_sg),
-            0.0,
+            zeros,
         )
         d_kro_g_d_sw = zeros.copy()
         d_kro_g_d_so = zeros.copy()
@@ -2302,7 +2301,7 @@ class BrooksCoreyThreePhaseRelPermModel(
         )
         if is_scalar:
             results = tuple(float(np.ravel(r)[0]) for r in results)
-            RelativePermeabilityDerivatives(
+            return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],
                 dKrg_dSw=results[2],
@@ -2444,7 +2443,7 @@ class LETParameters(Serializable):
             raise ValidationError(f"LET parameter `T` must be positive, got {self.T}")
 
 
-def _let_kr(
+def _let_relperm(
     normalized_saturation: FloatOrArray,
     L: float,
     E: float,
@@ -2568,7 +2567,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sw),
             np.clip((sw - Swc) / movable_water_range, 0.0, 1.0),
         )
-        krw = max_water_relperm * _let_kr(sw_star, water_L, water_E, water_T)
+        krw = max_water_relperm * _let_relperm(sw_star, water_L, water_E, water_T)
 
         # Gas kr (non-wetting phase)
         movable_gas_range = 1.0 - Swc - Sgr - Sorg
@@ -2577,7 +2576,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - Sgr) / movable_gas_range, 0.0, 1.0),
         )
-        krg = max_gas_relperm * _let_kr(sg_star, gas_L, gas_E, gas_T)
+        krg = max_gas_relperm * _let_relperm(sg_star, gas_L, gas_E, gas_T)
 
         # Oil kr (intermediate phase, three-phase mixing)
         # Compute two-phase oil kr on a unit-endpoint basis (0 to 1) so that
@@ -2591,7 +2590,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(so),
             np.clip((so - Sorw) / movable_oil_water_range, 0.0, 1.0),
         )
-        kro_w = _let_kr(so_star_w, oil_water_L, oil_water_E, oil_water_T)
+        kro_w = _let_relperm(so_star_w, oil_water_L, oil_water_E, oil_water_T)
 
         # Two-phase oil kr in the gas-oil system (unit endpoint)
         movable_gas_oil_range = 1.0 - Swc - Sorg - Sgr
@@ -2600,7 +2599,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(so),
             np.clip((so - Sorg) / movable_gas_oil_range, 0.0, 1.0),
         )
-        kro_g = _let_kr(so_star_g, gas_oil_L, gas_oil_E, gas_oil_T)
+        kro_g = _let_relperm(so_star_g, gas_oil_L, gas_oil_E, gas_oil_T)
 
         # Combine using mixing rule, then apply endpoint scaling.
         # Clip the mixing rule output to [0, 1] before scaling because some
@@ -2619,13 +2618,15 @@ def compute_let_three_phase_relative_permeabilities(
         # Oil is wetting, water becomes intermediate
         # Oil kr (wetting phase)
         movable_oil_range = 1.0 - Sorw - Sorg
-        min_residual = np.minimum(Sorw, Sorg)
+        max_residual = np.minimum(Sorw, Sorg)
         so_star = np.where(
             movable_oil_range <= 1e-6,
             np.zeros_like(so),
-            np.clip((so - min_residual) / movable_oil_range, 0.0, 1.0),
+            np.clip((so - max_residual) / movable_oil_range, 0.0, 1.0),
         )
-        kro = max_oil_relperm * _let_kr(so_star, oil_water_L, oil_water_E, oil_water_T)
+        kro = max_oil_relperm * _let_relperm(
+            so_star, oil_water_L, oil_water_E, oil_water_T
+        )
 
         # Gas kr (non-wetting phase)
         movable_gas_range = 1.0 - Sgr - Swc
@@ -2634,7 +2635,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - Sgr) / movable_gas_range, 0.0, 1.0),
         )
-        krg = max_gas_relperm * _let_kr(sg_star, gas_L, gas_E, gas_T)
+        krg = max_gas_relperm * _let_relperm(sg_star, gas_L, gas_E, gas_T)
 
         # Water kr (intermediate phase, use mixing rule)
         # Compute two-phase water kr on unit-endpoint basis, apply endpoint
@@ -2647,7 +2648,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sw),
             np.clip((sw - Swc) / movable_water_range_ow, 0.0, 1.0),
         )
-        krw_ow = _let_kr(sw_star_ow, water_L, water_E, water_T)
+        krw_ow = _let_relperm(sw_star_ow, water_L, water_E, water_T)
 
         # Two-phase water kr proxy from gas-water system (unit endpoint)
         movable_water_range_gw = 1.0 - Swc - Sgr
@@ -2656,7 +2657,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sw),
             np.clip((sw - Swc) / movable_water_range_gw, 0.0, 1.0),
         )
-        krw_gw = _let_kr(sw_star_gw, water_L, water_E, water_T)
+        krw_gw = _let_relperm(sw_star_gw, water_L, water_E, water_T)
 
         krw_mixed = mixing_rule(
             kro_w=krw_ow,
@@ -3037,123 +3038,126 @@ class LETThreePhaseRelPermModel(
                 (krg_sg_fwd - krg_sg_bwd) * inv_2_epsilon,
             )
             if is_scalar:
-                return tuple(float(np.ravel(r)[0]) for r in results)  # type: ignore[return-value]
-            return results  # type: ignore[return-value]
+                results = tuple(float(np.ravel(r)[0]) for r in results)
+            return RelativePermeabilityDerivatives(
+                dKrw_dSw=results[0],
+                dKro_dSw=results[1],
+                dKrg_dSw=results[2],
+                dKrw_dSo=results[3],
+                dKro_dSo=results[4],
+                dKrg_dSo=results[5],
+                dKrw_dSg=results[6],
+                dKro_dSg=results[7],
+                dKrg_dSg=results[8],
+            )
 
         # Water-wet path
         # krw
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
-        if mobile_water_range > 1e-9:
-            se_w_for_krw = np.clip(
-                (sw - Swc) / mobile_water_range,
-                0.0,
-                1.0,
+        valid_water = mobile_water_range > 1e-9
+        se_w_for_krw = np.clip(
+            (sw - Swc) / np.where(valid_water, mobile_water_range, 1.0),
+            0.0,
+            1.0,
+        )
+        d_krw_d_sw = np.where(
+            valid_water,
+            _let_curve_slope_wrt_normalized_saturation(
+                normalized_saturation=se_w_for_krw,
+                L=water_params.L,
+                E=water_params.E,
+                T=water_params.T,
+                kr_max=krw_max,
             )
-            d_krw_d_sw = (
-                _let_curve_slope_wrt_normalized_saturation(
-                    normalized_saturation=se_w_for_krw,
-                    L=water_params.L,
-                    E=water_params.E,
-                    T=water_params.T,
-                    kr_max=krw_max,
-                )
-                / mobile_water_range
-            )
-        else:
-            d_krw_d_sw = zeros.copy()
-            se_w_for_krw = zeros.copy()
+            / mobile_water_range,
+            zeros,
+        )
         d_krw_d_so = zeros.copy()
         d_krw_d_sg = zeros.copy()
 
         # krg
         mobile_gas_range = 1.0 - Swc - Sgr - Sorg  # type: ignore
-        if mobile_gas_range > 1e-9:
-            se_g_for_krg = np.clip(
-                (sg - Sgr) / mobile_gas_range,
-                0.0,
-                1.0,
+        valid_gas = mobile_gas_range > 1e-9
+        se_g_for_krg = np.clip(
+            (sg - Sgr) / np.where(valid_gas, mobile_gas_range, 1.0),
+            0.0,
+            1.0,
+        )
+        d_krg_d_sg = np.where(
+            valid_gas,
+            _let_curve_slope_wrt_normalized_saturation(
+                normalized_saturation=se_g_for_krg,
+                L=gas_params.L,
+                E=gas_params.E,
+                T=gas_params.T,
+                kr_max=krg_max,
             )
-            d_krg_d_sg = (
-                _let_curve_slope_wrt_normalized_saturation(
-                    normalized_saturation=se_g_for_krg,
-                    L=gas_params.L,
-                    E=gas_params.E,
-                    T=gas_params.T,
-                    kr_max=krg_max,
-                )
-                / mobile_gas_range
-            )
-        else:
-            d_krg_d_sg = zeros.copy()
-            se_g_for_krg = zeros.copy()
+            / mobile_gas_range,
+            zeros,
+        )
         d_krg_d_sw = zeros.copy()
         d_krg_d_so = zeros.copy()
 
         # kro_w (unit-endpoint oil kr from water-oil system, function of So)
         mobile_oil_water_range = 1.0 - Swc - Sorw  # type: ignore
-        if mobile_oil_water_range > 1e-9:
-            se_o_water_system = np.clip(
-                (so - Sorw) / mobile_oil_water_range,
-                0.0,
-                1.0,
+        valid_oil_water = mobile_oil_water_range > 1e-9
+        se_o_water_system = np.clip(
+            (so - Sorw) / np.where(valid_oil_water, mobile_oil_water_range, 1.0),
+            0.0,
+            1.0,
+        )
+        d_kro_w_d_so = np.where(
+            valid_oil_water,
+            _let_curve_slope_wrt_normalized_saturation(
+                normalized_saturation=se_o_water_system,
+                L=oil_water_params.L,
+                E=oil_water_params.E,
+                T=oil_water_params.T,
+                kr_max=1.0,
             )
-            d_kro_w_d_so = (
-                _let_curve_slope_wrt_normalized_saturation(
-                    normalized_saturation=se_o_water_system,
-                    L=oil_water_params.L,
-                    E=oil_water_params.E,
-                    T=oil_water_params.T,
-                    kr_max=1.0,
-                )
-                / mobile_oil_water_range
-            )
-            s = np.clip(se_o_water_system, 1e-15, 1.0 - 1e-15)
-            kro_w_vals = np.where(
-                se_o_water_system > 0.0,
+            / mobile_oil_water_range,
+            zeros,
+        )
+        s = np.clip(se_o_water_system, 1e-15, 1.0 - 1e-15)
+        kro_w_vals = np.where(
+            se_o_water_system > 0.0,
+            s**oil_water_params.L
+            / (
                 s**oil_water_params.L
-                / (
-                    s**oil_water_params.L
-                    + oil_water_params.E * (1.0 - s) ** oil_water_params.T
-                ),
-                0.0,
-            )
-        else:
-            d_kro_w_d_so = zeros.copy()
-            kro_w_vals = zeros.copy()
+                + oil_water_params.E * (1.0 - s) ** oil_water_params.T
+            ),
+            zeros,
+        )
         d_kro_w_d_sw = zeros.copy()
         d_kro_w_d_sg = zeros.copy()
 
         # kro_g (unit-endpoint oil kr from gas-oil system, function of So)
         mobile_gas_oil_range = 1.0 - Swc - Sorg - Sgr  # type: ignore
-        if mobile_gas_oil_range > 1e-9:
-            se_o_gas_system = np.clip(
-                (so - Sorg) / mobile_gas_oil_range,
-                0.0,
-                1.0,
+        valid_gas_oil = mobile_gas_oil_range > 1e-9
+        se_o_gas_system = np.clip(
+            (so - Sorg) / np.where(valid_gas_oil, mobile_gas_oil_range, 1.0),
+            0.0,
+            1.0,
+        )
+        d_kro_g_d_so = np.where(
+            valid_gas_oil,
+            _let_curve_slope_wrt_normalized_saturation(
+                normalized_saturation=se_o_gas_system,
+                L=gas_oil_params.L,
+                E=gas_oil_params.E,
+                T=gas_oil_params.T,
+                kr_max=1.0,
             )
-            d_kro_g_d_so = (
-                _let_curve_slope_wrt_normalized_saturation(
-                    normalized_saturation=se_o_gas_system,
-                    L=gas_oil_params.L,
-                    E=gas_oil_params.E,
-                    T=gas_oil_params.T,
-                    kr_max=1.0,
-                )
-                / mobile_gas_oil_range
-            )
-            s = np.clip(se_o_gas_system, 1e-15, 1.0 - 1e-15)
-            kro_g_vals = np.where(
-                se_o_gas_system > 0.0,
-                s**gas_oil_params.L
-                / (
-                    s**gas_oil_params.L
-                    + gas_oil_params.E * (1.0 - s) ** gas_oil_params.T
-                ),
-                0.0,
-            )
-        else:
-            d_kro_g_d_so = zeros.copy()
-            kro_g_vals = zeros.copy()
+            / mobile_gas_oil_range,
+            zeros,
+        )
+        s = np.clip(se_o_gas_system, 1e-15, 1.0 - 1e-15)
+        kro_g_vals = np.where(
+            se_o_gas_system > 0.0,
+            s**gas_oil_params.L
+            / (s**gas_oil_params.L + gas_oil_params.E * (1.0 - s) ** gas_oil_params.T),
+            zeros,
+        )
         d_kro_g_d_sw = zeros.copy()
         d_kro_g_d_sg = zeros.copy()
 
@@ -3201,7 +3205,7 @@ class LETThreePhaseRelPermModel(
         )
         if is_scalar:
             results = tuple(float(np.ravel(r)[0]) for r in results)
-            RelativePermeabilityDerivatives(
+            return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],
                 dKrg_dSw=results[2],

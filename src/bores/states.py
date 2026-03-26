@@ -380,8 +380,8 @@ def validate_state(
             grid_shape=model.grid_shape,
             cell_dimension=model.cell_dimension,
             thickness_grid=thickness_grid,
-            fluid_properties=fluid_properties,
-            rock_properties=rock_properties,
+            fluid_properties=fluid_properties,  # type:ignore[arg-type]
+            rock_properties=rock_properties,  # type:ignore[arg-type]
             saturation_history=saturation_history,
             boundary_conditions=model.boundary_conditions,  # type: ignore
             dip_angle=model.dip_angle,

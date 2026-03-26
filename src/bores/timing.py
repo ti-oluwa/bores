@@ -44,7 +44,7 @@ def Time(
         days += years * c.DAYS_PER_YEAR
 
     if months:
-        days += (years * c.DAYS_PER_YEAR) / c.MONTHS_PER_YEAR
+        days += months * (c.DAYS_PER_YEAR / c.MONTHS_PER_YEAR)
 
     delta = timedelta(
         weeks=weeks,

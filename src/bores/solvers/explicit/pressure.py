@@ -1,4 +1,3 @@
-import itertools
 import typing
 
 import attrs
@@ -6,7 +5,6 @@ import numba
 import numpy as np
 
 from bores._precision import get_dtype
-from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean

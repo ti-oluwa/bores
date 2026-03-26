@@ -1,5 +1,4 @@
 import functools
-import itertools
 import logging
 import typing
 
@@ -9,7 +8,6 @@ import numpy as np
 from scipy.sparse import coo_matrix
 
 from bores._precision import get_dtype
-from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
@@ -1399,7 +1397,7 @@ def compute_well_contributions(
 
                 _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
 
-                logger.info(
+                logger.debug(
                     f"Producer {produced_phase} phase: PI={productivity_index:.4f}, "
                     f"BHP={effective_bhp:.2f}, Cell Pressure={cell_pressure:.2f}, "
                     f"∆P={cell_pressure - effective_bhp:.2f}, "

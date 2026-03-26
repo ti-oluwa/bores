@@ -224,7 +224,7 @@ class Config(
     """
 
     max_pressure_change: float = attrs.field(  # type: ignore
-        default=500.0, validator=attrs.validators.ge(0)
+        default=1000.0, validator=attrs.validators.ge(0)
     )
     """
     Maximum allowable pressure change (in psi) per time step.
@@ -283,7 +283,7 @@ class Config(
     )
     """Maximum line search bisections per Newton step."""
 
-    max_saturation_step: float = attrs.field(
+    max_saturation_change: float = attrs.field(
         default=0.05,
         validator=attrs.validators.and_(
             attrs.validators.gt(0.0),
@@ -309,11 +309,52 @@ class Config(
         default=3,
         validator=attrs.validators.ge(1),
     )
-    
+    """
+    Number of consecutive Newton iterations allowed with insufficient
+    residual improvement before the solver declares stagnation.
+
+    During the Newton-Raphson solve, the relative residual is monitored
+    between iterations. If the reduction in residual falls below
+    `newton_stagnation_improvement_threshold` for this many consecutive
+    iterations, the solver assumes it is no longer making meaningful
+    progress.
+
+    This typically indicates:
+    - Poor Jacobian quality (e.g., inaccurate analytical derivatives)
+    - Strong nonlinearities (e.g., phase appearance, sharp fronts)
+    - Ill-conditioned system
+
+    When stagnation is detected, the solver may terminate early or trigger
+    fallback strategies (e.g., timestep reduction or switching assembly method).
+
+    Lower values means faster detection, more aggressive termination  
+    Higher values means more tolerance for slow convergence
+    """
+
     newton_stagnation_improvement_threshold: float = attrs.field(
         default=0.01,
         validator=attrs.validators.gt(0),
     )
+    """
+    Minimum relative improvement in residual required between successive
+    Newton iterations to be considered as making progress.
+
+    Defined as the fractional reduction in the nonlinear residual norm:
+
+        improvement = (R_k - R_{k+1}) / R_k
+
+    If the computed improvement falls below this threshold, the iteration
+    is classified as "non-improving". When this occurs for
+    `newton_stagnation_patience` consecutive iterations, stagnation is declared.
+
+    Typical interpretation:
+    - 0.01 means that we require at least 1% residual reduction per iteration
+    - Smaller values means more tolerant of slow convergence
+    - Larger values means stricter, may trigger stagnation earlier
+
+    This parameter is critical for preventing wasted iterations in cases
+    where Newton updates oscillate or make negligible progress.
+    """
 
     jacobian_assembly_method: typing.Literal["numerical", "analytical"] = "numerical"
     """
