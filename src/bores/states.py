@@ -8,10 +8,10 @@ import numpy as np
 
 from bores._precision import get_dtype
 from bores.constants import c
+from bores.datastructures import BottomHolePressures, Rates
 from bores.errors import ValidationError
 from bores.grids.base import (
     CapillaryPressureGrids,
-    RateGrids,
     RelativeMobilityGrids,
     RelPermGrids,
 )
@@ -53,10 +53,14 @@ class ModelState(
     """The reservoir model at this state"""
     wells: Wells[NDimension]
     """The wells configuration at this state"""
-    injection: RateGrids[NDimension]
-    """Fluids injection rates at this state in ft³/day"""
-    production: RateGrids[NDimension]
-    """Fluids production rates at this state in ft³/day"""
+    injection_rates: Rates[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas injection rates at this state in ft³/day"""
+    production_rates: Rates[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas production rates at this state in ft³/day"""
+    injection_bhps: BottomHolePressures[float, NDimension]
+    """Sparse tensor holding injection well(s) cell perforation bottom hole pressure at this state in psi"""
+    production_bhps: BottomHolePressures[float, NDimension]
+    """Sparse tensor holding production well(s) cell perforation bottom hole pressure at this state in psi"""
     relative_permeabilities: RelPermGrids[NDimension]
     """Relative permeabilities at this state"""
     relative_mobilities: RelativeMobilityGrids[NDimension]
@@ -122,8 +126,6 @@ def validate_state(
     model_shape = model.grid_shape
     fluid_properties = model.fluid_properties
     rock_properties = model.rock_properties
-    injection = state.injection
-    production = state.production
     relative_mobilities = state.relative_mobilities
     relative_permeabilities = state.relative_permeabilities
     capillary_pressures = state.capillary_pressures
@@ -207,58 +209,6 @@ def validate_state(
             if grid.shape != model_shape:
                 raise ValidationError(
                     f"Rock property grid {field.name} has shape {grid.shape}, "
-                    f"expected {model_shape}."
-                )
-
-    # Validate and coerce injection
-    if dtype is not None:
-        injection_dict = {}
-        for field in attrs.fields(injection.__class__):
-            value = getattr(injection, field.name)
-            if isinstance(value, np.ndarray):
-                injection_dict[field.name] = _validate_array(
-                    model_shape=model_shape,
-                    grid=value,
-                    field_name=f"Injection rate grid {field.name}",
-                    dtype=dtype,
-                )
-            else:
-                injection_dict[field.name] = value
-        injection = RateGrids(**injection_dict)
-    else:
-        for field in attrs.fields(injection.__class__):
-            grid = getattr(injection, field.name)
-            if not isinstance(grid, np.ndarray):
-                continue
-            if grid.shape != model_shape:
-                raise ValidationError(
-                    f"Injection rate grid {field.name} has shape {grid.shape}, "
-                    f"expected {model_shape}."
-                )
-
-    # Validate and coerce production
-    if dtype is not None:
-        production_dict = {}
-        for field in attrs.fields(production.__class__):
-            value = getattr(production, field.name)
-            if isinstance(value, np.ndarray):
-                production_dict[field.name] = _validate_array(
-                    model_shape=model_shape,
-                    grid=value,
-                    field_name=f"Production rate grid {field.name}",
-                    dtype=dtype,
-                )
-            else:
-                production_dict[field.name] = value
-        production = RateGrids(**production_dict)
-    else:
-        for field in attrs.fields(production.__class__):
-            grid = getattr(production, field.name)
-            if not isinstance(grid, np.ndarray):
-                continue
-            if grid.shape != model_shape:
-                raise ValidationError(
-                    f"Production rate grid {field.name} has shape {grid.shape}, "
                     f"expected {model_shape}."
                 )
 
@@ -393,8 +343,10 @@ def validate_state(
             time=state.time,
             model=model,
             wells=state.wells,
-            injection=injection,
-            production=production,
+            injection_rates=state.injection_rates,
+            production_rates=state.production_rates,
+            injection_bhps=state.injection_bhps,
+            production_bhps=state.production_bhps,
             relative_permeabilities=relative_permeabilities,
             relative_mobilities=relative_mobilities,
             capillary_pressures=capillary_pressures,

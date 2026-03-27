@@ -649,7 +649,7 @@ Type aliases and enumerations used throughout the API.
 | --- | --- | --- |
 | `CapillaryPressures` | TypedDict | Dictionary of capillary pressure arrays (Pcow, Pcgo). |
 | `RelativePermeabilities` | TypedDict | Dictionary of relative permeability arrays (kro, krw, krg). |
-| `RelativeMobilityRange` | TypedDict | Dictionary defining range of relative mobility values for each fluid phase. |
+| `PhaseRange` | TypedDict | Dictionary defining range of relative mobility values for each fluid phase. |
 | `Range` | class | A `(min, max)` range for quantities. |
 
 ---

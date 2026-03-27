@@ -14,7 +14,6 @@ from bores.types import ArrayLike, NDimension, NDimensionalGrid, Orientation
 
 __all__ = [
     "CapillaryPressureGrids",
-    "RateGrids",
     "RelativeMobilityGrids",
     "apply_structural_dip",
     "array",
@@ -704,85 +703,3 @@ class CapillaryPressureGrids(PadMixin[NDimension], Serializable):
 
     def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
         return attrs.fields(self.__class__)
-
-
-@attrs.frozen(slots=True)
-class RateGrids(PadMixin[NDimension], Serializable):
-    """
-    Wrapper for n-dimensional grids representing fluid flow rates (oil, water, gas).
-    """
-
-    oil: typing.Optional[NDimensionalGrid[NDimension]] = None
-    """Grid representing oil flow rates."""
-    water: typing.Optional[NDimensionalGrid[NDimension]] = None
-    """Grid representing water flow rates."""
-    gas: typing.Optional[NDimensionalGrid[NDimension]] = None
-    """Grid representing gas flow rates."""
-
-    @property
-    def total(self) -> typing.Optional[NDimensionalGrid[NDimension]]:
-        """
-        Returns the total fluid flow rate (oil + water + gas) at each grid cell.
-
-        Ensure that at least one of the phase grids is defined before accessing this property.
-        Also, all defined phase grids should have the same shape and unit.
-
-        If none of the individual phase grids are defined, returns None.
-        """
-        total_grid = None
-        if self.oil is not None:
-            total_grid = self.oil.copy()
-        if self.water is not None:
-            if total_grid is None:
-                total_grid = self.water.copy()
-            else:
-                total_grid += self.water
-        if self.gas is not None:
-            if total_grid is None:
-                total_grid = self.gas.copy()
-            else:
-                total_grid += self.gas
-        return total_grid
-
-    def __getitem__(self, key: NDimension) -> typing.Tuple[float, float, float]:
-        """
-        Returns the oil, water, and gas flow rates at the specified grid cell.
-
-        If a phase grid is not defined, its flow rate is returned as 0.0.
-
-        :param key: The grid cell index (tuple of integers).
-        :return: A tuple containing the oil, water, and gas flow rates.
-        """
-        oil = self.oil[key] if self.oil is not None else 0.0
-        water = self.water[key] if self.water is not None else 0.0
-        gas = self.gas[key] if self.gas is not None else 0.0
-        return oil, water, gas
-
-    def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
-        return attrs.fields(self.__class__)
-
-
-@attrs.frozen(slots=True)
-class _RateGridsProxy(typing.Generic[NDimension]):
-    """
-    Proxy to allow (controlled) item assignment on an N-dimensional rate grids.
-    without exposing the grid itself
-    """
-
-    oil: NDimensionalGrid[NDimension]
-    water: NDimensionalGrid[NDimension]
-    gas: NDimensionalGrid[NDimension]
-
-    def __setitem__(
-        self, key: NDimension, value: typing.Tuple[float, float, float]
-    ) -> None:
-        """
-        Sets the oil, water, and gas production rates at the specified grid cell.
-
-        :param key: The grid cell index (tuple of integers).
-        :param value: A tuple containing the oil, water, and gas production rates.
-        """
-        oil, water, gas = value
-        self.oil[key] = oil
-        self.water[key] = water
-        self.gas[key] = gas

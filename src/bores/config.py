@@ -8,6 +8,7 @@ from typing_extensions import Self
 
 from bores.boundary_conditions import BoundaryConditions
 from bores.constants import Constants
+from bores.datastructures import PhaseRange, Range
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTTables
 from bores.tables.rock_fluid import RockFluidTables
@@ -16,8 +17,6 @@ from bores.types import (
     EvolutionScheme,
     MiscibilityModel,
     PreconditionerStr,
-    Range,
-    RelativeMobilityRange,
     SolverStr,
     ThreeDimensions,
 )
@@ -88,8 +87,8 @@ class Config(
     use_pseudo_pressure: bool = True
     """Whether to use pseudo-pressure for gas (when applicable)."""
 
-    relative_mobility_range: RelativeMobilityRange = attrs.field(
-        default=RelativeMobilityRange(
+    relative_mobility_range: PhaseRange = attrs.field(
+        default=PhaseRange(
             oil=Range(min=1e-12, max=1e6),
             water=Range(min=1e-12, max=1e6),
             gas=Range(min=1e-12, max=1e6),

@@ -991,9 +991,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         for s in self._sorted_steps:
             st = self._states[s]
             solution_gor_grid = st.model.fluid_properties.solution_gas_to_oil_ratio_grid
-            oil_production = st.production.oil
-            if oil_production is None:
-                continue
+            oil_production = st.production_rates.oil
 
             step_in_days = st.step_size * c.DAYS_PER_SECOND
             oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
@@ -1200,10 +1198,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 break
 
             st = self._states[s]
-            oil_production = st.production.oil
-            if oil_production is None:
-                continue
-
+            oil_production = st.production_rates.oil
             step_in_days = st.step_size * days_per_second
             oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
             solution_gor_grid = st.model.fluid_properties.solution_gas_to_oil_ratio_grid
@@ -1388,10 +1383,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state = self._states[t]
 
             # Production is in ft³/day, convert to STB using FVF
-            oil_production = state.production.oil
-            if oil_production is None:
-                continue
-
+            oil_production = state.production_rates.oil
             step_in_days = state.step_size * days_per_second
             oil_fvf_grid = state.model.fluid_properties.oil_formation_volume_factor_grid
             oil_production_stb = oil_production * ft3_to_bbl / oil_fvf_grid
@@ -1467,10 +1459,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state = self._states[t]
 
             # Production is in ft³/day, convert to SCF using FVF
-            gas_production = state.production.gas
-            if gas_production is None:
-                continue
-
+            gas_production = state.production_rates.gas
             step_in_days = state.step_size * days_per_second
             gas_fvf_grid = state.model.fluid_properties.gas_formation_volume_factor_grid
             gas_production_scf = gas_production / gas_fvf_grid
@@ -1547,7 +1536,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state = self._states[t]
 
             # Production is in ft³/day, convert to STB using FVF
-            water_production = state.production.water
+            water_production = state.production_rates.water
             if water_production is None:
                 continue
 
@@ -1630,10 +1619,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state = self._states[t]
 
             # Injection is in ft³/day, convert to STB using FVF
-            oil_injection = state.injection.oil
-            if oil_injection is None:
-                continue
-
+            oil_injection = state.injection_rates.oil
             step_in_days = state.step_size * days_per_second
             oil_fvf_grid = state.model.fluid_properties.oil_formation_volume_factor_grid
             oil_injection_stb = oil_injection * ft3_to_bbl / oil_fvf_grid
@@ -1710,10 +1696,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state = self._states[t]
 
             # Injection is in ft³/day, convert to SCF using FVF
-            gas_injection = state.injection.gas
-            if gas_injection is None:
-                continue
-
+            gas_injection = state.injection_rates.gas
             step_in_days = state.step_size * days_per_second
             injected_gas_fvf_grid, _ = _build_injected_fvf_grids(
                 wells=state.wells,
@@ -1796,10 +1779,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state = self._states[t]
 
             # Injection is in ft³/day, convert to STB using FVF
-            water_injection = state.injection.water
-            if water_injection is None:
-                continue
-
+            water_injection = state.injection_rates.water
             step_in_days = state.step_size * days_per_second
             _, injected_water_fvf_grid = _build_injected_fvf_grids(
                 wells=state.wells,
@@ -2366,10 +2346,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 if s > to_step:
                     break
                 st = self._states[s]
-                oil_production = st.production.oil
-                if oil_production is None:
-                    continue
-
+                oil_production = st.production_rates.oil
                 step_in_days = st.step_size * days_per_second
                 oil_fvf_grid = (
                     st.model.fluid_properties.oil_formation_volume_factor_grid
@@ -2506,7 +2483,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         oil_production_stb = None
 
         # Sum production rates from all grid cells
-        if (oil_production := state.production.oil) is not None:
+        if (oil_production := state.production_rates.oil) is not None:
             # Convert from ft³/day to STB/day using oil FVF
             oil_fvf_grid = state.model.fluid_properties.oil_formation_volume_factor_grid
             oil_production_stb = oil_production * c.CUBIC_FEET_TO_BARRELS / oil_fvf_grid
@@ -2514,7 +2491,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 oil_production_stb = np.where(mask, oil_production_stb, 0.0)
             oil_rate = np.nansum(oil_production_stb)
 
-        if (gas_production := state.production.gas) is not None:
+        if (gas_production := state.production_rates.gas) is not None:
             # Convert from ft³/day to SCF/day using gas FVF (free gas phase only)
             gas_fvf_grid = state.model.fluid_properties.gas_formation_volume_factor_grid
             gas_production_scf = gas_production / gas_fvf_grid
@@ -2533,7 +2510,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         # Total gas = free gas phase + solution gas from oil
         gas_rate = free_gas_rate + solution_gas_rate
 
-        if (water_production := state.production.water) is not None:
+        if (water_production := state.production_rates.water) is not None:
             # Convert from ft³/day to STB/day using water FVF
             water_fvf_grid = (
                 state.model.fluid_properties.water_formation_volume_factor_grid
@@ -2616,7 +2593,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         water_rate = 0.0
 
         # Sum injection rates from all grid cells
-        if (oil_injection := state.injection.oil) is not None:
+        if (oil_injection := state.injection_rates.oil) is not None:
             # Convert from ft³/day to STB/day using oil FVF
             oil_fvf_grid = state.model.fluid_properties.oil_formation_volume_factor_grid
             oil_injection_stb = oil_injection * c.CUBIC_FEET_TO_BARRELS / oil_fvf_grid
@@ -2630,13 +2607,13 @@ class ModelAnalyst(typing.Generic[NDimension]):
             temperature_grid=state.model.fluid_properties.temperature_grid,
             grid_shape=state.model.grid_shape,
         )
-        if (gas_injection := state.injection.gas) is not None:
+        if (gas_injection := state.injection_rates.gas) is not None:
             gas_injection_scf = gas_injection / injected_gas_fvf_grid
             if mask is not None:
                 gas_injection_scf = np.where(mask, gas_injection_scf, 0.0)
             gas_rate = np.nansum(gas_injection_scf)
 
-        if (water_injection := state.injection.water) is not None:
+        if (water_injection := state.injection_rates.water) is not None:
             water_injection_stb = (
                 water_injection * c.CUBIC_FEET_TO_BARRELS / injected_water_fvf_grid
             )
@@ -2851,9 +2828,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 break
 
             st = self._states[s]
-            oil_production = st.production.oil
-            if oil_production is None:
-                continue
+            oil_production = st.production_rates.oil
             step_in_days = st.step_size * days_per_second
             oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
             solution_gor_grid = st.model.fluid_properties.solution_gas_to_oil_ratio_grid
@@ -3138,7 +3113,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
             st = self._states[s]
             step_in_days = st.step_size * days_per_second
-            production = st.production
+            production = st.production_rates
             oil_produced_ft3 += (
                 float(np.nansum(production.oil)) * step_in_days
                 if production.oil is not None
@@ -3155,7 +3130,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 else 0.0
             )
 
-            injection = st.injection
+            injection = st.injection_rates
             oil_injected_ft3 += (
                 float(np.nansum(injection.oil)) * step_in_days
                 if injection.oil is not None
@@ -3682,7 +3657,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 average_mobility=0.0,
             )
 
-        if state.production is None:
+        if state.production_rates is None:
             logger.warning("No production data available for productivity analysis")
             return ProductivityAnalysis(
                 total_flow_rate=0.0,
@@ -3750,40 +3725,42 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
                 # Get actual cell flow rate and fluid properties
                 if phase == "oil":
-                    if state.production.oil is None:
+                    if state.production_rates.oil is None:
                         continue
                     oil_fvf = float(
                         state.model.fluid_properties.oil_formation_volume_factor_grid[
                             i, j, k
                         ]
                     )
-                    cell_flow_rate_ft3 = state.production.oil[i, j, k]  # ft³/day
+                    cell_flow_rate_ft3 = state.production_rates.oil[i, j, k]  # type: ignore  # ft³/day
                     cell_flow_rate_stb = (
                         cell_flow_rate_ft3 * ft3_to_bbl / oil_fvf
                     )  # STB/day
 
                 elif phase == "water":
-                    if state.production.water is None:
+                    if state.production_rates.water is None:
                         continue
                     water_fvf = float(
                         state.model.fluid_properties.water_formation_volume_factor_grid[
                             i, j, k
                         ]
                     )
-                    cell_flow_rate_ft3 = state.production.water[i, j, k]  # ft³/day
+                    cell_flow_rate_ft3 = state.production_rates.water[  # type: ignore
+                        i, j, k
+                    ]  # ft³/day
                     cell_flow_rate_stb = (
                         cell_flow_rate_ft3 * ft3_to_bbl / water_fvf
                     )  # STB/day
 
                 else:  # gas
-                    if state.production.gas is None:
+                    if state.production_rates.gas is None:
                         continue
                     gas_fvf = float(
                         state.model.fluid_properties.gas_formation_volume_factor_grid[
                             i, j, k
                         ]
                     )
-                    cell_flow_rate_ft3 = state.production.gas[i, j, k]  # ft³/day
+                    cell_flow_rate_ft3 = state.production_rates.gas[i, j, k]  # type: ignore  # ft³/day
                     cell_flow_rate_stb = cell_flow_rate_ft3 / gas_fvf  # SCF/day
 
                 if cell_flow_rate_stb == 0:
@@ -3984,9 +3961,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 break
             st = self._states[s]
             solution_gor_grid = st.model.fluid_properties.solution_gas_to_oil_ratio_grid
-            oil_production = st.production.oil
-            if oil_production is None:
-                continue
+            oil_production = st.production_rates.oil
             step_in_days = st.step_size * days_per_second
             oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
             oil_production_stb = oil_production * ft3_to_bbl / oil_fvf_grid

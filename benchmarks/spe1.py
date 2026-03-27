@@ -451,7 +451,7 @@ def setup_grid():
         pressures=pvt_pressures,
         temperatures=pvt_temperatures,
         salinities=bores.array([0.0]),  # Fresh water
-        bubble_point_pressures=bores.array([4014.7, 4014.7]),
+        bubble_point_pressures=bores.array([4800.0, 4800.0]),
         oil_specific_gravity=oil_specific_gravity,
         gas_gravity=gas_gravity,
         water_salinity=0.0,
@@ -658,7 +658,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         radius=0.25,
         control=bores.AdaptiveRateControl(
             target_rate=100.0e6,  # 100 MMscf/D
-            bhp_limit=10000.0,  # Max injection BHP (psia)
+            bhp_limit=9011.0,  # Max injection BHP (psia)
             clamp=bores.InjectionClamp(),
         ),
         injected_fluid=bores.InjectedFluid(
@@ -880,7 +880,7 @@ def setup_analysis(bores, np, states):
 def pressure_plot(avg_pressure_history, bores, np):
     # Pressure
     pressure_fig = bores.make_series_plot(
-        data={"Avg. Reservoir Pressure": np.array(avg_pressure_history)},
+        data={"Avg. Reservoir Pressure": np.array(avg_pressure_history[1:])},
         title="Pressure Analysis",
         x_label="Time Step",
         y_label="Avg. Pressure (psia)",
@@ -1195,7 +1195,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 
 @app.cell
 def _(analyst):
-    mbe = analyst.material_balance_error(to_step=100)
+    mbe = analyst.material_balance_error()
     print(mbe.oil_mbe)
     return
 
@@ -1223,18 +1223,18 @@ def _(bores, states, viz, wells):
         # labels=labels,
         aspect_mode="data",
         z_scale=10.0,
-        z_slice=(1, 3),
+        # z_slice=(1, 3),
         marker_size=6,
         show_wells=True,
         show_surface_marker=True,
         show_perforations=True,
-        cmin=0.0,
-        cmax=1.0,
+        # cmin=0.0,
+        # cmax=1.0,
     )
 
     property = "gas-sat"
     figures = []
-    timesteps = [362]
+    timesteps = [320]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

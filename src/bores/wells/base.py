@@ -21,7 +21,7 @@ from bores.serialization import (
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTTables
 from bores.types import Coordinates, Orientation, ThreeDimensions, TwoDimensions
-from bores.wells.controls import WellControl
+from bores.wells.controls import ControlResult, WellControl
 from bores.wells.core import (
     InjectedFluid,
     ProducedFluid,
@@ -379,6 +379,53 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :return: The bottom-hole pressure (psi).
         """
         return self.control.get_bottom_hole_pressure(
+            pressure=pressure,
+            temperature=temperature,
+            phase_mobility=phase_mobility,
+            well_index=well_index,
+            fluid=fluid,
+            formation_volume_factor=formation_volume_factor,
+            allocation_fraction=allocation_fraction,
+            is_active=self.is_open,
+            use_pseudo_pressure=use_pseudo_pressure,
+            fluid_compressibility=fluid_compressibility,
+            pvt_tables=pvt_tables,
+            **kwargs,
+        )
+
+    def get_control(
+        self,
+        pressure: float,
+        temperature: float,
+        well_index: float,
+        fluid: WellFluidT,
+        formation_volume_factor: float,
+        phase_mobility: typing.Optional[float] = None,
+        allocation_fraction: float = 1.0,
+        use_pseudo_pressure: bool = False,
+        fluid_compressibility: typing.Optional[float] = None,
+        pvt_tables: typing.Optional[PVTTables] = None,
+        **kwargs: typing.Any,
+    ) -> ControlResult:
+        """
+        Compute both the flow rate and effective bottom-hole pressure for the well in a single pass,
+        using the configured control strategy.
+
+        :param pressure: The reservoir pressure at the well location (psi).
+        :param temperature: The reservoir temperature at the well location (°F).
+        :param phase_mobility: The relative mobility of the fluid phase being produced or injected.
+        :param well_index: The well index (md*ft).
+        :param fluid: The fluid being produced or injected.
+        :param formation_volume_factor: Formation volume factor of the fluid (bbl/STB or ft³/SCF).
+        :param allocation_fraction: Fraction of target rate to allocate to this cell (for multi-cell wells).
+        :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
+        :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
+        :param pvt_tables: `PVTTables` object for fluid property lookups
+        :param kwargs: Additional control-specific context (e.g., primary phase properties for CoupledRateControl).
+        :return: `ControlResult` containing the flow rate (bbl/day or
+            ft³/day) and effective BHP (psi).
+        """
+        return self.control.get_control(
             pressure=pressure,
             temperature=temperature,
             phase_mobility=phase_mobility,

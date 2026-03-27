@@ -174,7 +174,7 @@ See [Time Step Control](simulation/timestep-control.md) for guidance on adjustin
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `relative_mobility_range` | `RelativeMobilityRange` | See below | Min/max relative mobility per phase |
+| `relative_mobility_range` | `PhaseRange` | See below | Min/max relative mobility per phase |
 | `total_compressibility_range` | `Range` | `(1e-24, 1e-2)` | Min/max total compressibility |
 | `phase_appearance_tolerance` | `float` | `1e-6` | Saturation below which a phase is absent |
 

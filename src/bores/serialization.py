@@ -1218,6 +1218,10 @@ def serialize_ndarray(
     shape = list(a.shape)
     base = {"__ndarray__": True, "dtype": dtype.str, "shape": shape}
 
+    # Handle empty arrays before any access to elements
+    if a.size == 0:
+        return {**base, "encoding": "empty"}
+
     if _sniff_scalar(a):
         # Store the fill value as a Python scalar so JSON/orjson can encode it.
         # Use item() to convert numpy scalar → Python native.
@@ -1274,7 +1278,10 @@ def deserialize_ndarray(
     shape = tuple(int(s) for s in data["shape"])  # type: ignore
     encoding = data.get("encoding", "dense")  # type: ignore # legacy dicts have no encoding key
 
-    if encoding == "scalar":
+    if encoding == "empty":
+        arr = np.empty(shape, dtype=stored_dtype)
+
+    elif encoding == "scalar":
         arr = np.full(shape, fill_value=data["value"], dtype=stored_dtype)  # type: ignore
 
     elif encoding == "layered":

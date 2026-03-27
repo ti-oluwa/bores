@@ -8,6 +8,7 @@ from bores._precision import get_dtype
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
+from bores.datastructures import PhaseTensorsProxy
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
@@ -17,7 +18,11 @@ from bores.solvers.base import (
     _warn_production_rate,
     compute_mobility_grids,
 )
-from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
+from bores.types import (
+    FluidPhase,
+    ThreeDimensionalGrid,
+    ThreeDimensions,
+)
 from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
 from bores.wells.indices import WellIndicesCache
@@ -47,6 +52,10 @@ def evolve_pressure(
     wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
+    injection_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    production_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     pad_width: int = 1,
 ) -> EvolutionResult[ExplicitPressureSolution, None]:
     """
@@ -222,6 +231,10 @@ def evolve_pressure(
             time=time,
             config=config,
             well_indices_cache=well_indices_cache,
+            injection_rates=injection_rates,
+            production_rates=production_rates,
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
             dtype=dtype,
             pad_width=pad_width,
         )
@@ -272,6 +285,10 @@ def evolve_pressure(
             time=time,
             config=config,
             well_indices_cache=well_indices_cache,
+            injection_rates=injection_rates,
+            production_rates=production_rates,
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
             dtype=dtype,
             pad_width=pad_width,
         )
@@ -706,6 +723,10 @@ def compute_well_rate_grid(
     config: Config,
     well_indices_cache: WellIndicesCache,
     dtype: np.typing.DTypeLike,
+    injection_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    production_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     pad_width: int = 1,
 ) -> ThreeDimensionalGrid:
     """
@@ -809,7 +830,7 @@ def compute_well_rate_grid(
             )
             effective_mobility = typing.cast(float, total_mobility)
 
-            cell_injection_rate = well.get_flow_rate(
+            flow_rate, bhp = well.get_control(
                 pressure=cell_oil_pressure,
                 temperature=cell_temperature,
                 well_index=well_index,
@@ -823,9 +844,9 @@ def compute_well_rate_grid(
             )
 
             # Check for backflow (negative injection)
-            if cell_injection_rate < 0.0 and config.warn_well_anomalies:
+            if flow_rate < 0.0 and config.warn_well_anomalies:
                 _warn_injection_rate(
-                    injection_rate=cell_injection_rate,
+                    injection_rate=flow_rate,
                     well_name=well.name,
                     time=time,
                     cell=(i - pad_width, j - pad_width, k - pad_width),
@@ -835,9 +856,37 @@ def compute_well_rate_grid(
                 )
 
             if injected_phase != FluidPhase.GAS:
-                cell_injection_rate *= bbl_to_ft3
+                flow_rate *= bbl_to_ft3
 
-            well_rate_grid[i, j, k] += cell_injection_rate
+            well_rate_grid[i, j, k] += flow_rate
+
+            if injection_rates is not None:
+                if injected_phase == FluidPhase.GAS:
+                    injection_rates[i - pad_width, j - pad_width, k - pad_width] = (
+                        0.0,
+                        0.0,
+                        flow_rate,
+                    )
+                else:
+                    injection_rates[i - pad_width, j - pad_width, k - pad_width] = (
+                        flow_rate,
+                        0.0,
+                        0.0,
+                    )
+
+            if injection_bhps is not None:
+                if injected_phase == FluidPhase.GAS:
+                    injection_bhps[i - pad_width, j - pad_width, k - pad_width] = (
+                        0.0,
+                        0.0,
+                        bhp,
+                    )
+                else:
+                    injection_bhps[i - pad_width, j - pad_width, k - pad_width] = (
+                        bhp,
+                        0.0,
+                        0.0,
+                    )
 
     # Process production wells
     for well in wells.production_wells:
@@ -897,6 +946,12 @@ def compute_well_rate_grid(
                     ),
                 )
 
+            water_rate = 0.0
+            oil_rate = 0.0
+            gas_rate = 0.0
+            water_bhp = 0.0
+            oil_bhp = 0.0
+            gas_bhp = 0.0
             for produced_fluid in well.produced_fluids:
                 produced_phase = produced_fluid.phase
 
@@ -937,7 +992,7 @@ def compute_well_rate_grid(
                 )
                 # Compute production rate (bbls/day for liquids, ft³/day for gas)
                 # Note: Production rates are negative by convention
-                production_rate = well.get_flow_rate(
+                flow_rate, bhp = well.get_control(
                     pressure=cell_oil_pressure,
                     temperature=cell_temperature,
                     well_index=well_index,
@@ -952,9 +1007,9 @@ def compute_well_rate_grid(
                 )
 
                 # Check for backflow (positive production = injection)
-                if production_rate > 0.0 and config.warn_well_anomalies:
+                if flow_rate > 0.0 and config.warn_well_anomalies:
                     _warn_production_rate(
-                        production_rate=production_rate,
+                        production_rate=flow_rate,
                         well_name=well.name,
                         time=time,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
@@ -965,10 +1020,34 @@ def compute_well_rate_grid(
 
                 # Convert to ft³/day if not already
                 if produced_phase != FluidPhase.GAS:
-                    production_rate *= bbl_to_ft3
+                    flow_rate *= bbl_to_ft3
 
                 # Production rates are already negative
-                well_rate_grid[i, j, k] += production_rate
+                well_rate_grid[i, j, k] += flow_rate
+
+                if produced_phase == FluidPhase.GAS:
+                    gas_rate += flow_rate
+                    gas_bhp = bhp
+                elif produced_phase == FluidPhase.WATER:
+                    water_rate += flow_rate
+                    water_bhp = bhp
+                else:
+                    oil_rate += flow_rate
+                    oil_bhp = bhp
+
+            if production_rates is not None:
+                production_rates[i - pad_width, j - pad_width, k - pad_width] = (
+                    water_rate,
+                    oil_rate,
+                    gas_rate,
+                )
+
+            if production_bhps is not None:
+                production_bhps[i - pad_width, j - pad_width, k - pad_width] = (
+                    water_bhp,
+                    oil_bhp,
+                    gas_bhp,
+                )
 
     return well_rate_grid
 

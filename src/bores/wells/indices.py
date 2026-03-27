@@ -15,8 +15,11 @@ class PerforationIndex:
     """Well index for a single perforated cell."""
 
     cell: typing.Tuple[int, int, int]  # padded (i, j, k)
+    """Perforated cell padded indices"""
     cell_1d_index: int
+    """Perforated cell padded 1D index"""
     well_index: float
+    """Perforated cell well index"""
 
 
 @attrs.frozen
@@ -24,8 +27,11 @@ class WellIndices:
     """Computed well indices for all perforations of a single well."""
 
     well_name: str
+    """Well name"""
     perforations: typing.Tuple[PerforationIndex, ...]
+    """Tuple of `PerforationIndex` objects"""
     total_well_index: float
+    """Sum total of all perforated cells' well indices"""
 
     def allocation_fraction(self, perforation: PerforationIndex) -> float:
         if self.total_well_index <= 0:
@@ -40,8 +46,10 @@ class WellIndices:
 class WellIndicesCache:
     """(Pre)computed well indices for all wells."""
 
-    injection: typing.Dict[str, WellIndices]  # keyed by well name
+    injection: typing.Dict[str, WellIndices]
+    """Mapping of injection well names to their corresponding `WellIndices`"""
     production: typing.Dict[str, WellIndices]
+    """Mapping of injection well names to their corresponding `WellIndices`"""
 
 
 def build_well_indices_cache(

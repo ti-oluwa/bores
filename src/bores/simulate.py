@@ -19,14 +19,15 @@ from bores.boundary_conditions import (
 )
 from bores.config import Config
 from bores.constants import c
-from bores.errors import SimulationError, StopSimulation, TimingError, ValidationError
-from bores.grids.base import (
-    CapillaryPressureGrids,
-    RateGrids,
-    RelativeMobilityGrids,
-    _RateGridsProxy,
-    build_uniform_grid,
+from bores.datastructures import (
+    BottomHolePressure,
+    BottomHolePressures,
+    PhaseTensorsProxy,
+    Rates,
+    SparseTensor,
 )
+from bores.errors import SimulationError, StopSimulation, TimingError, ValidationError
+from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.boundary_conditions import (
     apply_boundary_conditions,
     apply_pressure_boundary_condition,
@@ -42,7 +43,7 @@ from bores.grids.updates import (
     update_pvt_grids,
     update_residual_saturation_grids,
 )
-from bores.grids.utils import pad_grid, unpad_grid
+from bores.grids.utils import pad_grid
 from bores.models import (
     FluidProperties,
     ReservoirModel,
@@ -102,18 +103,14 @@ class StepResult(typing.Generic[NDimension]):
     """Updated rock properties after the time step."""
     saturation_history: SaturationHistory[NDimension]
     """Updated saturation history after the time step."""
-    oil_injection_grid: NDimensionalGrid[NDimension]
-    """Grid of oil injection rates during the time step."""
-    water_injection_grid: NDimensionalGrid[NDimension]
-    """Grid of water injection rates during the time step."""
-    gas_injection_grid: NDimensionalGrid[NDimension]
-    """Grid of gas injection rates during the time step."""
-    oil_production_grid: NDimensionalGrid[NDimension]
-    """Grid of oil production rates during the time step."""
-    water_production_grid: NDimensionalGrid[NDimension]
-    """Grid of water production rates during the time step."""
-    gas_production_grid: NDimensionalGrid[NDimension]
-    """Grid of gas production rates during the time step."""
+    injection_rates: typing.Optional[Rates[float, NDimension]] = None
+    """Phase injection rates during the time step."""
+    production_rates: typing.Optional[Rates[float, NDimension]] = None
+    """Phase production rates during the time step."""
+    injection_bhps: typing.Optional[BottomHolePressures[float, NDimension]] = None
+    """Phase injection bottom hole pressures during the time step"""
+    production_bhps: typing.Optional[BottomHolePressures[float, NDimension]] = None
+    """Phase production bottom hole pressures during the time step"""
     success: bool = True
     """Whether the time step evolution was successful."""
     message: typing.Optional[str] = None
@@ -133,7 +130,6 @@ class SaturationChangeCheckResult:
 def _validate_pressure_range(
     padded_pressure_grid: NDimensionalGrid[ThreeDimensions],
     time_step: int,
-    padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
     padded_fluid_properties: FluidProperties[ThreeDimensions],
     padded_rock_properties: RockProperties[ThreeDimensions],
     padded_saturation_history: SaturationHistory[ThreeDimensions],
@@ -175,19 +171,12 @@ def _validate_pressure_range(
             + f"\nAt Time Step {time_step}."
         )
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
             success=False,
             message=message,
         )
-
     return None
 
 
@@ -272,7 +261,6 @@ def _check_saturation_changes(
 
 def _run_impes_step(
     time_step: int,
-    padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
     grid_shape: ThreeDimensions,
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: NDimensionalGrid[ThreeDimensions],
@@ -320,6 +308,26 @@ def _run_impes_step(
     old_pressure_grid = padded_fluid_properties.pressure_grid.copy()
 
     logger.debug("Evolving pressure (implicit)...")
+    injection_rates = Rates(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
+    production_rates = Rates(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
+    injection_bhps = BottomHolePressures(
+        oil=BottomHolePressure(grid_shape, dtype=float),
+        water=BottomHolePressure(grid_shape, dtype=float),
+        gas=BottomHolePressure(grid_shape, dtype=float),
+    )
+    production_bhps = BottomHolePressures(
+        oil=BottomHolePressure(grid_shape, dtype=float),
+        water=BottomHolePressure(grid_shape, dtype=float),
+        gas=BottomHolePressure(grid_shape, dtype=float),
+    )
     pressure_result = implicit.evolve_pressure(
         cell_dimension=cell_dimension,
         thickness_grid=padded_thickness_grid,
@@ -333,6 +341,26 @@ def _run_impes_step(
         capillary_pressure_grids=padded_capillary_pressure_grids,
         wells=wells,
         config=config,
+        injection_rates=PhaseTensorsProxy(
+            oil=injection_rates.oil,
+            water=injection_rates.water,
+            gas=injection_rates.gas,
+        ),
+        production_rates=PhaseTensorsProxy(
+            oil=production_rates.oil,
+            water=production_rates.water,
+            gas=production_rates.gas,
+        ),
+        injection_bhps=PhaseTensorsProxy(
+            oil=injection_bhps.oil,
+            water=injection_bhps.water,
+            gas=injection_bhps.gas,
+        ),
+        production_bhps=PhaseTensorsProxy(
+            oil=production_bhps.oil,
+            water=production_bhps.water,
+            gas=production_bhps.gas,
+        ),
         pad_width=pad_width,
         well_indices_cache=well_indices_cache,
     )
@@ -341,12 +369,6 @@ def _run_impes_step(
             f"Implicit pressure evolution failed at time step {time_step}: \n{pressure_result.message}"
         )
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -366,12 +388,6 @@ def _run_impes_step(
         )
         logger.error(message)
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -387,7 +403,6 @@ def _run_impes_step(
     pressure_validation_result = _validate_pressure_range(
         padded_pressure_grid=padded_pressure_grid,
         time_step=time_step,
-        padded_zeros_grid=padded_zeros_grid,
         padded_fluid_properties=padded_fluid_properties,
         padded_rock_properties=padded_rock_properties,
         padded_saturation_history=padded_saturation_history,
@@ -459,7 +474,6 @@ def _run_impes_step(
         old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
     )
-
     # Check flash-induced saturation changes before proceeding to saturation solver.
     # If the liberation flash itself violates the saturation change limits, reject
     # the step immediately, as there's no point running the full saturation solver.
@@ -492,12 +506,6 @@ def _run_impes_step(
         )
         logger.debug(message)
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -508,6 +516,16 @@ def _run_impes_step(
                 "max_allowed_saturation_change": flash_sat_check.max_allowed_phase_saturation_change,
             },
         )
+
+    # Updated fluid properties again as solution gas-to-oil ratio may have changed
+    # and some PVT properties depend on it
+    padded_fluid_properties = update_pvt_grids(
+        fluid_properties=padded_fluid_properties,
+        wells=wells,
+        miscibility_model=miscibility_model,
+        pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
+    )
 
     # Apply boundary conditions to updated saturation grids
     logger.debug(
@@ -573,49 +591,64 @@ def _run_impes_step(
 
     # Saturation evolution (explicit)
     logger.debug("Evolving saturation (explicit)...")
-    # Build zeros grids to track production and injection at each time step
-    oil_injection_grid = padded_zeros_grid.copy()
-    water_injection_grid = padded_zeros_grid.copy()
-    gas_injection_grid = padded_zeros_grid.copy()
-    oil_production_grid = padded_zeros_grid.copy()
-    water_production_grid = padded_zeros_grid.copy()
-    gas_production_grid = padded_zeros_grid.copy()
-
     # Compute pressure change grid for PVT volume correction
     pressure_change_grid = padded_pressure_grid - old_pressure_grid
 
     if miscibility_model == "immiscible":
-        evolve_saturation = explicit.evolve_saturation
+        saturation_result = explicit.evolve_saturation(
+            cell_dimension=cell_dimension,
+            thickness_grid=padded_thickness_grid,
+            elevation_grid=padded_elevation_grid,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            rock_properties=padded_rock_properties,
+            fluid_properties=padded_fluid_properties,
+            relative_mobility_grids=padded_relative_mobility_grids,
+            capillary_pressure_grids=padded_capillary_pressure_grids,
+            config=config,
+            well_indices_cache=well_indices_cache,
+            injection_rates=PhaseTensorsProxy(
+                oil=injection_rates.oil,
+                water=injection_rates.water,
+                gas=injection_rates.gas,
+            ),
+            production_rates=PhaseTensorsProxy(
+                oil=production_rates.oil,
+                water=production_rates.water,
+                gas=production_rates.gas,
+            ),
+            pressure_change_grid=pressure_change_grid,
+            pad_width=pad_width,
+        )
     else:
-        evolve_saturation = explicit.evolve_miscible_saturation
+        saturation_result = explicit.evolve_miscible_saturation(
+            cell_dimension=cell_dimension,
+            thickness_grid=padded_thickness_grid,
+            elevation_grid=padded_elevation_grid,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
+            rock_properties=padded_rock_properties,
+            fluid_properties=padded_fluid_properties,
+            relative_mobility_grids=padded_relative_mobility_grids,
+            capillary_pressure_grids=padded_capillary_pressure_grids,
+            wells=wells,
+            config=config,
+            well_indices_cache=well_indices_cache,
+            injection_rates=PhaseTensorsProxy(
+                oil=injection_rates.oil,
+                water=injection_rates.water,
+                gas=injection_rates.gas,
+            ),
+            production_rates=PhaseTensorsProxy(
+                oil=production_rates.oil,
+                water=production_rates.water,
+                gas=production_rates.gas,
+            ),
+            pressure_change_grid=pressure_change_grid,
+            pad_width=pad_width,
+        )
 
-    saturation_result = evolve_saturation(
-        cell_dimension=cell_dimension,
-        thickness_grid=padded_thickness_grid,
-        elevation_grid=padded_elevation_grid,
-        time_step=time_step,
-        time_step_size=time_step_size,
-        time=time,
-        rock_properties=padded_rock_properties,
-        fluid_properties=padded_fluid_properties,
-        relative_mobility_grids=padded_relative_mobility_grids,
-        capillary_pressure_grids=padded_capillary_pressure_grids,
-        wells=wells,
-        config=config,
-        well_indices_cache=well_indices_cache,
-        injection_grid=_RateGridsProxy(
-            oil=oil_injection_grid,
-            water=water_injection_grid,
-            gas=gas_injection_grid,
-        ),
-        production_grid=_RateGridsProxy(
-            oil=oil_production_grid,
-            water=water_production_grid,
-            gas=gas_production_grid,
-        ),
-        pressure_change_grid=pressure_change_grid,
-        pad_width=pad_width,
-    )
     saturation_solution = saturation_result.value
     saturation_change_result = _check_saturation_changes(
         max_oil_saturation_change=saturation_solution.max_oil_saturation_change,
@@ -641,12 +674,6 @@ def _run_impes_step(
             f"Explicit saturation evolution failed at time step {time_step}: \n{saturation_result.message}"
         )
         return StepResult(
-            oil_injection_grid=oil_injection_grid,
-            water_injection_grid=water_injection_grid,
-            gas_injection_grid=gas_injection_grid,
-            oil_production_grid=oil_production_grid,
-            water_production_grid=water_production_grid,
-            gas_production_grid=gas_production_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -666,12 +693,6 @@ def _run_impes_step(
         """
         logger.debug(message)
         return StepResult(
-            oil_injection_grid=oil_injection_grid,
-            water_injection_grid=water_injection_grid,
-            gas_injection_grid=gas_injection_grid,
-            oil_production_grid=oil_production_grid,
-            water_production_grid=water_production_grid,
-            gas_production_grid=gas_production_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -750,15 +771,13 @@ def _run_impes_step(
     )
     logger.debug("Saturation evolution completed!")
     return StepResult(
-        oil_injection_grid=oil_injection_grid,
-        water_injection_grid=water_injection_grid,
-        gas_injection_grid=gas_injection_grid,
-        oil_production_grid=oil_production_grid,
-        water_production_grid=water_production_grid,
-        gas_production_grid=gas_production_grid,
         fluid_properties=padded_fluid_properties,
         rock_properties=padded_rock_properties,
         saturation_history=padded_saturation_history,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
         success=True,
         message=saturation_result.message,
         timer_kwargs=timer_kwargs,
@@ -767,7 +786,6 @@ def _run_impes_step(
 
 def _run_implicit_step(
     time_step: int,
-    padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
     grid_shape: ThreeDimensions,
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: NDimensionalGrid[ThreeDimensions],
@@ -819,6 +837,26 @@ def _run_implicit_step(
     old_pressure_grid = padded_fluid_properties.pressure_grid.copy()
 
     logger.debug("Evolving pressure (implicit)...")
+    injection_rates = Rates(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
+    production_rates = Rates(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
+    injection_bhps = BottomHolePressures(
+        oil=BottomHolePressure(grid_shape, dtype=float),
+        water=BottomHolePressure(grid_shape, dtype=float),
+        gas=BottomHolePressure(grid_shape, dtype=float),
+    )
+    production_bhps = BottomHolePressures(
+        oil=BottomHolePressure(grid_shape, dtype=float),
+        water=BottomHolePressure(grid_shape, dtype=float),
+        gas=BottomHolePressure(grid_shape, dtype=float),
+    )
     pressure_result = implicit.evolve_pressure(
         cell_dimension=cell_dimension,
         thickness_grid=padded_thickness_grid,
@@ -833,6 +871,26 @@ def _run_implicit_step(
         wells=wells,
         config=config,
         well_indices_cache=well_indices_cache,
+        injection_rates=PhaseTensorsProxy(
+            oil=injection_rates.oil,
+            water=injection_rates.water,
+            gas=injection_rates.gas,
+        ),
+        production_rates=PhaseTensorsProxy(
+            oil=production_rates.oil,
+            water=production_rates.water,
+            gas=production_rates.gas,
+        ),
+        injection_bhps=PhaseTensorsProxy(
+            oil=injection_bhps.oil,
+            water=injection_bhps.water,
+            gas=injection_bhps.gas,
+        ),
+        production_bhps=PhaseTensorsProxy(
+            oil=production_bhps.oil,
+            water=production_bhps.water,
+            gas=production_bhps.gas,
+        ),
         pad_width=pad_width,
     )
     if not pressure_result.success:
@@ -840,12 +898,6 @@ def _run_implicit_step(
             f"Implicit pressure evolution failed at time step {time_step}: \n{pressure_result.message}"
         )
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -865,12 +917,6 @@ def _run_implicit_step(
         )
         logger.error(message)
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -886,7 +932,6 @@ def _run_implicit_step(
     pressure_validation_result = _validate_pressure_range(
         padded_pressure_grid=padded_pressure_grid,
         time_step=time_step,
-        padded_zeros_grid=padded_zeros_grid,
         padded_fluid_properties=padded_fluid_properties,
         padded_rock_properties=padded_rock_properties,
         padded_saturation_history=padded_saturation_history,
@@ -977,12 +1022,6 @@ def _run_implicit_step(
         )
         logger.debug(message)
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -993,6 +1032,16 @@ def _run_implicit_step(
                 "max_allowed_saturation_change": flash_sat_check.max_allowed_phase_saturation_change,
             },
         )
+
+    # Update fluid properties again as solution gas-to-oil ratio may have changed
+    # and some PVT properties depend on it
+    padded_fluid_properties = update_pvt_grids(
+        fluid_properties=padded_fluid_properties,
+        wells=wells,
+        miscibility_model=miscibility_model,
+        pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
+    )
 
     # Apply boundary conditions to updated saturation grids
     logger.debug(
@@ -1014,19 +1063,10 @@ def _run_implicit_step(
     logger.debug("Evolving saturation (implicit, Newton-Raphson)...")
     pressure_change_grid = padded_pressure_grid - old_pressure_grid
 
-    # Build zeros grids to track production and injection at each time step
-    oil_injection_grid = padded_zeros_grid.copy()
-    water_injection_grid = padded_zeros_grid.copy()
-    gas_injection_grid = padded_zeros_grid.copy()
-    oil_production_grid = padded_zeros_grid.copy()
-    water_production_grid = padded_zeros_grid.copy()
-    gas_production_grid = padded_zeros_grid.copy()
-
     saturation_result = implicit.evolve_saturation(
         cell_dimension=cell_dimension,
         thickness_grid=padded_thickness_grid,
         elevation_grid=padded_elevation_grid,
-        time_step=time_step,
         time_step_size=time_step_size,
         time=time,
         rock_properties=padded_rock_properties,
@@ -1034,15 +1074,15 @@ def _run_implicit_step(
         wells=wells,
         config=config,
         well_indices_cache=well_indices_cache,
-        injection_grid=_RateGridsProxy(
-            oil=oil_injection_grid,
-            water=water_injection_grid,
-            gas=gas_injection_grid,
+        injection_rates=PhaseTensorsProxy(
+            oil=injection_rates.oil,
+            water=injection_rates.water,
+            gas=injection_rates.gas,
         ),
-        production_grid=_RateGridsProxy(
-            oil=oil_production_grid,
-            water=water_production_grid,
-            gas=gas_production_grid,
+        production_rates=PhaseTensorsProxy(
+            oil=production_rates.oil,
+            water=production_rates.water,
+            gas=production_rates.gas,
         ),
         pressure_change_grid=pressure_change_grid,
         pad_width=pad_width,
@@ -1071,12 +1111,6 @@ def _run_implicit_step(
             f"Implicit saturation evolution failed at time step {time_step}: \n{saturation_result.message}"
         )
         return StepResult(
-            oil_injection_grid=oil_injection_grid,
-            water_injection_grid=water_injection_grid,
-            gas_injection_grid=gas_injection_grid,
-            oil_production_grid=oil_production_grid,
-            water_production_grid=water_production_grid,
-            gas_production_grid=gas_production_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -1096,12 +1130,6 @@ def _run_implicit_step(
         """
         logger.debug(message)
         return StepResult(
-            oil_injection_grid=oil_injection_grid,
-            water_injection_grid=water_injection_grid,
-            gas_injection_grid=gas_injection_grid,
-            oil_production_grid=oil_production_grid,
-            water_production_grid=water_production_grid,
-            gas_production_grid=gas_production_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -1169,15 +1197,13 @@ def _run_implicit_step(
 
     logger.debug("Sequential implicit step completed!")
     return StepResult(
-        oil_injection_grid=oil_injection_grid,
-        water_injection_grid=water_injection_grid,
-        gas_injection_grid=gas_injection_grid,
-        oil_production_grid=oil_production_grid,
-        water_production_grid=water_production_grid,
-        gas_production_grid=gas_production_grid,
         fluid_properties=padded_fluid_properties,
         rock_properties=padded_rock_properties,
         saturation_history=padded_saturation_history,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
         success=True,
         message=saturation_result.message,
         timer_kwargs=timer_kwargs,
@@ -1186,7 +1212,6 @@ def _run_implicit_step(
 
 def _run_explicit_step(
     time_step: int,
-    padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
     grid_shape: ThreeDimensions,
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: NDimensionalGrid[ThreeDimensions],
@@ -1234,6 +1259,26 @@ def _run_explicit_step(
     old_pressure_grid = padded_fluid_properties.pressure_grid.copy()
 
     logger.debug("Evolving pressure (explicit)...")
+    injection_rates = Rates(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
+    production_rates = Rates(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
+    injection_bhps = BottomHolePressures(
+        oil=BottomHolePressure(grid_shape, dtype=float),
+        water=BottomHolePressure(grid_shape, dtype=float),
+        gas=BottomHolePressure(grid_shape, dtype=float),
+    )
+    production_bhps = BottomHolePressures(
+        oil=BottomHolePressure(grid_shape, dtype=float),
+        water=BottomHolePressure(grid_shape, dtype=float),
+        gas=BottomHolePressure(grid_shape, dtype=float),
+    )
     pressure_result = explicit.evolve_pressure(
         cell_dimension=cell_dimension,
         thickness_grid=padded_thickness_grid,
@@ -1248,6 +1293,26 @@ def _run_explicit_step(
         wells=wells,
         config=config,
         well_indices_cache=well_indices_cache,
+        injection_rates=PhaseTensorsProxy(
+            oil=injection_rates.oil,
+            water=injection_rates.water,
+            gas=injection_rates.gas,
+        ),
+        production_rates=PhaseTensorsProxy(
+            oil=production_rates.oil,
+            water=production_rates.water,
+            gas=production_rates.gas,
+        ),
+        injection_bhps=PhaseTensorsProxy(
+            oil=injection_bhps.oil,
+            water=injection_bhps.water,
+            gas=injection_bhps.gas,
+        ),
+        production_bhps=PhaseTensorsProxy(
+            oil=production_bhps.oil,
+            water=production_bhps.water,
+            gas=production_bhps.gas,
+        ),
         pad_width=pad_width,
     )
     pressure_solution = pressure_result.value
@@ -1265,12 +1330,6 @@ def _run_explicit_step(
             f"Explicit pressure evolution failed at time step {time_step}: \n{pressure_result.message}"
         )
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -1287,12 +1346,6 @@ def _run_explicit_step(
         )
         logger.debug(message)
         return StepResult(
-            oil_injection_grid=padded_zeros_grid,
-            water_injection_grid=padded_zeros_grid,
-            gas_injection_grid=padded_zeros_grid,
-            oil_production_grid=padded_zeros_grid,
-            water_production_grid=padded_zeros_grid,
-            gas_production_grid=padded_zeros_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -1310,7 +1363,6 @@ def _run_explicit_step(
     pressure_validation_result = _validate_pressure_range(
         padded_pressure_grid=padded_pressure_grid,
         time_step=time_step,
-        padded_zeros_grid=padded_zeros_grid,
         padded_fluid_properties=padded_fluid_properties,
         padded_rock_properties=padded_rock_properties,
         padded_saturation_history=padded_saturation_history,
@@ -1318,12 +1370,6 @@ def _run_explicit_step(
     if pressure_validation_result is not None:
         # Add `timer_kwargs` to the result for explicit scheme
         return StepResult(
-            oil_injection_grid=pressure_validation_result.oil_injection_grid,
-            water_injection_grid=pressure_validation_result.water_injection_grid,
-            gas_injection_grid=pressure_validation_result.gas_injection_grid,
-            oil_production_grid=pressure_validation_result.oil_production_grid,
-            water_production_grid=pressure_validation_result.water_production_grid,
-            gas_production_grid=pressure_validation_result.gas_production_grid,
             fluid_properties=pressure_validation_result.fluid_properties,
             rock_properties=pressure_validation_result.rock_properties,
             saturation_history=pressure_validation_result.saturation_history,
@@ -1365,51 +1411,65 @@ def _run_explicit_step(
     # Saturation evolution (explicit)
     logger.debug("Evolving saturation (explicit)...")
 
-    # Build zeros grids to track production and injection at each time step
-    oil_injection_grid = padded_zeros_grid.copy()
-    water_injection_grid = padded_zeros_grid.copy()
-    gas_injection_grid = padded_zeros_grid.copy()
-    oil_production_grid = padded_zeros_grid.copy()
-    water_production_grid = padded_zeros_grid.copy()
-    gas_production_grid = padded_zeros_grid.copy()
-
     # Compute pressure change grid for PVT volume correction
     pressure_change_grid = padded_pressure_grid - old_pressure_grid
 
     if miscibility_model == "immiscible":
-        evolve_saturation = explicit.evolve_saturation
+        saturation_result = explicit.evolve_saturation(
+            cell_dimension=cell_dimension,
+            thickness_grid=padded_thickness_grid,
+            elevation_grid=padded_elevation_grid,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            rock_properties=padded_rock_properties,
+            fluid_properties=padded_fluid_properties,
+            relative_mobility_grids=padded_relative_mobility_grids,
+            capillary_pressure_grids=padded_capillary_pressure_grids,
+            config=config,
+            well_indices_cache=well_indices_cache,
+            injection_rates=PhaseTensorsProxy(
+                oil=injection_rates.oil,
+                water=injection_rates.water,
+                gas=injection_rates.gas,
+            ),
+            production_rates=PhaseTensorsProxy(
+                oil=production_rates.oil,
+                water=production_rates.water,
+                gas=production_rates.gas,
+            ),
+            pressure_change_grid=pressure_change_grid,
+            pad_width=pad_width,
+        )
     else:
-        evolve_saturation = explicit.evolve_miscible_saturation
+        saturation_result = explicit.evolve_miscible_saturation(
+            cell_dimension=cell_dimension,
+            thickness_grid=padded_thickness_grid,
+            elevation_grid=padded_elevation_grid,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
+            rock_properties=padded_rock_properties,
+            fluid_properties=padded_fluid_properties,
+            relative_mobility_grids=padded_relative_mobility_grids,
+            capillary_pressure_grids=padded_capillary_pressure_grids,
+            wells=wells,
+            config=config,
+            well_indices_cache=well_indices_cache,
+            injection_rates=PhaseTensorsProxy(
+                oil=injection_rates.oil,
+                water=injection_rates.water,
+                gas=injection_rates.gas,
+            ),
+            production_rates=PhaseTensorsProxy(
+                oil=production_rates.oil,
+                water=production_rates.water,
+                gas=production_rates.gas,
+            ),
+            pressure_change_grid=pressure_change_grid,
+            pad_width=pad_width,
+        )
 
-    saturation_result = evolve_saturation(
-        cell_dimension=cell_dimension,
-        thickness_grid=padded_thickness_grid,
-        elevation_grid=padded_elevation_grid,
-        time_step=time_step,
-        time_step_size=time_step_size,
-        time=time,
-        rock_properties=padded_rock_properties,
-        fluid_properties=padded_fluid_properties,
-        relative_mobility_grids=padded_relative_mobility_grids,
-        capillary_pressure_grids=padded_capillary_pressure_grids,
-        wells=wells,
-        config=config,
-        well_indices_cache=well_indices_cache,
-        injection_grid=_RateGridsProxy(
-            oil=oil_injection_grid,
-            water=water_injection_grid,
-            gas=gas_injection_grid,
-        ),
-        production_grid=_RateGridsProxy(
-            oil=oil_production_grid,
-            water=water_production_grid,
-            gas=gas_production_grid,
-        ),
-        pressure_change_grid=pressure_change_grid,
-        pad_width=pad_width,
-    )
     saturation_solution = saturation_result.value
-
     saturation_change_result = _check_saturation_changes(
         max_oil_saturation_change=saturation_solution.max_oil_saturation_change,
         max_water_saturation_change=saturation_solution.max_water_saturation_change,
@@ -1434,12 +1494,6 @@ def _run_explicit_step(
             f"Explicit saturation evolution failed at time step {time_step}: \n{saturation_result.message}"
         )
         return StepResult(
-            oil_injection_grid=oil_injection_grid,
-            water_injection_grid=water_injection_grid,
-            gas_injection_grid=gas_injection_grid,
-            oil_production_grid=oil_production_grid,
-            water_production_grid=water_production_grid,
-            gas_production_grid=gas_production_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -1459,12 +1513,6 @@ def _run_explicit_step(
         """
         logger.error(message)
         return StepResult(
-            oil_injection_grid=oil_injection_grid,
-            water_injection_grid=water_injection_grid,
-            gas_injection_grid=gas_injection_grid,
-            oil_production_grid=oil_production_grid,
-            water_production_grid=water_production_grid,
-            gas_production_grid=gas_production_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -1581,12 +1629,6 @@ def _run_explicit_step(
         )
         logger.debug(message)
         return StepResult(
-            oil_injection_grid=oil_injection_grid,
-            water_injection_grid=water_injection_grid,
-            gas_injection_grid=gas_injection_grid,
-            oil_production_grid=oil_production_grid,
-            water_production_grid=water_production_grid,
-            gas_production_grid=gas_production_grid,
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
             saturation_history=padded_saturation_history,
@@ -1597,6 +1639,16 @@ def _run_explicit_step(
                 "max_allowed_saturation_change": flash_sat_check.max_allowed_phase_saturation_change,
             },
         )
+
+    # Updated fluid properties again as solution gas-to-oil ratio may have changed
+    # and some PVT properties depend on it
+    padded_fluid_properties = update_pvt_grids(
+        fluid_properties=padded_fluid_properties,
+        wells=wells,
+        miscibility_model=miscibility_model,
+        pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
+    )
 
     # Apply boundary conditions to updated saturation grids
     logger.debug(
@@ -1631,12 +1683,10 @@ def _run_explicit_step(
         fluid_properties=padded_fluid_properties,
         rock_properties=padded_rock_properties,
         saturation_history=padded_saturation_history,
-        oil_injection_grid=oil_injection_grid,
-        water_injection_grid=water_injection_grid,
-        gas_injection_grid=gas_injection_grid,
-        oil_production_grid=oil_production_grid,
-        water_production_grid=water_production_grid,
-        gas_production_grid=gas_production_grid,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
         success=True,
         message=saturation_result.message,
         timer_kwargs=timer_kwargs,
@@ -1955,13 +2005,26 @@ def run(
         capillary_pressure_grids = padded_capillary_pressure_grids.unpad(
             pad_width=pad_width
         )
-        zeros_grid = build_uniform_grid(model.grid_shape, value=0.0)
-        oil_injection_grid = zeros_grid
-        water_injection_grid = zeros_grid.copy()
-        gas_injection_grid = zeros_grid.copy()
-        oil_production_grid = zeros_grid.copy()
-        water_production_grid = zeros_grid.copy()
-        gas_production_grid = zeros_grid.copy()
+        injection_rates = Rates(
+            oil=SparseTensor(grid_shape, dtype=float),
+            water=SparseTensor(grid_shape, dtype=float),
+            gas=SparseTensor(grid_shape, dtype=float),
+        )
+        production_rates = Rates(
+            oil=SparseTensor(grid_shape, dtype=float),
+            water=SparseTensor(grid_shape, dtype=float),
+            gas=SparseTensor(grid_shape, dtype=float),
+        )
+        injection_bhps = BottomHolePressures(
+            oil=BottomHolePressure(grid_shape, dtype=float),
+            water=BottomHolePressure(grid_shape, dtype=float),
+            gas=BottomHolePressure(grid_shape, dtype=float),
+        )
+        production_bhps = BottomHolePressures(
+            oil=BottomHolePressure(grid_shape, dtype=float),
+            water=BottomHolePressure(grid_shape, dtype=float),
+            gas=BottomHolePressure(grid_shape, dtype=float),
+        )
         state = ModelState(
             step=timer.step,
             step_size=timer.step_size,
@@ -1971,16 +2034,10 @@ def run(
             relative_mobilities=relative_mobility_grids,
             relative_permeabilities=relperm_grids,
             capillary_pressures=capillary_pressure_grids,
-            injection=RateGrids(
-                oil=oil_injection_grid,
-                water=water_injection_grid,
-                gas=gas_injection_grid,
-            ),
-            production=RateGrids(
-                oil=oil_production_grid,
-                water=water_production_grid,
-                gas=gas_production_grid,
-            ),
+            injection_rates=injection_rates,
+            production_rates=production_rates,
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
             timer_state=timer.dump_state(),
         )
 
@@ -1991,7 +2048,6 @@ def run(
         no_flow_pressure_bc = isinstance(
             boundary_conditions["pressure"], type(default_bc)
         )
-        padded_zeros_grid = pad_grid(zeros_grid, pad_width=pad_width)
         while not timer.done():
             # We first propose the time step size for the next step
             # `timer.step` is still the last accepted step
@@ -2103,7 +2159,6 @@ def run(
                     result = _run_impes_step(
                         time_step=new_step,
                         grid_shape=grid_shape,
-                        padded_zeros_grid=padded_zeros_grid,
                         cell_dimension=cell_dimension,
                         thickness_grid=thickness_grid,
                         padded_thickness_grid=padded_thickness_grid,
@@ -2126,7 +2181,6 @@ def run(
                     result = _run_implicit_step(
                         time_step=new_step,
                         grid_shape=grid_shape,
-                        padded_zeros_grid=padded_zeros_grid,
                         cell_dimension=cell_dimension,
                         thickness_grid=thickness_grid,
                         padded_thickness_grid=padded_thickness_grid,
@@ -2149,7 +2203,6 @@ def run(
                     result = _run_explicit_step(
                         time_step=new_step,
                         grid_shape=grid_shape,
-                        padded_zeros_grid=padded_zeros_grid,
                         cell_dimension=cell_dimension,
                         thickness_grid=thickness_grid,
                         padded_thickness_grid=padded_thickness_grid,
@@ -2222,39 +2275,15 @@ def run(
                     logger.debug(
                         "Preparing injection and production rate grids for output"
                     )
-                    oil_injection_grid = unpad_grid(
-                        result.oil_injection_grid, pad_width=pad_width
-                    )
-                    water_injection_grid = unpad_grid(
-                        result.water_injection_grid, pad_width=pad_width
-                    )
-                    gas_injection_grid = unpad_grid(
-                        result.gas_injection_grid, pad_width=pad_width
-                    )
-                    oil_production_grid = unpad_grid(
-                        result.oil_production_grid, pad_width=pad_width
-                    )
-                    water_production_grid = unpad_grid(
-                        result.water_production_grid, pad_width=pad_width
-                    )
-                    gas_production_grid = unpad_grid(
-                        result.gas_production_grid, pad_width=pad_width
-                    )
+                    injection_rates = result.injection_rates
+                    production_rates = result.production_rates
+                    injection_bhps = result.injection_bhps
+                    production_bhps = result.production_bhps
+                    assert injection_rates is not None
+                    assert production_rates is not None
+                    assert injection_bhps is not None
+                    assert production_bhps is not None
 
-                    # Negate production rates in-place (use out parameter to avoid -0.0 issues)
-                    np.negative(oil_production_grid, out=oil_production_grid)
-                    np.negative(water_production_grid, out=water_production_grid)
-                    np.negative(gas_production_grid, out=gas_production_grid)
-                    injection_rates = RateGrids(
-                        oil=oil_injection_grid,
-                        water=water_injection_grid,
-                        gas=gas_injection_grid,
-                    )
-                    production_rates = RateGrids(
-                        oil=oil_production_grid,
-                        water=water_production_grid,
-                        gas=gas_production_grid,
-                    )
                     logger.debug("Taking model state snapshot")
                     # Capture the current state of the wells
                     wells_snapshot = copy.deepcopy(wells)
@@ -2286,8 +2315,10 @@ def run(
                         relative_mobilities=relative_mobility_grids,
                         relative_permeabilities=relperm_grids,
                         capillary_pressures=capillary_pressure_grids,
-                        injection=injection_rates,
-                        production=production_rates,
+                        injection_rates=injection_rates,
+                        production_rates=production_rates.abs(),
+                        injection_bhps=injection_bhps,
+                        production_bhps=production_bhps,
                         timer_state=timer.dump_state(),
                     )
                     logger.debug("Yielding model state")

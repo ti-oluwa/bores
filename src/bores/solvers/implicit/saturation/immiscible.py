@@ -11,6 +11,7 @@ from bores._precision import get_dtype
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
+from bores.datastructures import PhaseTensorsProxy
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
@@ -23,22 +24,20 @@ from bores.solvers.base import (
     solve_linear_system,
     to_1D_index_interior_only,
 )
-from bores.solvers.explicit.saturation import (
-    compute_phase_fluxes_from_neighbour,
+from bores.solvers.explicit.saturation.immiscible import (
+    compute_fluxes_from_neighbour,
     compute_well_rate_grids,
 )
 from bores.tables.rock_fluid import RockFluidTables
-from bores.types import (
-    FluidPhase,
-    SupportsSetItem,
-    ThreeDimensionalGrid,
-    ThreeDimensions,
-)
+from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
 from bores.wells.indices import WellIndicesCache
 
 logger = logging.getLogger(__name__)
+
+
+__all__ = ["evolve_saturation"]
 
 
 @attrs.frozen
@@ -246,7 +245,7 @@ def _compute_saturation_residual(
                     cell_thickness, east_neighbour_thickness
                 )
                 east_flow_area = cell_size_y * harmonic_thickness
-                water_flux, _, gas_flux = compute_phase_fluxes_from_neighbour(
+                water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i + 1, j, k),
                     flow_area=east_flow_area,
@@ -271,7 +270,7 @@ def _compute_saturation_residual(
                     cell_thickness, west_neighbour_thickness
                 )
                 west_flow_area = cell_size_y * harmonic_thickness
-                water_flux, _, gas_flux = compute_phase_fluxes_from_neighbour(
+                water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i - 1, j, k),
                     flow_area=west_flow_area,
@@ -297,7 +296,7 @@ def _compute_saturation_residual(
                     cell_thickness, north_neighbour_thickness
                 )
                 north_flow_area = cell_size_x * harmonic_thickness
-                water_flux, _, gas_flux = compute_phase_fluxes_from_neighbour(
+                water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i, j - 1, k),
                     flow_area=north_flow_area,
@@ -322,7 +321,7 @@ def _compute_saturation_residual(
                     cell_thickness, south_neighbour_thickness
                 )
                 south_flow_area = cell_size_x * harmonic_thickness
-                water_flux, _, gas_flux = compute_phase_fluxes_from_neighbour(
+                water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i, j + 1, k),
                     flow_area=south_flow_area,
@@ -348,7 +347,7 @@ def _compute_saturation_residual(
                     cell_thickness, top_neighbour_thickness
                 )
                 top_flow_length = harmonic_thickness
-                water_flux, _, gas_flux = compute_phase_fluxes_from_neighbour(
+                water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i, j, k - 1),
                     flow_area=flow_area_z,
@@ -373,7 +372,7 @@ def _compute_saturation_residual(
                     cell_thickness, bottom_neighbour_thickness
                 )
                 bottom_flow_length = harmonic_thickness
-                water_flux, _, gas_flux = compute_phase_fluxes_from_neighbour(
+                water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i, j, k + 1),
                     flow_area=flow_area_z,
@@ -517,7 +516,6 @@ def _compute_residual(
     old_gas_saturation_grid: ThreeDimensionalGrid,
     oil_pressure_grid: ThreeDimensionalGrid,
     pressure_change_grid: ThreeDimensionalGrid,
-    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     mobility_grids: typing.Tuple[
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
@@ -525,8 +523,6 @@ def _compute_residual(
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
     ],
     fluid_properties: FluidProperties[ThreeDimensions],
-    wells: Wells[ThreeDimensions],
-    config: Config,
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
@@ -535,32 +531,22 @@ def _compute_residual(
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
-    time: float,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
     well_indices_cache: WellIndicesCache,
-    injection_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    production_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    pad_width: int,
+    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike,
+    pad_width: int = 1,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
     Compute the residual from pre-computed saturation-dependent rock-fluid properties.
 
     :return: `(water_residual, gas_residual)` as 1D arrays of length N.
     """
-    (
-        water_relative_mobility_grid,
-        oil_relative_mobility_grid,
-        gas_relative_mobility_grid,
-    ) = relative_mobility_grids
     oil_water_capillary_pressure_grid, gas_oil_capillary_pressure_grid = (
         capillary_pressure_grids
     )
@@ -574,23 +560,11 @@ def _compute_residual(
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
-        wells=wells,
-        oil_pressure_grid=oil_pressure_grid,
-        temperature_grid=fluid_properties.temperature_grid,
-        water_relative_mobility_grid=water_relative_mobility_grid,
-        oil_relative_mobility_grid=oil_relative_mobility_grid,
-        gas_relative_mobility_grid=gas_relative_mobility_grid,
-        water_compressibility_grid=water_compressibility_grid,
-        oil_compressibility_grid=fluid_properties.oil_compressibility_grid,
-        gas_compressibility_grid=gas_compressibility_grid,
-        fluid_properties=fluid_properties,
-        time=time,
-        config=config,
         well_indices_cache=well_indices_cache,
-        pad_width=pad_width,
-        injection_grid=injection_grid,
-        production_grid=production_grid,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
         dtype=dtype,
+        pad_width=pad_width,
     )
     return _compute_saturation_residual(
         oil_pressure_grid=oil_pressure_grid,
@@ -641,7 +615,6 @@ def compute_residual(
     pressure_change_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    wells: Wells[ThreeDimensions],
     config: Config,
     cell_count_x: int,
     cell_count_y: int,
@@ -651,21 +624,16 @@ def compute_residual(
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
-    time: float,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
     well_indices_cache: WellIndicesCache,
-    injection_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    production_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    pad_width: int,
+    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike,
+    pad_width: int = 1,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
     Computes full residual. (Re-)computes saturation-dependent rock-fluid properties,
@@ -674,7 +642,7 @@ def compute_residual(
     :return: `(water_residual, gas_residual)` as 1D arrays of length N.
     """
     (
-        relative_mobility_grids,
+        _,
         capillary_pressure_grids,
         mobility_grids,
     ) = compute_rock_fluid_properties(
@@ -692,12 +660,9 @@ def compute_residual(
         old_gas_saturation_grid=old_gas_saturation_grid,
         oil_pressure_grid=oil_pressure_grid,
         pressure_change_grid=pressure_change_grid,
-        relative_mobility_grids=relative_mobility_grids,
         capillary_pressure_grids=capillary_pressure_grids,
         mobility_grids=mobility_grids,
         fluid_properties=fluid_properties,
-        wells=wells,
-        config=config,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
@@ -706,17 +671,16 @@ def compute_residual(
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=porosity_grid,
-        time=time,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
         well_indices_cache=well_indices_cache,
-        injection_grid=injection_grid,
-        production_grid=production_grid,
-        pad_width=pad_width,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
         dtype=dtype,
+        pad_width=pad_width,
     )
 
 
@@ -736,28 +700,22 @@ def assemble_numerical_jacobian(
     pressure_change_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    wells: Wells[ThreeDimensions],
     config: Config,
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
-    time: float,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
     well_indices_cache: WellIndicesCache,
-    injection_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    production_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    pad_width: int,
+    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike,
+    pad_width: int = 1,
 ) -> csr_matrix:
     """
     Assemble the saturation Jacobian using column-wise forward finite differences.
@@ -782,7 +740,6 @@ def assemble_numerical_jacobian(
         pressure_change_grid=pressure_change_grid,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
-        wells=wells,
         config=config,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
@@ -792,17 +749,16 @@ def assemble_numerical_jacobian(
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=porosity_grid,
-        time=time,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
         well_indices_cache=well_indices_cache,
-        injection_grid=injection_grid,
-        production_grid=production_grid,
-        pad_width=pad_width,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
         dtype=dtype,
+        pad_width=pad_width,
     )
 
     for cell_1d_idx in range(interior_cell_count):
@@ -1205,12 +1161,24 @@ def _assemble_analytical_jacobian(
         mD/cP to ft2/psi/day. Must be the same constant used when building
         the mobility grids so that the mobility derivative is consistently
         scaled.
-    :return: (rows, cols, vals) COO arrays of length <= 28*N.
+    :return: (rows, cols, vals) COO arrays of length <= 56*N.
     """
     cells_per_slice = (cell_count_y - 2) * (cell_count_z - 2)
-    # Worst-case: 2 accumulation entries + 6 faces * 4 entries each = 26 per cell.
-    # We allocate 28 for headroom.
-    max_nnz_per_slice = 28 * cells_per_slice
+    # Per interior cell, worst-case non-zero entries:
+    #
+    #  Accumulation (diagonal only, one per free variable):
+    #      (Rw, Sw), (Rg, Sg) → 2 entries
+    #
+    #  Per face (up to 6 faces):
+    #      Diagonal entries for cell i  (dRw/dSw_i, dRw/dSg_i, dRg/dSw_i, dRg/dSg_i) → 4
+    #      Off-diagonal entries for neighbour n (same 4 combinations)                  → 4
+    #      Total per face: 8
+    #
+    #  6 faces × 8 = 48 flux entries
+    #  Total: 2 + 48 = 50 per cell
+    #
+    #  Multiply by cells_per_slice and add headroom.
+    max_nnz_per_slice = 56 * cells_per_slice
     slice_count = cell_count_x - 2
 
     all_rows = np.empty((slice_count, max_nnz_per_slice), dtype=np.int32)
@@ -1412,7 +1380,7 @@ def _assemble_analytical_jacobian(
 
                     transmissibility = flow_area / flow_length
 
-                    # Phase potentials — must match compute_phase_fluxes_from_neighbour
+                    # Phase potentials — must match compute_fluxes_from_neighbour
                     # exactly so that upwind cell selection is identical.
                     #
                     # The residual selects the upwind density based on the sign of the
@@ -1521,7 +1489,7 @@ def _assemble_analytical_jacobian(
                     # dR_w/dS = -dF_w/dS
                     #
                     # water_neighbour_is_upwind mirrors the upwind_water_density decision
-                    # in compute_phase_fluxes_from_neighbour: neighbour is upwind when
+                    # in compute_fluxes_from_neighbour: neighbour is upwind when
                     # water_potential_difference > 0 (flow from neighbour into cell i).
                     upwind_water_mobility = (
                         neighbour_water_mobility
@@ -1582,16 +1550,16 @@ def _assemble_analytical_jacobian(
 
                     # Capillary contributions (always both cells)
                     dFw_cap_dSw_i = (
-                        upwind_water_mobility * (-dPcow_dSw_i) * transmissibility
+                        upwind_water_mobility * (+dPcow_dSw_i) * transmissibility
                     )
                     dFw_cap_dSg_i = (
-                        upwind_water_mobility * (-dPcow_dSg_i) * transmissibility
+                        upwind_water_mobility * (+dPcow_dSg_i) * transmissibility
                     )
                     dFw_cap_dSw_n = (
-                        upwind_water_mobility * (+dPcow_dSw_n) * transmissibility
+                        upwind_water_mobility * (-dPcow_dSw_n) * transmissibility
                     )
                     dFw_cap_dSg_n = (
-                        upwind_water_mobility * (+dPcow_dSg_n) * transmissibility
+                        upwind_water_mobility * (-dPcow_dSg_n) * transmissibility
                     )
 
                     # Total dF_w/dS -> dR_w/dS = -dF_w/dS
@@ -1657,16 +1625,16 @@ def _assemble_analytical_jacobian(
                         )
 
                     dFg_cap_dSw_i = (
-                        upwind_gas_mobility * (-dPcgo_dSw_i) * transmissibility
+                        upwind_gas_mobility * (+dPcgo_dSw_i) * transmissibility
                     )
                     dFg_cap_dSg_i = (
-                        upwind_gas_mobility * (-dPcgo_dSg_i) * transmissibility
+                        upwind_gas_mobility * (+dPcgo_dSg_i) * transmissibility
                     )
                     dFg_cap_dSw_n = (
-                        upwind_gas_mobility * (+dPcgo_dSw_n) * transmissibility
+                        upwind_gas_mobility * (-dPcgo_dSw_n) * transmissibility
                     )
                     dFg_cap_dSg_n = (
-                        upwind_gas_mobility * (+dPcgo_dSg_n) * transmissibility
+                        upwind_gas_mobility * (-dPcgo_dSg_n) * transmissibility
                     )
 
                     dRg_dSw_i = -(dFg_mob_dSw_i + dFg_cap_dSw_i)
@@ -2193,7 +2161,7 @@ def assemble_analytical_jacobian(
     time_step_in_days: float,
     config: Config,
     well_indices_cache: WellIndicesCache,
-    pad_width: int,
+    pad_width: int = 1,
 ) -> csr_matrix:
     """
     Assemble the full analytical saturation Jacobian.
@@ -2357,13 +2325,8 @@ def assemble_jacobian(
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
     well_indices_cache: WellIndicesCache,
-    injection_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    production_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    pad_width: int,
+    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
@@ -2372,6 +2335,7 @@ def assemble_jacobian(
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
     ],
+    pad_width: int = 1,
 ) -> csr_matrix:
     """
     Assembles the Jacobian for the system.
@@ -2441,24 +2405,22 @@ def assemble_jacobian(
         pressure_change_grid=pressure_change_grid,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
-        wells=wells,
         config=config,
         thickness_grid=thickness_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=porosity_grid,
-        time=time,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
         well_indices_cache=well_indices_cache,
-        injection_grid=injection_grid,
-        production_grid=production_grid,
-        pad_width=pad_width,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
         dtype=dtype,
+        pad_width=pad_width,
     )
 
 
@@ -2483,12 +2445,8 @@ def solve_implicit_saturation(
     wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
-    injection_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    production_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
+    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
@@ -2546,8 +2504,6 @@ def solve_implicit_saturation(
         oil_pressure_grid=oil_pressure_grid,
         pressure_change_grid=pressure_change_grid,
         fluid_properties=fluid_properties,
-        wells=wells,
-        config=config,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
@@ -2556,17 +2512,16 @@ def solve_implicit_saturation(
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=porosity_grid,
-        time=time,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
         well_indices_cache=well_indices_cache,
-        injection_grid=injection_grid,
-        production_grid=production_grid,
-        pad_width=pad_width,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
         dtype=dtype,
+        pad_width=pad_width,
     )
 
     for iteration in range(max_newton_iterations):
@@ -2583,7 +2538,7 @@ def solve_implicit_saturation(
             fluid_properties=fluid_properties,
             config=config,
             # We only normalize for "numerical" Jacobian assembly, as perturbations may cause
-            # saturation sum to excedd 1.0 sometimes
+            # saturation sum to exceed 1.0 sometimes
             normalize_saturations=config.jacobian_assembly_method == "numerical",
         )
 
@@ -2591,7 +2546,6 @@ def solve_implicit_saturation(
         water_residual, gas_residual = _compute_residual(
             water_saturation_grid=water_saturation_grid,
             gas_saturation_grid=gas_saturation_grid,
-            relative_mobility_grids=relative_mobility_grids,
             capillary_pressure_grids=capillary_pressure_grids,
             mobility_grids=mobility_grids,
             **residual_kwargs,  # type: ignore[arg-type]
@@ -2669,8 +2623,8 @@ def solve_implicit_saturation(
             gas_compressibility_grid=gas_compressibility_grid,
             rock_compressibility=rock_compressibility,
             well_indices_cache=well_indices_cache,
-            injection_grid=injection_grid,
-            production_grid=production_grid,
+            injection_rates=injection_rates,
+            production_rates=production_rates,
             pad_width=pad_width,
             dtype=dtype,
             capillary_pressure_grids=capillary_pressure_grids,
@@ -2721,6 +2675,7 @@ def solve_implicit_saturation(
                 oil_saturation_grid=oil_saturation_grid_trial,
                 gas_saturation_grid=gas_saturation_grid_trial,
                 rock_properties=rock_properties,
+                config=config,
                 **residual_kwargs,  # type: ignore[arg-type]
             )
             residual_trial = interleave_residuals(
@@ -2751,7 +2706,6 @@ def solve_implicit_saturation(
         max_saturation_update = float(
             np.max(np.abs(saturation_vector_trial - saturation_vector))
         )
-
         saturation_vector = saturation_vector_trial
         water_saturation_grid = water_saturation_grid_trial
         oil_saturation_grid = oil_saturation_grid_trial
@@ -2861,7 +2815,6 @@ def evolve_saturation(
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
-    time_step: int,
     time_step_size: float,
     time: float,
     rock_properties: RockProperties[ThreeDimensions],
@@ -2869,13 +2822,9 @@ def evolve_saturation(
     wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
-    injection_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
-    production_grid: typing.Optional[
-        SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
-    ],
     pressure_change_grid: ThreeDimensionalGrid,
+    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     pad_width: int = 1,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
@@ -2919,8 +2868,8 @@ def evolve_saturation(
         wells=wells,
         config=config,
         well_indices_cache=well_indices_cache,
-        injection_grid=injection_grid,
-        production_grid=production_grid,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
         water_compressibility_grid=fluid_properties.water_compressibility_grid,
         gas_compressibility_grid=fluid_properties.gas_compressibility_grid,
         rock_compressibility=rock_properties.compressibility,

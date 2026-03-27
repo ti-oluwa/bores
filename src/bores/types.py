@@ -2,14 +2,10 @@ import enum
 import typing
 from typing import TypeAlias
 
-import attrs
 import numpy as np
 from scipy.sparse import csr_array, csr_matrix  # type: ignore[import-untyped]
 from scipy.sparse.linalg import LinearOperator  # type: ignore[import-untyped]
 from typing_extensions import TypedDict
-
-from bores.errors import ValidationError
-from bores.serialization import Serializable
 
 __all__ = [
     "ArrayLike",
@@ -25,8 +21,6 @@ __all__ = [
     "OneDimensionalGrid",
     "Orientation",
     "Preconditioner",
-    "Range",
-    "RelativeMobilityRange",
     "RelativePermeabilities",
     "Solver",
     "SolverFunc",
@@ -250,73 +244,8 @@ class Wettability(enum.Enum):
         return self.value
 
 
-@attrs.frozen
-class Range(Serializable):
-    """
-    Class representing minimum and maximum values.
-    """
-
-    min: float
-    """Minimum value."""
-    max: float
-    """Maximum value."""
-
-    def __attrs_post_init__(self) -> None:
-        if self.min > self.max:
-            raise ValidationError("Minimum value cannot be greater than maximum value.")
-
-    def clip(self, value: T) -> T:
-        """
-        Clips the given value between the minimum and maximum values.
-
-        :param value: The value to be clipped.
-        :return: The clipped value.
-        """
-        from bores.utils import clip
-
-        return clip(value, self.min, self.max)
-
-    def __len__(self) -> int:
-        return 2
-
-    def __iter__(self) -> typing.Iterator[float]:
-        yield self.min
-        yield self.max
-
-    def __contains__(self, item: float) -> bool:
-        return self.min <= item <= self.max
-
-    def __getitem__(self, index: int) -> float:
-        if index == 0:
-            return self.min
-        elif index == 1:
-            return self.max
-        else:
-            raise IndexError("Index out of range for Range. Valid indices are 0 and 1.")
-
-
-class RelativeMobilityRange(TypedDict):
-    """
-    Dictionary holding relative mobility ranges for different phases.
-    """
-
-    oil: Range
-    water: Range
-    gas: Range
-
-
 Kcon = typing.TypeVar("Kcon", contravariant=True)
 Vcon = typing.TypeVar("Vcon", contravariant=True)
-
-
-class SupportsSetItem(typing.Protocol, typing.Generic[Kcon, Vcon]):
-    """
-    Protocol for objects that support item assignment.
-    """
-
-    def __setitem__(self, key: Kcon, value: Vcon, /) -> None:
-        """Sets the item at the specified key to the given value."""
-        ...
 
 
 GasZFactorMethod = typing.Literal["papay", "hall-yarborough", "dak"]

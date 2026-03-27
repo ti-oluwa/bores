@@ -5,6 +5,7 @@ import numba
 import numpy as np
 
 from bores._precision import get_dtype
+from bores.datastructures import PhaseRange
 from bores.errors import ValidationError
 from bores.grids.base import (
     CapillaryPressureGrids,
@@ -18,7 +19,7 @@ from bores.grids.pvt import (
     build_three_phase_relative_permeabilities_grids,
 )
 from bores.tables.rock_fluid import CapillaryPressureTable, RelativePermeabilityTable
-from bores.types import NDimensionalGrid, RelativeMobilityRange, ThreeDimensions
+from bores.types import NDimensionalGrid, ThreeDimensions
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def build_rock_fluid_properties_grids(
     capillary_pressure_table: typing.Optional[CapillaryPressureTable] = None,
     disable_capillary_effects: bool = False,
     capillary_strength_factor: float = 1.0,
-    relative_mobility_range: typing.Optional[RelativeMobilityRange] = None,
+    relative_mobility_range: typing.Optional[PhaseRange] = None,
     phase_appearance_tolerance: float = 1e-6,
 ) -> typing.Tuple[
     RelPermGrids[ThreeDimensions],

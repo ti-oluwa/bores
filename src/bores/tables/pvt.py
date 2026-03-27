@@ -1425,7 +1425,10 @@ class PVTTables(StoreSerializable):
         interpolation_method: InterpolationMethod = "linear",
         validate: bool = True,
         warn_on_extrapolation: bool = False,
-        clamps: typing.Optional[typing.Dict[str, typing.Tuple[float, float]]] = None,
+        clamps: typing.Union[
+            typing.Literal[False],
+            typing.Optional[typing.Dict[str, typing.Tuple[float, float]]],
+        ] = None,
     ) -> Self:
         """
         Build a `PVTTables` bundle from a `PVTDataSet`.
