@@ -20,8 +20,6 @@ from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
     EvolutionResult,
-    _warn_injection_pressure,
-    _warn_production_pressure,
     compute_mobility_grids,
     from_1D_index_interior_only,
     solve_linear_system,
@@ -32,9 +30,7 @@ from bores.solvers.explicit.saturation.immiscible import (
     compute_well_rate_grids,
 )
 from bores.tables.rock_fluid import RockFluidTables
-from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
-from bores.wells.base import Wells
-from bores.wells.controls import CoupledRateControl
+from bores.types import ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.indices import WellIndicesCache
 
 logger = logging.getLogger(__name__)
@@ -804,16 +800,21 @@ def assemble_numerical_jacobian(
             original_oil_saturation = oil_saturation_grid_f64[i, j, k]
 
             if var_offset == 0:
-                water_saturation_grid_f64[i, j, k] = original_water_saturation + epsilon
+                perturbed_water_saturation = original_water_saturation + epsilon
+                perturbed_gas_saturation = original_gas_saturation
+                perturbed_oil_saturation = max(
+                    0.0, 1.0 - perturbed_water_saturation - perturbed_gas_saturation
+                )
             else:
-                gas_saturation_grid_f64[i, j, k] = original_gas_saturation + epsilon
+                perturbed_water_saturation = original_water_saturation
+                perturbed_gas_saturation = original_gas_saturation + epsilon
+                perturbed_oil_saturation = max(
+                    0.0, 1.0 - perturbed_water_saturation - perturbed_gas_saturation
+                )
 
-            oil_saturation_grid_f64[i, j, k] = max(
-                0.0,
-                1.0
-                - water_saturation_grid_f64[i, j, k]
-                - gas_saturation_grid_f64[i, j, k],
-            )
+            water_saturation_grid_f64[i, j, k] = perturbed_water_saturation
+            gas_saturation_grid_f64[i, j, k] = perturbed_gas_saturation
+            oil_saturation_grid_f64[i, j, k] = perturbed_oil_saturation
 
             perturbed_water_residual, perturbed_gas_residual = compute_residual(
                 water_saturation_grid=water_saturation_grid_f64,
@@ -1383,7 +1384,6 @@ def _assemble_analytical_jacobian(
 
                     transmissibility = flow_area / flow_length
 
-                    
                     # The residual selects the upwind density based on the sign of the
                     # potential difference, where that potential difference itself uses
                     # the upwind density. We resolve this the same way the residual does:
@@ -1724,9 +1724,6 @@ def _assemble_analytical_jacobian(
 
 def _assemble_jacobian_well_contributions(
     oil_pressure_grid: ThreeDimensionalGrid,
-    water_relative_mobility_grid: ThreeDimensionalGrid,
-    oil_relative_mobility_grid: ThreeDimensionalGrid,
-    gas_relative_mobility_grid: ThreeDimensionalGrid,
     water_viscosity_grid: ThreeDimensionalGrid,
     gas_viscosity_grid: ThreeDimensionalGrid,
     dkrw_dSw_grid: ThreeDimensionalGrid,
@@ -1735,11 +1732,9 @@ def _assemble_jacobian_well_contributions(
     dkrg_dSw_grid: ThreeDimensionalGrid,
     dkrg_dSo_grid: ThreeDimensionalGrid,
     dkrg_dSg_grid: ThreeDimensionalGrid,
-    fluid_properties: FluidProperties[ThreeDimensions],
-    wells: Wells[ThreeDimensions],
-    config: Config,
     well_indices_cache: WellIndicesCache,
-    time: float,
+    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     md_per_cp_to_ft2_per_psi_per_day: float,
     pad_width: int,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
@@ -1765,16 +1760,6 @@ def _assemble_jacobian_well_contributions(
 
     :return: (rows, cols, vals) COO arrays for the well Jacobian entries.
     """
-    gas_formation_volume_factor_grid = fluid_properties.gas_formation_volume_factor_grid
-    gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
-    water_bubble_point_pressure_grid = fluid_properties.water_bubble_point_pressure_grid
-    water_fvf_grid = fluid_properties.water_formation_volume_factor_grid
-    oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid
-    water_compressibility_grid = fluid_properties.water_compressibility_grid
-    oil_compressibility_grid = fluid_properties.oil_compressibility_grid
-    gas_compressibility_grid = fluid_properties.gas_compressibility_grid
-    temperature_grid = fluid_properties.temperature_grid
-
     rows: typing.List[int] = []
     cols: typing.List[int] = []
     vals: typing.List[float] = []
@@ -1792,110 +1777,20 @@ def _assemble_jacobian_well_contributions(
         cols.append(2 * cell_1d_index + col_offset)
         vals.append(derivative_value)
 
-    # For injection wells, we target BHP-controlled wells only; rate-controlled injects at fixed
-    # rate regardless of saturation, so dR/dS = 0 for those.
-    for well in wells.injection_wells:
-        if not well.is_open or well.injected_fluid is None:
-            continue
-        if not well.control.is_bhp_control():
-            continue  # Rate-controlled injection have no saturation sensitivity
-
-        injected_fluid = well.injected_fluid
-        injected_phase = injected_fluid.phase
-        use_pseudo_pressure = (
-            config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
-        )
-        well_indices = well_indices_cache.injection[well.name]
+    for well_indices in well_indices_cache.injection.values():
         for perforation_index in well_indices:
             i, j, k = perforation_index.cell
-            cell_1d_index = perforation_index.cell_1d_index
             well_index = perforation_index.well_index
-            allocation_fraction = well_indices.allocation_fraction(perforation_index)
+            cell_1d_index = perforation_index.cell_1d_index
             cell_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
-            cell_temperature = typing.cast(float, temperature_grid[i, j, k])
-            phase_fvf = typing.cast(
-                float,
-                injected_fluid.get_formation_volume_factor(
-                    pressure=cell_pressure,
-                    temperature=cell_temperature,
-                ),
-            )
-
-            if injected_phase == FluidPhase.GAS:
-                phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
-                phase_compressibility = typing.cast(
-                    float, gas_compressibility_grid[i, j, k]
-                )
-                compressibility_kwargs: dict = {}
-            else:
-                phase_mobility = typing.cast(
-                    float, water_relative_mobility_grid[i, j, k]
-                )
-                phase_compressibility = typing.cast(
-                    float, water_compressibility_grid[i, j, k]
-                )
-                compressibility_kwargs = {
-                    "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
-                    "gas_formation_volume_factor": gas_formation_volume_factor_grid[
-                        i, j, k
-                    ],
-                    "gas_solubility_in_water": gas_solubility_in_water_grid[i, j, k],
-                }
-
-            phase_compressibility = typing.cast(
-                float,
-                injected_fluid.get_compressibility(
-                    pressure=cell_pressure,
-                    temperature=cell_temperature,
-                    **compressibility_kwargs,
-                ),
-            )
-            effective_mobility = typing.cast(
-                float,
-                water_relative_mobility_grid[i, j, k]
-                + oil_relative_mobility_grid[i, j, k]
-                + gas_relative_mobility_grid[i, j, k],
-            )
-            effective_bhp = well.get_bottom_hole_pressure(
-                pressure=cell_pressure,
-                temperature=cell_temperature,
-                phase_mobility=effective_mobility,
-                well_index=well_index,
-                fluid=injected_fluid,
-                formation_volume_factor=phase_fvf,
-                allocation_fraction=allocation_fraction,
-                use_pseudo_pressure=use_pseudo_pressure,
-                fluid_compressibility=phase_compressibility,
-                pvt_tables=None,
-            )
-            if not np.isfinite(effective_bhp):
-                logger.error(
-                    f"Non-finite BHP for production well {well.name!r} "
-                    f"at cell ({i - pad_width},{j - pad_width},{k - pad_width}): {effective_bhp}. Skipping perforation."
-                )
-                continue
-
-            if abs(effective_bhp - cell_pressure) > 1e6:
-                logger.warning(
-                    f"Extreme BHP for production well {well.name!r} "
-                    f"at cell ({i - pad_width},{j - pad_width},{k - pad_width}): {effective_bhp:.2e} psi "
-                    f"(reservoir pressure: {cell_pressure:.1f} psi)."
-                )
-
-            if cell_pressure > effective_bhp and config.warn_well_anomalies:
-                _warn_injection_pressure(
-                    bhp=effective_bhp,
-                    cell_pressure=cell_pressure,
-                    well_name=well.name,
-                    time=time,
-                    cell=(i - pad_width, j - pad_width, k - pad_width),
-                )
-
-            drawdown = cell_pressure - effective_bhp
+            water_bhp, _, gas_bhp = injection_bhps[
+                i - pad_width, j - pad_width, k - pad_width
+            ]
 
             # Injection only injects the injected phase; we differentiate the
             # injected-phase well rate w.r.t. Sw and Sg.
-            if injected_phase == FluidPhase.GAS:
+            if gas_bhp:
+                drawdown = cell_pressure - gas_bhp
                 # For gas PI, the kr dependence is PI ∝ krg/mu_g * k_abs * conv.
                 # d(PI)/d(krg) * d(krg)/dSw_eff = base_pi / max(krg, eps) * dkrg/dSw_eff
                 # is numerically fragile; instead use the raw mobility derivative:
@@ -1923,8 +1818,10 @@ def _assemble_jacobian_well_contributions(
                 # dR_g/dSw = -dq_g/dSw (residual = accum - flux - q_well)
                 _add_diagonal_entry(cell_1d_index, 1, 0, -dqg_dSw)
                 _add_diagonal_entry(cell_1d_index, 1, 1, -dqg_dSg)
-            else:
+
+            elif water_bhp:
                 # Water injection: only water rate has kr sensitivity
+                drawdown = cell_pressure - water_bhp
                 water_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
                 inverse_water_viscosity = (
                     1.0 / water_viscosity if water_viscosity > 0.0 else 0.0
@@ -1949,175 +1846,70 @@ def _assemble_jacobian_well_contributions(
                 _add_diagonal_entry(cell_1d_index, 0, 0, -dqw_dSw)
                 _add_diagonal_entry(cell_1d_index, 0, 1, -dqw_dSg)
 
-    # Production wells are always BHP-controlled for the saturation Jacobian
-    # (even rate-controlled wells have phase split that depends on kr).
-    for well in wells.production_wells:
-        if not well.is_open:
-            continue
-
-        is_couple_controlled = isinstance(well.control, CoupledRateControl)
-
-        well_indices = well_indices_cache.production[well.name]
+    for well_indices in well_indices_cache.production.values():
         for perforation_index in well_indices:
             i, j, k = perforation_index.cell
             cell_1d_index = perforation_index.cell_1d_index
             well_index = perforation_index.well_index
-            allocation_fraction = well_indices.allocation_fraction(perforation_index)
             cell_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
-            cell_temperature = typing.cast(float, temperature_grid[i, j, k])
+            water_bhp, _, gas_bhp = production_bhps[
+                i - pad_width, j - pad_width, k - pad_width
+            ]
 
-            primary_phase_context = {}
-            if is_couple_controlled:
-                primary_phase_context = well.control.build_primary_phase_context(  # type: ignore
-                    produced_fluids=well.produced_fluids,
-                    oil_mobility=typing.cast(
-                        float, oil_relative_mobility_grid[i, j, k]
-                    ),
-                    water_mobility=typing.cast(
-                        float, water_relative_mobility_grid[i, j, k]
-                    ),
-                    gas_mobility=typing.cast(
-                        float, gas_relative_mobility_grid[i, j, k]
-                    ),
-                    oil_fvf=typing.cast(float, oil_fvf_grid[i, j, k]),
-                    water_fvf=typing.cast(float, water_fvf_grid[i, j, k]),
-                    gas_fvf=typing.cast(
-                        float, gas_formation_volume_factor_grid[i, j, k]
-                    ),
-                    oil_compressibility=typing.cast(
-                        float, oil_compressibility_grid[i, j, k]
-                    ),
-                    water_compressibility=typing.cast(
-                        float, water_compressibility_grid[i, j, k]
-                    ),
-                    gas_compressibility=typing.cast(
-                        float, gas_compressibility_grid[i, j, k]
-                    ),
+            if water_bhp:
+                drawdown = cell_pressure - water_bhp
+                water_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
+                inverse_water_viscosity = (
+                    1.0 / water_viscosity if water_viscosity > 0.0 else 0.0
                 )
-
-            for produced_fluid in well.produced_fluids:
-                produced_phase = produced_fluid.phase
-
-                if produced_phase == FluidPhase.GAS:
-                    phase_mobility = typing.cast(
-                        float, gas_relative_mobility_grid[i, j, k]
-                    )
-                    phase_compressibility = typing.cast(
-                        float, gas_compressibility_grid[i, j, k]
-                    )
-                    phase_fvf = typing.cast(
-                        float, gas_formation_volume_factor_grid[i, j, k]
-                    )
-                elif produced_phase == FluidPhase.WATER:
-                    phase_mobility = typing.cast(
-                        float, water_relative_mobility_grid[i, j, k]
-                    )
-                    phase_compressibility = typing.cast(
-                        float, water_compressibility_grid[i, j, k]
-                    )
-                    phase_fvf = typing.cast(float, water_fvf_grid[i, j, k])
-                else:  # Oil
-                    phase_mobility = typing.cast(
-                        float, oil_relative_mobility_grid[i, j, k]
-                    )
-                    phase_compressibility = typing.cast(
-                        float, oil_compressibility_grid[i, j, k]
-                    )
-                    phase_fvf = typing.cast(float, oil_fvf_grid[i, j, k])
-
-                use_pseudo_pressure = (
-                    config.use_pseudo_pressure and produced_phase == FluidPhase.GAS
+                dkrw_dSw_eff = dkrw_dSw_grid[i, j, k] - dkrw_dSo_grid[i, j, k]
+                dkrw_dSg_eff = dkrw_dSg_grid[i, j, k] - dkrw_dSo_grid[i, j, k]
+                dqw_dSw = (
+                    well_index
+                    * md_per_cp_to_ft2_per_psi_per_day
+                    * inverse_water_viscosity
+                    * dkrw_dSw_eff
+                    * drawdown
                 )
-                effective_bhp = well.get_bottom_hole_pressure(
-                    pressure=cell_pressure,
-                    temperature=cell_temperature,
-                    phase_mobility=phase_mobility,
-                    well_index=well_index,
-                    fluid=produced_fluid,
-                    formation_volume_factor=phase_fvf,
-                    allocation_fraction=allocation_fraction,
-                    use_pseudo_pressure=use_pseudo_pressure,
-                    fluid_compressibility=phase_compressibility,
-                    pvt_tables=config.pvt_tables,
-                    **primary_phase_context,
+                dqw_dSg = (
+                    well_index
+                    * md_per_cp_to_ft2_per_psi_per_day
+                    * inverse_water_viscosity
+                    * dkrw_dSg_eff
+                    * drawdown
                 )
-                if not np.isfinite(effective_bhp):
-                    logger.error(
-                        f"Non-finite BHP for production well {well.name!r} "
-                        f"at cell ({i - pad_width},{j - pad_width},{k - pad_width}): {effective_bhp}. Skipping perforation."
-                    )
-                    continue
+                _add_diagonal_entry(cell_1d_index, 0, 0, -dqw_dSw)
+                _add_diagonal_entry(cell_1d_index, 0, 1, -dqw_dSg)
 
-                if abs(effective_bhp - cell_pressure) > 1e6:
-                    logger.warning(
-                        f"Extreme BHP for production well {well.name!r} "
-                        f"at cell ({i - pad_width},{j - pad_width},{k - pad_width}): {effective_bhp:.2e} psi "
-                        f"(reservoir pressure: {cell_pressure:.1f} psi)."
-                    )
+            if gas_bhp:
+                drawdown = cell_pressure - gas_bhp
+                gas_viscosity = typing.cast(float, gas_viscosity_grid[i, j, k])
+                inverse_gas_viscosity = (
+                    1.0 / gas_viscosity if gas_viscosity > 0.0 else 0.0
+                )
+                dkrg_dSw_eff = dkrg_dSw_grid[i, j, k] - dkrg_dSo_grid[i, j, k]
+                dkrg_dSg_eff = dkrg_dSg_grid[i, j, k] - dkrg_dSo_grid[i, j, k]
+                dqg_dSw = (
+                    well_index
+                    * md_per_cp_to_ft2_per_psi_per_day
+                    * inverse_gas_viscosity
+                    * dkrg_dSw_eff
+                    * drawdown
+                )
+                dqg_dSg = (
+                    well_index
+                    * md_per_cp_to_ft2_per_psi_per_day
+                    * inverse_gas_viscosity
+                    * dkrg_dSg_eff
+                    * drawdown
+                )
+                _add_diagonal_entry(cell_1d_index, 1, 0, -dqg_dSw)
+                _add_diagonal_entry(cell_1d_index, 1, 1, -dqg_dSg)
 
-                if cell_pressure < effective_bhp and config.warn_well_anomalies:
-                    _warn_production_pressure(
-                        bhp=effective_bhp,
-                        cell_pressure=cell_pressure,
-                        well_name=well.name,
-                        time=time,
-                        cell=(i - pad_width, j - pad_width, k - pad_width),
-                    )
-
-                drawdown = cell_pressure - effective_bhp
-
-                if produced_phase == FluidPhase.WATER:
-                    water_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
-                    inverse_water_viscosity = (
-                        1.0 / water_viscosity if water_viscosity > 0.0 else 0.0
-                    )
-                    dkrw_dSw_eff = dkrw_dSw_grid[i, j, k] - dkrw_dSo_grid[i, j, k]
-                    dkrw_dSg_eff = dkrw_dSg_grid[i, j, k] - dkrw_dSo_grid[i, j, k]
-                    dqw_dSw = (
-                        well_index
-                        * md_per_cp_to_ft2_per_psi_per_day
-                        * inverse_water_viscosity
-                        * dkrw_dSw_eff
-                        * drawdown
-                    )
-                    dqw_dSg = (
-                        well_index
-                        * md_per_cp_to_ft2_per_psi_per_day
-                        * inverse_water_viscosity
-                        * dkrw_dSg_eff
-                        * drawdown
-                    )
-                    _add_diagonal_entry(cell_1d_index, 0, 0, -dqw_dSw)
-                    _add_diagonal_entry(cell_1d_index, 0, 1, -dqw_dSg)
-
-                elif produced_phase == FluidPhase.GAS:
-                    gas_viscosity = typing.cast(float, gas_viscosity_grid[i, j, k])
-                    inverse_gas_viscosity = (
-                        1.0 / gas_viscosity if gas_viscosity > 0.0 else 0.0
-                    )
-                    dkrg_dSw_eff = dkrg_dSw_grid[i, j, k] - dkrg_dSo_grid[i, j, k]
-                    dkrg_dSg_eff = dkrg_dSg_grid[i, j, k] - dkrg_dSo_grid[i, j, k]
-                    dqg_dSw = (
-                        well_index
-                        * md_per_cp_to_ft2_per_psi_per_day
-                        * inverse_gas_viscosity
-                        * dkrg_dSw_eff
-                        * drawdown
-                    )
-                    dqg_dSg = (
-                        well_index
-                        * md_per_cp_to_ft2_per_psi_per_day
-                        * inverse_gas_viscosity
-                        * dkrg_dSg_eff
-                        * drawdown
-                    )
-                    _add_diagonal_entry(cell_1d_index, 1, 0, -dqg_dSw)
-                    _add_diagonal_entry(cell_1d_index, 1, 1, -dqg_dSg)
-
-                # No contribution needed for produced oil. Water/gas equations have no direct oil-kr dependency
-                # (So is derived; oil doesn't appear in the water or gas residual
-                # equations directly since kro only enters the oil material balance
-                # which we do not solve explicitly).
+            # No contribution needed for produced oil. Water/gas equations have no direct oil-kr dependency
+            # (So is derived; oil doesn't appear in the water or gas residual
+            # equations directly since kro only enters the oil material balance
+            # which we do not solve explicitly).
 
     return (
         np.array(rows, dtype=np.int32),
@@ -2147,10 +1939,9 @@ def assemble_analytical_jacobian(
     absolute_permeability_z_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
-    fluid_properties: FluidProperties[ThreeDimensions],
-    wells: Wells[ThreeDimensions],
+    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
-    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     mobility_grids: typing.Tuple[
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
@@ -2158,7 +1949,6 @@ def assemble_analytical_jacobian(
     ],
     elevation_grid: ThreeDimensionalGrid,
     gravitational_constant: float,
-    time: float,
     time_step_in_days: float,
     config: Config,
     well_indices_cache: WellIndicesCache,
@@ -2202,11 +1992,6 @@ def assemble_analytical_jacobian(
     oil_water_capillary_pressure_grid, gas_oil_capillary_pressure_grid = (
         capillary_pressure_grids
     )
-    (
-        water_relative_mobility_grid,
-        oil_relative_mobility_grid,
-        gas_relative_mobility_grid,
-    ) = relative_mobility_grids
     (
         (water_mobility_grid_x, _, gas_mobility_grid_x),
         (water_mobility_grid_y, _, gas_mobility_grid_y),
@@ -2261,9 +2046,6 @@ def assemble_analytical_jacobian(
     # Assemble well rate Jacobian (diagonal contributions only)
     well_rows, well_cols, well_vals = _assemble_jacobian_well_contributions(
         oil_pressure_grid=oil_pressure_grid,
-        water_relative_mobility_grid=water_relative_mobility_grid,
-        oil_relative_mobility_grid=oil_relative_mobility_grid,
-        gas_relative_mobility_grid=gas_relative_mobility_grid,
         water_viscosity_grid=water_viscosity_grid,
         gas_viscosity_grid=gas_viscosity_grid,
         dkrw_dSw_grid=dkrw_dSw_grid,
@@ -2272,15 +2054,13 @@ def assemble_analytical_jacobian(
         dkrg_dSw_grid=dkrg_dSw_grid,
         dkrg_dSo_grid=dkrg_dSo_grid,
         dkrg_dSg_grid=dkrg_dSg_grid,
-        fluid_properties=fluid_properties,
-        wells=wells,
-        config=config,
         well_indices_cache=well_indices_cache,
-        time=time,
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
         pad_width=pad_width,
     )
-    
+
     # Merge both parts into a single COO matrix
     # coo_matrix.tocsr() sums duplicate (row, col) entries, so flux and well
     # contributions at the same diagonal position are correctly accumulated.
@@ -2313,24 +2093,23 @@ def assemble_jacobian(
     pressure_change_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    wells: Wells[ThreeDimensions],
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
-    time: float,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
     well_indices_cache: WellIndicesCache,
+    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
-    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     mobility_grids: typing.Tuple[
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
@@ -2370,8 +2149,6 @@ def assemble_jacobian(
             gas_density_grid=fluid_properties.gas_density_grid,
             elevation_grid=elevation_grid,
             rock_properties=rock_properties,
-            fluid_properties=fluid_properties,
-            wells=wells,
             gravitational_constant=gravitational_constant,
             water_viscosity_grid=fluid_properties.water_viscosity_grid,
             gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
@@ -2379,13 +2156,13 @@ def assemble_jacobian(
             absolute_permeability_y_grid=rock_properties.absolute_permeability.y,
             absolute_permeability_z_grid=rock_properties.absolute_permeability.z,
             porosity_grid=porosity_grid,
-            relative_mobility_grids=relative_mobility_grids,
             mobility_grids=mobility_grids,
             capillary_pressure_grids=capillary_pressure_grids,
             time_step_in_days=time_step_in_days,
-            time=time,
             config=config,
             well_indices_cache=well_indices_cache,
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
             pad_width=pad_width,
         )
 
@@ -2443,9 +2220,10 @@ def solve_implicit_saturation(
     time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
+    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     water_compressibility_grid: ThreeDimensionalGrid,
@@ -2528,9 +2306,21 @@ def solve_implicit_saturation(
     )
 
     for iteration in range(max_newton_iterations):
+        # Apply saturation boundary condition to ensure consistency between bghost and edge/boundary cells
+        apply_saturation_boundary_conditions(
+            padded_water_saturation_grid=water_saturation_grid,
+            padded_oil_saturation_grid=oil_saturation_grid,
+            padded_gas_saturation_grid=gas_saturation_grid,
+            boundary_conditions=boundary_conditions,
+            cell_dimension=cell_dimension,
+            grid_shape=grid_shape,
+            thickness_grid=thickness_grid,
+            time=time,
+            pad_width=pad_width,
+        )
         # (Re-)compute all saturation-dependent properties once per iteration
         (
-            relative_mobility_grids,
+            _,
             capillary_pressure_grids,
             mobility_grids,
         ) = compute_rock_fluid_properties(
@@ -2613,25 +2403,24 @@ def solve_implicit_saturation(
             pressure_change_grid=pressure_change_grid,
             rock_properties=rock_properties,
             fluid_properties=fluid_properties,
-            wells=wells,
             thickness_grid=thickness_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
             elevation_grid=elevation_grid,
             porosity_grid=porosity_grid,
-            time=time,
             time_step_in_days=time_step_in_days,
             gravitational_constant=gravitational_constant,
             water_compressibility_grid=water_compressibility_grid,
             gas_compressibility_grid=gas_compressibility_grid,
             rock_compressibility=rock_compressibility,
             well_indices_cache=well_indices_cache,
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
             injection_rates=injection_rates,
             production_rates=production_rates,
             pad_width=pad_width,
             dtype=dtype,
             capillary_pressure_grids=capillary_pressure_grids,
-            relative_mobility_grids=relative_mobility_grids,
             mobility_grids=mobility_grids,
         )
         # condition_number = spla.norm(jacobian, ord=2) * spla.norm(jacobian.T, ord=2)
@@ -2647,7 +2436,7 @@ def solve_implicit_saturation(
             max_iterations=config.max_iterations,
             fallback_to_direct=True,
         )
-        
+
         linear_residual = jacobian @ saturation_change + residual_vector
         linear_residual_norm = np.linalg.norm(linear_residual)
         logger.debug(
@@ -2700,9 +2489,7 @@ def solve_implicit_saturation(
                 f"||R||={residual_trial_norm:.4e} vs ||R_base||={residual_norm:.4e}"
             )
             if residual_trial_norm < residual_norm:
-                logger.debug(
-                    f"Line search: Accepted at alpha={line_search_factor:.4f}"
-                )
+                logger.debug(f"Line search: Accepted at alpha={line_search_factor:.4f}")
                 break
 
             line_search_factor *= 0.5
@@ -2847,12 +2634,13 @@ def evolve_saturation(
     time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
     pressure_change_grid: ThreeDimensionalGrid,
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
@@ -2893,9 +2681,10 @@ def evolve_saturation(
         time=time,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
-        wells=wells,
         config=config,
         well_indices_cache=well_indices_cache,
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
         injection_rates=injection_rates,
         production_rates=production_rates,
         boundary_conditions=boundary_conditions,

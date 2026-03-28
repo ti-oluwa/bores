@@ -56,6 +56,11 @@ def apply_saturation_boundary_conditions(
     """
     Applies boundary conditions to the fluid saturation grids (in-place).
 
+    Saturation usually do not have boundary conditions specified, but this is just to support it
+    if its needed. By default, the purpose of this function fix the numerically drift between ghost/pad
+    cells and edge cells between saturation updates. Ensuring that ghost cells, mirror the edge cells
+    all the time (No-flow boundary basically).
+
     :param padded_water_saturation_grid: The padded water saturation grid.
     :param padded_oil_saturation_grid: The padded oil saturation grid.
     :param padded_gas_saturation_grid: The padded gas saturation grid.
@@ -180,13 +185,14 @@ def apply_boundary_conditions(
         time=time,
         pad_width=pad_width,
     )
-    apply_temperature_boundary_condition(
-        padded_temperature_grid=padded_fluid_properties.temperature_grid,
-        boundary_conditions=boundary_conditions,
-        cell_dimension=cell_dimension,
-        grid_shape=grid_shape,
-        thickness_grid=thickness_grid,
-        time=time,
-        pad_width=pad_width,
-    )
+    # Since system is isothermal for now, no need for this
+    # apply_temperature_boundary_condition(
+    #     padded_temperature_grid=padded_fluid_properties.temperature_grid,
+    #     boundary_conditions=boundary_conditions,
+    #     cell_dimension=cell_dimension,
+    #     grid_shape=grid_shape,
+    #     thickness_grid=thickness_grid,
+    #     time=time,
+    #     pad_width=pad_width,
+    # )
     return padded_fluid_properties

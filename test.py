@@ -114,7 +114,7 @@ producer = bores.production_well(
             phase=bores.FluidPhase.WATER,
             specific_gravity=1.0,
             molecular_weight=18.015,
-        ),
+        )
     ],
 )
 wells = bores.wells_(injectors=[injector], producers=[producer])

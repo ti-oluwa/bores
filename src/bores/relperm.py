@@ -2145,6 +2145,10 @@ class BrooksCoreyThreePhaseRelPermModel(
             inv_2_epsilon = 1.0 / (2.0 * finite_difference_epsilon)
 
             def _corey(sw, so, sg):
+                # Clamp to valid range before calling
+                sw = np.clip(sw, 0.0, 1.0)
+                sg = np.clip(sg, 0.0, 1.0)
+                so = np.clip(1.0 - sw - sg, 0.0, 1.0)
                 return compute_corey_three_phase_relative_permeabilities(
                     water_saturation=sw,
                     oil_saturation=so,
@@ -2162,35 +2166,48 @@ class BrooksCoreyThreePhaseRelPermModel(
                     minimum_mobile_pore_space=minimum_mobile_pore_space,
                 )
 
+            # dSw: perturb Sw, adjust So = 1 - Sw - Sg to maintain constraint
             krw_sw_fwd, kro_sw_fwd, krg_sw_fwd = _corey(
-                sw + finite_difference_epsilon, so, sg
+                sw + finite_difference_epsilon,
+                1.0 - (sw + finite_difference_epsilon) - sg,
+                sg,
             )
             krw_sw_bwd, kro_sw_bwd, krg_sw_bwd = _corey(
-                sw - finite_difference_epsilon, so, sg
-            )
-            krw_so_fwd, kro_so_fwd, krg_so_fwd = _corey(
-                sw, so + finite_difference_epsilon, sg
-            )
-            krw_so_bwd, kro_so_bwd, krg_so_bwd = _corey(
-                sw, so - finite_difference_epsilon, sg
-            )
-            krw_sg_fwd, kro_sg_fwd, krg_sg_fwd = _corey(
-                sw, so, sg + finite_difference_epsilon
-            )
-            krw_sg_bwd, kro_sg_bwd, krg_sg_bwd = _corey(
-                sw, so, sg - finite_difference_epsilon
+                sw - finite_difference_epsilon,
+                1.0 - (sw - finite_difference_epsilon) - sg,
+                sg,
             )
 
+            # dSg: perturb Sg, adjust So = 1 - Sw - Sg to maintain constraint
+            krw_sg_fwd, kro_sg_fwd, krg_sg_fwd = _corey(
+                sw,
+                1.0 - sw - (sg + finite_difference_epsilon),
+                sg + finite_difference_epsilon,
+            )
+            krw_sg_bwd, kro_sg_bwd, krg_sg_bwd = _corey(
+                sw,
+                1.0 - sw - (sg - finite_difference_epsilon),
+                sg - finite_difference_epsilon,
+            )
+
+            # dSo: So is not a free variable (So = 1 - Sw - Sg), so its derivatives
+            # are derived from the Sw and Sg derivatives via the chain rule.
+            # dkr/dSo = -dkr/dSw - dkr/dSg (since dSo = -dSw - dSg)
+            # We still compute it for interface compatibility.
             results = (
-                (krw_sw_fwd - krw_sw_bwd) * inv_2_epsilon,
-                (kro_sw_fwd - kro_sw_bwd) * inv_2_epsilon,
-                (krg_sw_fwd - krg_sw_bwd) * inv_2_epsilon,
-                (krw_so_fwd - krw_so_bwd) * inv_2_epsilon,
-                (kro_so_fwd - kro_so_bwd) * inv_2_epsilon,
-                (krg_so_fwd - krg_so_bwd) * inv_2_epsilon,
-                (krw_sg_fwd - krw_sg_bwd) * inv_2_epsilon,
-                (kro_sg_fwd - kro_sg_bwd) * inv_2_epsilon,
-                (krg_sg_fwd - krg_sg_bwd) * inv_2_epsilon,
+                (krw_sw_fwd - krw_sw_bwd) * inv_2_epsilon,  # dkrw/dSw
+                (kro_sw_fwd - kro_sw_bwd) * inv_2_epsilon,  # dkro/dSw
+                (krg_sw_fwd - krg_sw_bwd) * inv_2_epsilon,  # dkrg/dSw
+                # dkr/dSo = -dkr/dSw - dkr/dSg from chain rule
+                -((krw_sw_fwd - krw_sw_bwd) + (krw_sg_fwd - krw_sg_bwd))
+                * inv_2_epsilon,
+                -((kro_sw_fwd - kro_sw_bwd) + (kro_sg_fwd - kro_sg_bwd))
+                * inv_2_epsilon,
+                -((krg_sw_fwd - krg_sw_bwd) + (krg_sg_fwd - krg_sg_bwd))
+                * inv_2_epsilon,
+                (krw_sg_fwd - krw_sg_bwd) * inv_2_epsilon,  # dkrw/dSg
+                (kro_sg_fwd - kro_sg_bwd) * inv_2_epsilon,  # dkro/dSg
+                (krg_sg_fwd - krg_sg_bwd) * inv_2_epsilon,  # dkrg/dSg
             )
             if is_scalar:
                 results = tuple(float(np.ravel(r)[0]) for r in results)
@@ -3013,6 +3030,9 @@ class LETThreePhaseRelPermModel(
             inv_2_epsilon = 1.0 / (2.0 * finite_difference_epsilon)
 
             def _let(sw, so, sg):
+                sw = np.clip(sw, 0.0, 1.0)
+                sg = np.clip(sg, 0.0, 1.0)
+                so = np.clip(1.0 - sw - sg, 0.0, 1.0)
                 return compute_let_three_phase_relative_permeabilities(
                     water_saturation=sw,
                     oil_saturation=so,
@@ -3043,31 +3063,36 @@ class LETThreePhaseRelPermModel(
                 )
 
             krw_sw_fwd, kro_sw_fwd, krg_sw_fwd = _let(
-                sw + finite_difference_epsilon, so, sg
+                sw + finite_difference_epsilon,
+                1.0 - (sw + finite_difference_epsilon) - sg,
+                sg,
             )
             krw_sw_bwd, kro_sw_bwd, krg_sw_bwd = _let(
-                sw - finite_difference_epsilon, so, sg
-            )
-            krw_so_fwd, kro_so_fwd, krg_so_fwd = _let(
-                sw, so + finite_difference_epsilon, sg
-            )
-            krw_so_bwd, kro_so_bwd, krg_so_bwd = _let(
-                sw, so - finite_difference_epsilon, sg
+                sw - finite_difference_epsilon,
+                1.0 - (sw - finite_difference_epsilon) - sg,
+                sg,
             )
             krw_sg_fwd, kro_sg_fwd, krg_sg_fwd = _let(
-                sw, so, sg + finite_difference_epsilon
+                sw,
+                1.0 - sw - (sg + finite_difference_epsilon),
+                sg + finite_difference_epsilon,
             )
             krw_sg_bwd, kro_sg_bwd, krg_sg_bwd = _let(
-                sw, so, sg - finite_difference_epsilon
+                sw,
+                1.0 - sw - (sg - finite_difference_epsilon),
+                sg - finite_difference_epsilon,
             )
 
             results = (
                 (krw_sw_fwd - krw_sw_bwd) * inv_2_epsilon,
                 (kro_sw_fwd - kro_sw_bwd) * inv_2_epsilon,
                 (krg_sw_fwd - krg_sw_bwd) * inv_2_epsilon,
-                (krw_so_fwd - krw_so_bwd) * inv_2_epsilon,
-                (kro_so_fwd - kro_so_bwd) * inv_2_epsilon,
-                (krg_so_fwd - krg_so_bwd) * inv_2_epsilon,
+                -((krw_sw_fwd - krw_sw_bwd) + (krw_sg_fwd - krw_sg_bwd))
+                * inv_2_epsilon,
+                -((kro_sw_fwd - kro_sw_bwd) + (kro_sg_fwd - kro_sg_bwd))
+                * inv_2_epsilon,
+                -((krg_sw_fwd - krg_sw_bwd) + (krg_sg_fwd - krg_sg_bwd))
+                * inv_2_epsilon,
                 (krw_sg_fwd - krw_sg_bwd) * inv_2_epsilon,
                 (kro_sg_fwd - kro_sg_bwd) * inv_2_epsilon,
                 (krg_sg_fwd - krg_sg_bwd) * inv_2_epsilon,

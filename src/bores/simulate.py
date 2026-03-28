@@ -39,7 +39,7 @@ from bores.grids.pvt import (
 )
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.grids.updates import (
-    apply_solution_gas_liberation,
+    apply_solution_gas_updates,
     update_pvt_grids,
     update_residual_saturation_grids,
 )
@@ -453,9 +453,16 @@ def _run_impes_step(
     old_oil_formation_volume_factor_grid = (
         padded_fluid_properties.oil_formation_volume_factor_grid.copy()
     )
+    old_gas_solubility_in_water_grid = (
+        padded_fluid_properties.gas_solubility_in_water_grid.copy()
+    )
+    old_water_formation_volume_factor_grid = (
+        padded_fluid_properties.water_formation_volume_factor_grid.copy()
+    )
     # Save pre-flash saturations to detect flash-induced saturation changes
     old_oil_saturation_grid = padded_fluid_properties.oil_saturation_grid.copy()
     old_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
+    old_water_saturation_grid = padded_fluid_properties.water_saturation_grid.copy()
 
     padded_fluid_properties = update_pvt_grids(
         fluid_properties=padded_fluid_properties,
@@ -469,10 +476,12 @@ def _run_impes_step(
     # When pressure drops below bubble point, solution gas-to-oil ratio decreases
     # and dissolved gas comes out of solution as free gas.
     # This updates oil saturation, gas saturation, and solution gas-to-oil ratio.
-    padded_fluid_properties = apply_solution_gas_liberation(
+    padded_fluid_properties = apply_solution_gas_updates(
         fluid_properties=padded_fluid_properties,
         old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
     )
     # Check flash-induced saturation changes before proceeding to saturation solver.
     # If the liberation flash itself violates the saturation change limits, reject
@@ -491,9 +500,17 @@ def _run_impes_step(
             )
         )
     )
+    flash_water_sat_change = float(
+        np.max(
+            np.abs(
+                padded_fluid_properties.water_saturation_grid
+                - old_water_saturation_grid
+            )
+        )
+    )
     flash_sat_check = _check_saturation_changes(
         max_oil_saturation_change=flash_oil_sat_change,
-        max_water_saturation_change=0.0,
+        max_water_saturation_change=flash_water_sat_change,
         max_gas_saturation_change=flash_gas_sat_change,
         max_allowed_oil_saturation_change=config.max_oil_saturation_change,
         max_allowed_water_saturation_change=config.max_water_saturation_change,
@@ -965,9 +982,16 @@ def _run_implicit_step(
     old_oil_formation_volume_factor_grid = (
         padded_fluid_properties.oil_formation_volume_factor_grid.copy()
     )
+    old_gas_solubility_in_water_grid = (
+        padded_fluid_properties.gas_solubility_in_water_grid.copy()
+    )
+    old_water_formation_volume_factor_grid = (
+        padded_fluid_properties.water_formation_volume_factor_grid.copy()
+    )
     # Save pre-flash saturations to detect flash-induced saturation changes
     old_oil_saturation_grid = padded_fluid_properties.oil_saturation_grid.copy()
     old_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
+    old_water_saturation_grid = padded_fluid_properties.water_saturation_grid.copy()
 
     # PVT update at new pressure
     logger.debug("Updating PVT fluid properties for saturation evolution")
@@ -983,10 +1007,12 @@ def _run_implicit_step(
     )
 
     # Solution gas liberation flash
-    padded_fluid_properties = apply_solution_gas_liberation(
+    padded_fluid_properties = apply_solution_gas_updates(
         fluid_properties=padded_fluid_properties,
         old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
     )
 
     # Check flash-induced saturation changes before proceeding to saturation solver.
@@ -1006,9 +1032,17 @@ def _run_implicit_step(
             )
         )
     )
+    flash_water_sat_change = float(
+        np.max(
+            np.abs(
+                padded_fluid_properties.water_saturation_grid
+                - old_water_saturation_grid
+            )
+        )
+    )
     flash_sat_check = _check_saturation_changes(
         max_oil_saturation_change=flash_oil_sat_change,
-        max_water_saturation_change=0.0,
+        max_water_saturation_change=flash_water_sat_change,
         max_gas_saturation_change=flash_gas_sat_change,
         max_allowed_oil_saturation_change=config.max_oil_saturation_change,
         max_allowed_water_saturation_change=config.max_water_saturation_change,
@@ -1032,6 +1066,9 @@ def _run_implicit_step(
             },
         )
 
+    # No need to apply saturation boundary conditions here, they are applied at the
+    # start of the newton iteration in the implicit saturation solver
+
     # Update fluid properties again as solution gas-to-oil ratio may have changed
     # and some PVT properties depend on it
     padded_fluid_properties = update_pvt_grids(
@@ -1041,23 +1078,6 @@ def _run_implicit_step(
         pvt_tables=config.pvt_tables,
         freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
-
-    # Apply boundary conditions to updated saturation grids
-    logger.debug(
-        f"Applying saturations boundary conditions after solution gas evolution for time step {time_step}..."
-    )
-    apply_saturation_boundary_conditions(
-        padded_water_saturation_grid=padded_fluid_properties.water_saturation_grid,
-        padded_oil_saturation_grid=padded_fluid_properties.oil_saturation_grid,
-        padded_gas_saturation_grid=padded_fluid_properties.gas_saturation_grid,
-        boundary_conditions=boundary_conditions,
-        cell_dimension=cell_dimension,
-        grid_shape=grid_shape,
-        thickness_grid=thickness_grid,
-        time=time,
-        pad_width=pad_width,
-    )
-    logger.debug("Saturation boundary conditions applied.")
 
     logger.debug("Evolving saturation (implicit, Newton-Raphson)...")
     pressure_change_grid = padded_pressure_grid - old_pressure_grid
@@ -1071,7 +1091,6 @@ def _run_implicit_step(
         time=time,
         rock_properties=padded_rock_properties,
         fluid_properties=padded_fluid_properties,
-        wells=wells,
         config=config,
         well_indices_cache=well_indices_cache,
         injection_rates=PhaseTensorsProxy(
@@ -1083,6 +1102,16 @@ def _run_implicit_step(
             oil=production_rates.oil,
             water=production_rates.water,
             gas=production_rates.gas,
+        ),
+        injection_bhps=PhaseTensorsProxy(
+            oil=injection_bhps.oil,
+            water=injection_bhps.water,
+            gas=injection_bhps.gas,
+        ),
+        production_bhps=PhaseTensorsProxy(
+            oil=production_bhps.oil,
+            water=production_bhps.water,
+            gas=production_bhps.gas,
         ),
         boundary_conditions=boundary_conditions,
         pressure_change_grid=pressure_change_grid,
@@ -1577,9 +1606,16 @@ def _run_explicit_step(
     old_oil_formation_volume_factor_grid = (
         padded_fluid_properties.oil_formation_volume_factor_grid.copy()
     )
+    old_gas_solubility_in_water_grid = (
+        padded_fluid_properties.gas_solubility_in_water_grid.copy()
+    )
+    old_water_formation_volume_factor_grid = (
+        padded_fluid_properties.water_formation_volume_factor_grid.copy()
+    )
     # Save pre-flash saturations to detect flash-induced saturation changes
     old_oil_saturation_grid = padded_fluid_properties.oil_saturation_grid.copy()
     old_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
+    old_water_saturation_grid = padded_fluid_properties.water_saturation_grid.copy()
 
     padded_fluid_properties = update_pvt_grids(
         fluid_properties=padded_fluid_properties,
@@ -1593,10 +1629,12 @@ def _run_explicit_step(
     # When pressure drops below bubble point, solution gas-to-oil ratio decreases
     # and dissolved gas comes out of solution as free gas.
     # This updates oil saturation, gas saturation, and solution gas-to-oil ratio.
-    padded_fluid_properties = apply_solution_gas_liberation(
+    padded_fluid_properties = apply_solution_gas_updates(
         fluid_properties=padded_fluid_properties,
         old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
     )
 
     # Check flash-induced saturation changes so the next timestep doesn't
@@ -1615,9 +1653,17 @@ def _run_explicit_step(
             )
         )
     )
+    flash_water_sat_change = float(
+        np.max(
+            np.abs(
+                padded_fluid_properties.water_saturation_grid
+                - old_water_saturation_grid
+            )
+        )
+    )
     flash_sat_check = _check_saturation_changes(
         max_oil_saturation_change=flash_oil_sat_change,
-        max_water_saturation_change=0.0,
+        max_water_saturation_change=flash_water_sat_change,
         max_gas_saturation_change=flash_gas_sat_change,
         max_allowed_oil_saturation_change=config.max_oil_saturation_change,
         max_allowed_water_saturation_change=config.max_water_saturation_change,

@@ -18,7 +18,6 @@ from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
     EvolutionResult,
     _warn_injection_pressure,
-    _warn_injection_rate,
     _warn_production_pressure,
     compute_mobility_grids,
     solve_linear_system,
