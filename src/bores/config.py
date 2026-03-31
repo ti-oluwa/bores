@@ -62,7 +62,7 @@ class Config(
     )
     """Relative convergence tolerance for saturation iterative solvers (default is 1e-4). Transport matrix tend to be more well conditioned."""
 
-    maximum_iterations: int = attrs.field(  # type: ignore
+    maximum_solver_iterations: int = attrs.field(  # type: ignore
         default=250,
         validator=attrs.validators.and_(
             attrs.validators.ge(1),  # type: ignore[arg-type]

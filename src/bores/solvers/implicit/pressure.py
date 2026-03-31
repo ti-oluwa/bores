@@ -65,6 +65,8 @@ def evolve_pressure(
     well_indices_cache: WellIndicesCache,
     injection_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     production_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    injection_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    production_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     pad_width: int = 1,
@@ -225,6 +227,8 @@ def evolve_pressure(
             dtype=dtype,
             injection_rates=injection_rates,
             production_rates=production_rates,
+            injection_fvfs=injection_fvfs,
+            production_fvfs=production_fvfs,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
             pad_width=pad_width,
@@ -304,6 +308,8 @@ def evolve_pressure(
             dtype=dtype,
             injection_rates=injection_rates,
             production_rates=production_rates,
+            injection_fvfs=injection_fvfs,
+            production_fvfs=production_fvfs,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
             pad_width=pad_width,
@@ -344,7 +350,7 @@ def evolve_pressure(
             A_csr=jacobian,
             b=residual_vector,
             rtol=config.pressure_convergence_tolerance,
-            maximum_iterations=config.maximum_iterations,
+            maximum_iterations=config.maximum_solver_iterations,
             solver=config.pressure_solver,
             preconditioner=config.pressure_preconditioner,
             fallback_to_direct=True,
@@ -369,7 +375,9 @@ def evolve_pressure(
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
     )
-    maximum_pressure_change = np.max(np.abs(new_pressure_grid - current_oil_pressure_grid))
+    maximum_pressure_change = np.max(
+        np.abs(new_pressure_grid - current_oil_pressure_grid)
+    )
     return EvolutionResult(
         value=ImplicitPressureSolution(
             pressure_grid=new_pressure_grid.astype(dtype, copy=False),
@@ -975,6 +983,8 @@ def compute_well_contributions(
     dtype: npt.DTypeLike,
     injection_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     production_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    injection_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    production_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     pad_width: int = 1,
@@ -1228,6 +1238,20 @@ def compute_well_contributions(
                         0.0,
                     )
 
+            if injection_fvfs is not None:
+                if injected_phase == FluidPhase.GAS:
+                    injection_fvfs[i - pad_width, j - pad_width, k - pad_width] = (
+                        0.0,
+                        0.0,
+                        phase_fvf,
+                    )
+                else:
+                    injection_fvfs[i - pad_width, j - pad_width, k - pad_width] = (
+                        phase_fvf,
+                        0.0,
+                        0.0,
+                    )
+
             if injection_bhps is not None:
                 if injected_phase == FluidPhase.GAS:
                     injection_bhps[i - pad_width, j - pad_width, k - pad_width] = (
@@ -1289,6 +1313,9 @@ def compute_well_contributions(
             water_rate = 0.0
             oil_rate = 0.0
             gas_rate = 0.0
+            water_fvf = 0.0
+            oil_fvf = 0.0
+            gas_fvf = 0.0
             water_bhp = 0.0
             oil_bhp = 0.0
             gas_bhp = 0.0
@@ -1407,12 +1434,15 @@ def compute_well_contributions(
 
                 if produced_phase == FluidPhase.GAS:
                     gas_rate += flow_rate
+                    gas_fvf = phase_fvf
                     gas_bhp = bhp
                 elif produced_phase == FluidPhase.WATER:
                     water_rate += flow_rate * bbl_to_ft3
+                    water_fvf = phase_fvf
                     water_bhp = bhp
                 else:
                     oil_rate += flow_rate * bbl_to_ft3
+                    oil_fvf = phase_fvf
                     oil_bhp = bhp
 
                 logger.debug(
@@ -1428,6 +1458,13 @@ def compute_well_contributions(
                     water_rate,
                     oil_rate,
                     gas_rate,
+                )
+
+            if production_fvfs is not None:
+                production_fvfs[i - pad_width, j - pad_width, k - pad_width] = (
+                    water_fvf,
+                    oil_fvf,
+                    gas_fvf,
                 )
 
             if production_bhps is not None:

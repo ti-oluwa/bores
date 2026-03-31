@@ -349,7 +349,7 @@ compute_gas_compressibility_factor_hall_yarborough(
     pressure: float, temperature: float, gas_gravity: float,
     h2s_mole_fraction: float = 0.0, co2_mole_fraction: float = 0.0,
     n2_mole_fraction: float = 0.0,
-    maximum_iterations: int = 50, tolerance: float = 1e-10
+    maximum_solver_iterations: int = 50, tolerance: float = 1e-10
 ) -> float
 ```
 
@@ -364,7 +364,7 @@ compute_gas_compressibility_factor_dranchuk_abou_kassem(
     pressure: float, temperature: float, gas_gravity: float,
     h2s_mole_fraction: float = 0.0, co2_mole_fraction: float = 0.0,
     n2_mole_fraction: float = 0.0,
-    maximum_iterations: int = 50, tolerance: float = 1e-10
+    maximum_solver_iterations: int = 50, tolerance: float = 1e-10
 ) -> float
 ```
 
@@ -477,7 +477,7 @@ $$R_s = \gamma_g \cdot \left[\left(\frac{P}{18.2} + 1.4\right) \cdot 10^{0.0125 
 ```python
 estimate_solution_gor(
     pressure: float, temperature: float, oil_api_gravity: float, gas_gravity: float,
-    maximum_iterations: int = 20, tolerance: float = 1e-4
+    maximum_solver_iterations: int = 20, tolerance: float = 1e-4
 ) -> float
 ```
 

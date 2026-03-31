@@ -9,7 +9,7 @@ import numpy.typing as npt
 
 from bores._precision import get_dtype
 from bores.constants import c
-from bores.datastructures import BottomHolePressures, Rates
+from bores.datastructures import BottomHolePressures, FormationVolumeFactors, Rates
 from bores.errors import ValidationError
 from bores.grids.base import (
     CapillaryPressureGrids,
@@ -58,6 +58,10 @@ class ModelState(
     """Holds sparse tensors for oil, water, and gas injection rates at this state in ft³/day"""
     production_rates: Rates[float, NDimension]
     """Holds sparse tensors for oil, water, and gas production rates at this state in ft³/day"""
+    injection_formation_volume_factors: FormationVolumeFactors[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas injection formation volume factors at this state in ft³/SCF or bbls/STB"""
+    production_formation_volume_factors: FormationVolumeFactors[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas production formation volume factors at this state in ft³/SCF or bbls/STB"""
     injection_bhps: BottomHolePressures[float, NDimension]
     """Sparse tensor holding injection well(s) cell perforation bottom hole pressure at this state in psi"""
     production_bhps: BottomHolePressures[float, NDimension]
@@ -92,6 +96,16 @@ class ModelState(
     def time_in_years(self) -> float:
         """Time elapsed at this state in years"""
         return self.time / c.DAYS_PER_YEAR * 86400
+
+    @property
+    def injection_fvfs(self) -> FormationVolumeFactors[float, NDimension]:
+        """Formation volume factors for injection phases at this state in ft³/SCF or bbls/STB"""
+        return self.injection_formation_volume_factors
+
+    @property
+    def production_fvfs(self) -> FormationVolumeFactors[float, NDimension]:
+        """Formation volume factors for production phases at this state in ft³/SCF or bbls/STB"""
+        return self.production_formation_volume_factors
 
 
 def _validate_array(
@@ -346,6 +360,8 @@ def validate_state(
             wells=state.wells,
             injection_rates=state.injection_rates,
             production_rates=state.production_rates,
+            injection_formation_volume_factors=state.injection_formation_volume_factors,
+            production_formation_volume_factors=state.production_formation_volume_factors,
             injection_bhps=state.injection_bhps,
             production_bhps=state.production_bhps,
             relative_permeabilities=relative_permeabilities,

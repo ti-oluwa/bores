@@ -12,16 +12,13 @@ import numpy.typing as npt
 from typing_extensions import Self
 
 from bores._precision import get_dtype
-from bores.boundary_conditions import (
-    BoundaryConditions,
-    GridBoundaryCondition,
-    default_bc,
-)
+from bores.boundary_conditions import BoundaryConditions, default_bc
 from bores.config import Config
 from bores.constants import c
 from bores.datastructures import (
     BottomHolePressure,
     BottomHolePressures,
+    FormationVolumeFactors,
     PhaseTensorsProxy,
     Rates,
     SparseTensor,
@@ -106,6 +103,10 @@ class StepResult(typing.Generic[NDimension]):
     """Phase injection rates during the time step."""
     production_rates: typing.Optional[Rates[float, NDimension]] = None
     """Phase production rates during the time step."""
+    injection_fvfs: typing.Optional[FormationVolumeFactors[float, NDimension]] = None
+    """Phase injection formation volume factors during the time step."""
+    production_fvfs: typing.Optional[FormationVolumeFactors[float, NDimension]] = None
+    """Phase production formation volume factors during the time step."""
     injection_bhps: typing.Optional[BottomHolePressures[float, NDimension]] = None
     """Phase injection bottom hole pressures during the time step"""
     production_bhps: typing.Optional[BottomHolePressures[float, NDimension]] = None
@@ -266,6 +267,14 @@ def _make_rates(grid_shape: NDimension) -> Rates[float, NDimension]:
     )
 
 
+def _make_fvfs(grid_shape: NDimension) -> FormationVolumeFactors[float, NDimension]:
+    return FormationVolumeFactors(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
+
+
 def _make_bhps(grid_shape: NDimension) -> BottomHolePressures[float, NDimension]:
     return BottomHolePressures(
         oil=BottomHolePressure(grid_shape, dtype=float),
@@ -278,6 +287,12 @@ def _rates_proxy(
     rates: Rates[float, NDimension],
 ) -> PhaseTensorsProxy[float, NDimension]:
     return PhaseTensorsProxy(oil=rates.oil, water=rates.water, gas=rates.gas)
+
+
+def _fvfs_proxy(
+    fvfs: FormationVolumeFactors[float, NDimension],
+) -> PhaseTensorsProxy[float, NDimension]:
+    return PhaseTensorsProxy(oil=fvfs.oil, water=fvfs.water, gas=fvfs.gas)
 
 
 def _bhps_proxy(
@@ -340,6 +355,8 @@ def _run_impes_step(
     logger.debug("Evolving pressure (implicit)...")
     injection_rates = _make_rates(grid_shape)
     production_rates = _make_rates(grid_shape)
+    injection_fvfs = _make_fvfs(grid_shape)
+    production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
     pressure_result = implicit.evolve_pressure(
@@ -357,6 +374,8 @@ def _run_impes_step(
         config=config,
         injection_rates=_rates_proxy(injection_rates),
         production_rates=_rates_proxy(production_rates),
+        injection_fvfs=_fvfs_proxy(injection_fvfs),
+        production_fvfs=_fvfs_proxy(production_fvfs),
         injection_bhps=_bhps_proxy(injection_bhps),
         production_bhps=_bhps_proxy(production_bhps),
         pad_width=pad_width,
@@ -774,6 +793,8 @@ def _run_impes_step(
         saturation_history=padded_saturation_history,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_fvfs=injection_fvfs,
+        production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,
         production_bhps=production_bhps,
         success=True,
@@ -841,6 +862,8 @@ def _run_sequential_implicit_step(
     logger.debug("Evolving pressure (implicit)...")
     injection_rates = _make_rates(grid_shape)
     production_rates = _make_rates(grid_shape)
+    injection_fvfs = _make_fvfs(grid_shape)
+    production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
     pressure_result = implicit.evolve_pressure(
@@ -859,6 +882,8 @@ def _run_sequential_implicit_step(
         well_indices_cache=well_indices_cache,
         injection_rates=_rates_proxy(injection_rates),
         production_rates=_rates_proxy(production_rates),
+        injection_fvfs=_fvfs_proxy(injection_fvfs),
+        production_fvfs=_fvfs_proxy(production_fvfs),
         injection_bhps=_bhps_proxy(injection_bhps),
         production_bhps=_bhps_proxy(production_bhps),
         pad_width=pad_width,
@@ -1168,6 +1193,8 @@ def _run_sequential_implicit_step(
         saturation_history=padded_saturation_history,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_fvfs=injection_fvfs,
+        production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,
         production_bhps=production_bhps,
         success=True,
@@ -1253,6 +1280,8 @@ def _run_full_sequential_implicit_step(
 
     injection_rates = _make_rates(grid_shape)
     production_rates = _make_rates(grid_shape)
+    injection_fvfs = _make_fvfs(grid_shape)
+    production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
 
@@ -1271,11 +1300,6 @@ def _run_full_sequential_implicit_step(
 
     for iteration in range(maximum_outer_iterations):
         logger.debug(f"Outer iteration {iteration + 1}/{maximum_outer_iterations}")
-        injection_rates = _make_rates(grid_shape)
-        production_rates = _make_rates(grid_shape)
-        injection_bhps = _make_bhps(grid_shape)
-        production_bhps = _make_bhps(grid_shape)
-
         # Implicit pressure solve
         pressure_result = implicit.evolve_pressure(
             cell_dimension=cell_dimension,
@@ -1293,6 +1317,8 @@ def _run_full_sequential_implicit_step(
             well_indices_cache=well_indices_cache,
             injection_rates=_rates_proxy(injection_rates),
             production_rates=_rates_proxy(production_rates),
+            injection_fvfs=_fvfs_proxy(injection_fvfs),
+            production_fvfs=_fvfs_proxy(production_fvfs),
             injection_bhps=_bhps_proxy(injection_bhps),
             production_bhps=_bhps_proxy(production_bhps),
             pad_width=pad_width,
@@ -1713,6 +1739,12 @@ def _run_full_sequential_implicit_step(
         prev_water_saturation_grid = iter_fluid_properties.water_saturation_grid.copy()
         prev_oil_saturation_grid = iter_fluid_properties.oil_saturation_grid.copy()
         prev_gas_saturation_grid = iter_fluid_properties.gas_saturation_grid.copy()
+        injection_rates = _make_rates(grid_shape)
+        production_rates = _make_rates(grid_shape)
+        injection_fvfs = _make_fvfs(grid_shape)
+        production_fvfs = _make_fvfs(grid_shape)
+        injection_bhps = _make_bhps(grid_shape)
+        production_bhps = _make_bhps(grid_shape)
 
     if not outer_converged:
         logger.warning(
@@ -1743,6 +1775,8 @@ def _run_full_sequential_implicit_step(
         saturation_history=padded_saturation_history,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_fvfs=injection_fvfs,
+        production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,
         production_bhps=production_bhps,
         success=True,
@@ -1805,6 +1839,8 @@ def _run_explicit_step(
     logger.debug("Evolving pressure (explicit)...")
     injection_rates = _make_rates(grid_shape)
     production_rates = _make_rates(grid_shape)
+    injection_fvfs = _make_fvfs(grid_shape)
+    production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
     pressure_result = explicit.evolve_pressure(
@@ -1823,6 +1859,8 @@ def _run_explicit_step(
         well_indices_cache=well_indices_cache,
         injection_rates=_rates_proxy(injection_rates),
         production_rates=_rates_proxy(production_rates),
+        injection_fvfs=_fvfs_proxy(injection_fvfs),
+        production_fvfs=_fvfs_proxy(production_fvfs),
         injection_bhps=_bhps_proxy(injection_bhps),
         production_bhps=_bhps_proxy(production_bhps),
         pad_width=pad_width,
@@ -2197,6 +2235,8 @@ def _run_explicit_step(
         saturation_history=padded_saturation_history,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_fvfs=injection_fvfs,
+        production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,
         production_bhps=production_bhps,
         success=True,
@@ -2561,6 +2601,8 @@ def run(
         )
         injection_rates = _make_rates(grid_shape)
         production_rates = _make_rates(grid_shape)
+        injection_fvfs = _make_fvfs(grid_shape)
+        production_fvfs = _make_fvfs(grid_shape)
         injection_bhps = _make_bhps(grid_shape)
         production_bhps = _make_bhps(grid_shape)
         state = ModelState(
@@ -2574,6 +2616,8 @@ def run(
             capillary_pressures=capillary_pressure_grids,
             injection_rates=injection_rates,
             production_rates=production_rates,
+            injection_formation_volume_factors=injection_fvfs,
+            production_formation_volume_factors=production_fvfs,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
             timer_state=timer.dump_state(),
@@ -2830,10 +2874,14 @@ def run(
                     )
                     injection_rates = result.injection_rates
                     production_rates = result.production_rates
+                    injection_fvfs = result.injection_fvfs
+                    production_fvfs = result.production_fvfs
                     injection_bhps = result.injection_bhps
                     production_bhps = result.production_bhps
                     assert injection_rates is not None
                     assert production_rates is not None
+                    assert injection_fvfs is not None
+                    assert production_fvfs is not None
                     assert injection_bhps is not None
                     assert production_bhps is not None
 
@@ -2870,6 +2918,8 @@ def run(
                         capillary_pressures=capillary_pressure_grids,
                         injection_rates=injection_rates,
                         production_rates=production_rates.abs(),
+                        injection_formation_volume_factors=injection_fvfs,
+                        production_formation_volume_factors=production_fvfs,
                         injection_bhps=injection_bhps,
                         production_bhps=production_bhps,
                         timer_state=timer.dump_state(),

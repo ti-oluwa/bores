@@ -118,7 +118,7 @@ config = bores.Config(
 )
 ```
 
-In this example, BORES first tries BiCGSTAB for the pressure equation. If BiCGSTAB does not converge within `maximum_iterations`, it tries GMRES. If GMRES also fails, it falls back to the direct solver. This is particularly useful for simulations where the pressure matrix conditioning varies over time (e.g., when wells switch controls or when a gas front arrives at a producer).
+In this example, BORES first tries BiCGSTAB for the pressure equation. If BiCGSTAB does not converge within `maximum_solver_iterations`, it tries GMRES. If GMRES also fails, it falls back to the direct solver. This is particularly useful for simulations where the pressure matrix conditioning varies over time (e.g., when wells switch controls or when a gas front arrives at a producer).
 
 Solver chains add robustness at the cost of potentially longer solve times on difficult steps. For most simulations, a single solver (`"bicgstab"`) with a good preconditioner is sufficient.
 
@@ -158,7 +158,7 @@ The key parameters that affect solver performance are:
 
 **`saturation_convergence_tolerance`** (default: `1e-4`): The tolerance for the saturation solver (implicit scheme only). Saturation transport is typically better conditioned than pressure, so a more relaxed tolerance is appropriate.
 
-**`maximum_iterations`** (default: `250`): The maximum number of iterations before the solver gives up. Well-conditioned problems typically converge in 10 to 50 iterations. If you regularly hit the iteration limit, the problem is likely poorly conditioned and needs a better preconditioner rather than more iterations.
+**`maximum_solver_iterations`** (default: `250`): The maximum number of iterations before the solver gives up. Well-conditioned problems typically converge in 10 to 50 iterations. If you regularly hit the iteration limit, the problem is likely poorly conditioned and needs a better preconditioner rather than more iterations.
 
 ```python
 config = bores.Config(
@@ -167,7 +167,7 @@ config = bores.Config(
     wells=wells,
     pressure_solver="bicgstab",
     pressure_convergence_tolerance=1e-6,
-    maximum_iterations=250,
+    maximum_solver_iterations=250,
 )
 ```
 

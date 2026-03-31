@@ -2438,7 +2438,7 @@ def solve_implicit_saturation(
             solver=config.saturation_solver,
             preconditioner=config.saturation_preconditioner,
             rtol=config.saturation_convergence_tolerance,
-            maximum_iterations=config.maximum_iterations,
+            maximum_iterations=config.maximum_solver_iterations,
             fallback_to_direct=True,
         )
 

@@ -18,7 +18,7 @@ from tqdm import tqdm
 from bores.config import Config
 from bores.datastructures import Rates, SparseTensor
 from bores.models import ReservoirModel
-from bores.simulate import Run, StepResult, run
+from bores.simulate import Run, StepCallback, StepResult, run
 from bores.states import ModelState
 from bores.types import ThreeDimensions
 
@@ -38,16 +38,6 @@ class MonitorConfig:
     Configuration for the simulation monitor.
 
     Controls which display backends are active and how often they refresh.
-    All display options default to enabled; set `enable=False` as a master
-    switch to suppress all output and stat collection with zero overhead.
-    """
-
-    enable: bool = True
-    """
-    Master switch.
-
-    When `False`, no stats are collected and no display is shown.
-    The `monitored_run` generator becomes a zero-overhead passthrough.
     """
 
     use_rich: bool = True
@@ -528,10 +518,10 @@ def _build_rich_panel(
             ("  ", ""),
         ]
     solver_parts += [
-        ("ΔP ", dim),
+        ("Pressure Change (ΔP) ", dim),
         (f"{diagnostics.maximum_pressure_change:,.2f} psi", val),
         ("  ", ""),
-        ("ΔS ", dim),
+        ("Saturation Change (ΔS) ", dim),
         (f"{diagnostics.maximum_saturation_change:.2e}", val),
     ]
 
@@ -611,9 +601,11 @@ def monitor(
     config: typing.Optional[Config] = None,
     *,
     monitor: typing.Optional[MonitorConfig] = None,
+    on_step_rejected: typing.Optional[StepCallback] = None,
+    on_step_accepted: typing.Optional[StepCallback] = None,
 ) -> typing.Generator[typing.Tuple[ModelState[ThreeDimensions], RunStats], None, None]:
     """
-    Wraps `bores.run` with optional live monitoring and statistics collection.
+    Wraps `bores.run(...)` with optional live monitoring and statistics collection.
 
     Yields `(ModelState, RunStats)` pairs at the same cadence as
     `bores.run` (i.e. every `output_frequency` accepted steps).
@@ -632,7 +624,13 @@ def monitor(
         the config stored on the `Run` when provided).
     :param monitor: `MonitorConfig` controlling display options. Defaults
         to `MonitorConfig()` (rich live panel enabled by default).
-    :yields: `(state, stats)` - the model state and the live `RunStats`
+    :param on_step_rejected: Optional callback to be invoked whenever a
+        proposed time step is rejected by the timer. The callback receives the
+        same arguments as the `on_step_rejected` callback of `bores.run`.
+    :param on_step_accepted: Optional callback to be invoked whenever a time
+        step is accepted by the timer. The callback receives the same arguments
+        as the `on_step_accepted` callback of `bores.run`.
+    :yields: Tuple of `(state, stats)` - the model state and the live `RunStats`
         accumulator after each accepted output step.
     :raises ValueError: If `input` is a `ReservoirModel` and `config`
         is not provided.
@@ -640,49 +638,45 @@ def monitor(
     if monitor is None:
         monitor = MonitorConfig()
 
+    if not monitor.use_rich and not monitor.use_tqdm:
+        logger.warning(
+            "Monitor config has both `use_rich` and `use_tqdm` set to False; no live display will be shown."
+        )
+
     is_generic_input = not isinstance(input, (ReservoirModel, Run))
-
-    if not monitor.enable:
-        stats = RunStats()
-        if is_generic_input:
-            simulation = input
-        else:
-            simulation = run(input, config)  # type: ignore[arg-type]
-
-        for state in simulation:  # type: ignore
-            yield state, stats
-        logger.info(stats.summary())
-        return
-
-    # Resolve simulation time for progress tracking
     if isinstance(input, Run):
-        _config = config or input.config
+        config = config or input.config
     else:
         if config is None and not is_generic_input:
             raise ValueError(
                 "Must provide `config` when `input` is a `ReservoirModel`."
             )
-        _config = typing.cast(Config, config)
+        config = typing.cast(Config, config)
 
     # Suppress logging from `run(...)`; monitor handles all output and stats
-    _config = _config.with_updates(log_interval=0)
-    total_simulation_time: float = float(_config.timer.simulation_time)
+    config = config.with_updates(log_interval=0)
+    total_simulation_time: float = float(config.timer.simulation_time)
     stats = RunStats()
     _timer_kwargs: typing.Dict[str, typing.Any] = {}
 
     def _on_step_rejected(
         step_result: StepResult, step_size: float, elapsed_time: float
     ) -> None:
-        nonlocal _timer_kwargs
+        nonlocal _timer_kwargs, on_step_rejected
         stats.record_rejection()
         _timer_kwargs.clear()
         _timer_kwargs.update(step_result.timer_kwargs)
+        if on_step_rejected is not None:
+            on_step_rejected(step_result, step_size, elapsed_time)
 
     def _on_step_accepted(
         step_result: StepResult, step_size: float, elapsed_time: float
     ) -> None:
+        nonlocal _timer_kwargs, on_step_accepted
         _timer_kwargs.clear()
         _timer_kwargs.update(step_result.timer_kwargs)
+        if on_step_accepted is not None:
+            on_step_accepted(step_result, step_size, elapsed_time)
 
     tqdm_bar: typing.Optional[tqdm] = None  # type: ignore[type-arg]
     if monitor.use_tqdm:
@@ -699,7 +693,7 @@ def monitor(
             dynamic_ncols=True,
         )
 
-    # All logging from bores.* is redirected through the same `Console` that
+    # All logging from 'bores.*' is redirected through the same `Console` that
     # owns the `Live` panel. This prevents the default stderr handler from
     # writing lines that force Rich to re-render and print a new panel frame
     # on every log record emitted inside simulation.
@@ -750,7 +744,7 @@ def monitor(
         else:
             simulation = run(
                 input,  # type: ignore[arg-type]
-                _config,
+                config,
                 on_step_rejected=_on_step_rejected,
                 on_step_accepted=_on_step_accepted,
             )

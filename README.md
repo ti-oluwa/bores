@@ -48,7 +48,7 @@ logging.basicConfig(level=logging.INFO)
 # Set precision (32-bit is the default)
 bores.use_32bit_precision()
 
-# Grid dimensions: 10x10x3 cells, each 100 ft x 100 ft, 20 ft thick
+# Grid dimensions: 10x10x3 cells, each 1000 ft x 1000 ft, 100 ft thick
 grid_shape = typing.cast(bores.ThreeDimensions, (10, 10, 3))
 cell_dimension = (1000.0, 1000.0)
 
@@ -242,7 +242,7 @@ BORES was developed by a graduate petroleum engineer with just theoretical knowl
 
 **Improvements**: Pull requests for bug fixes, documentation improvements, and enhancements that fall within the scope of a black-oil reservoir simulation framework are welcome. Please keep changes focused and well-tested.
 
-**Out of scope**: Changes that go beyond the black-oil formulation (compositional simulation, thermal recovery, geomechanical coupling) are outside the current scope of the project.
+**Out of scope**: Changes that go beyond the black-oil formulation (compositional simulation, thermal recovery, etc.) are outside the current scope of the project.
 
 ## License
 

@@ -116,7 +116,7 @@ config = bores.Config(
     saturation_preconditioner="ilu",              # Preconditioner for saturation
     pressure_convergence_tolerance=1e-6,          # Relative tolerance for pressure
     saturation_convergence_tolerance=1e-4,        # Relative tolerance for saturation
-    maximum_iterations=250,                           # Max iterations per solve
+    maximum_solver_iterations=250,                           # Max iterations per solve
 )
 ```
 
@@ -128,7 +128,7 @@ The saturation equation is typically better conditioned than the pressure equati
 
 ### Solver Does Not Converge
 
-If the solver fails to converge within `maximum_iterations`, BORES raises a `SolverError`. Common causes and fixes:
+If the solver fails to converge within `maximum_solver_iterations`, BORES raises a `SolverError`. Common causes and fixes:
 
 1. **Preconditioner is too weak.** Switch from `"diagonal"` to `"ilu"`, or from `"ilu"` to `"amg"`. A stronger preconditioner reduces iteration counts.
 
@@ -186,7 +186,7 @@ config = bores.Config(
     pressure_preconditioner="amg",
     saturation_preconditioner="ilu",
     pressure_convergence_tolerance=1e-6,
-    maximum_iterations=500,
+    maximum_solver_iterations=500,
     # ...
 )
 ```

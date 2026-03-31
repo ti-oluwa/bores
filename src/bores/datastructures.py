@@ -446,6 +446,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         """
         if not isinstance(scalar, (int, float, np.floating)):
             return NotImplemented
+
         for k in list(self._data):
             self[k] = self._data[k] * scalar
         return self
@@ -803,6 +804,17 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
 
         return self._dtype(max(values))  # type: ignore
 
+    def abs(self) -> Self:
+        """
+        Element-wise absolute value.
+
+        Returns a new tensor where each stored entry `v` becomes `|v|`.
+        Entries equal to `default` remain implicit and are not stored.
+
+        :returns: New `SparseTensor` with absolute-valued entries.
+        """
+        return self.__abs__()
+
     def _validate_key(self, key: typing.Any) -> None:
         """
         Assert that `key` is a valid non-negative integer tuple of rank
@@ -981,6 +993,82 @@ class BottomHolePressures(Serializable, typing.Generic[DType, ShapeT]):
             `DType`.
         """
         return self.water[key], self.oil[key], self.gas[key]
+
+    def __setitem__(
+        self,
+        key: ShapeT,
+        value: typing.Tuple[
+            typing.Union[DType, float],
+            typing.Union[DType, float],
+            typing.Union[DType, float],
+        ],
+    ) -> None:
+        """
+        Set the water, oil and gas bottom hole pressures at the specified cell.
+
+        :param key: The N-dimensional cell index typed as `ShapeT`.
+        :param value: A three-tuple `(water_bhp, oil_bhp, gas_bhp)`.
+        """
+        water, oil, gas = value
+        self.oil[key] = oil
+        self.water[key] = water
+        self.gas[key] = gas
+
+
+@attrs.frozen(slots=True)
+class FormationVolumeFactors(Serializable, typing.Generic[DType, ShapeT]):
+    """
+    Wrapper for N-dimensional sparse tensors representing phase formation volume factors
+    (oil, water, gas).
+    """
+
+    oil: SparseTensor[DType, ShapeT]
+    """Sparse tensor representing oil formation volume factors."""
+
+    water: SparseTensor[DType, ShapeT]
+    """Sparse tensor representing oil formation volume factors."""
+
+    gas: SparseTensor[DType, ShapeT]
+    """Sparse tensor representing oil formation volume factors."""
+
+    def __iter__(self) -> typing.Iterator[typing.Optional[SparseTensor[DType, ShapeT]]]:
+        yield self.water
+        yield self.oil
+        yield self.gas
+
+    def __getitem__(self, key: ShapeT) -> typing.Tuple[DType, DType, DType]:
+        """
+        Return the water, oil and gas formation volume factors at the specified cell.
+
+        If a phase tensor is not defined, its formation volume factor is returned as the
+        default fill value of the other defined tensors, falling back to
+        `0.0` if none are defined.
+
+        :param key: The N-dimensional cell index typed as `ShapeT`.
+        :returns: A tuple `(water_bhp, oil_bhp, gas_bhp)` each of type
+            `DType`.
+        """
+        return self.water[key], self.oil[key], self.gas[key]
+
+    def __setitem__(
+        self,
+        key: ShapeT,
+        value: typing.Tuple[
+            typing.Union[DType, float],
+            typing.Union[DType, float],
+            typing.Union[DType, float],
+        ],
+    ) -> None:
+        """
+        Set the water, oil and gas formation volume factors at the specified cell.
+
+        :param key: The N-dimensional cell index typed as `ShapeT`.
+        :param value: A three-tuple `(water_bhp, oil_bhp, gas_bhp)`.
+        """
+        water, oil, gas = value
+        self.oil[key] = oil
+        self.water[key] = water
+        self.gas[key] = gas
 
 
 @attrs.frozen(slots=True)

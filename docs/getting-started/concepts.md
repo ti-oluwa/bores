@@ -315,7 +315,7 @@ config = bores.Config(
     pressure_solver="bicgstab",
     pressure_preconditioner="ilu",
     pressure_convergence_tolerance=1e-6,
-    maximum_iterations=250,
+    maximum_solver_iterations=250,
 
     # Stability controls
     maximum_pressure_change=100.0,           # psi per step

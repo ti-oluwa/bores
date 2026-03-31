@@ -134,7 +134,7 @@ See [Schemes](simulation/schemes.md) for detailed information on each evolution 
 | `saturation_preconditioner` | `str` or `None` | `"ilu"` | Preconditioner for saturation solvers |
 | `pressure_convergence_tolerance` | `float` | `1e-6` | Relative convergence tolerance for pressure |
 | `saturation_convergence_tolerance` | `float` | `1e-4` | Relative convergence tolerance for saturation |
-| `maximum_iterations` | `int` | `250` | Maximum solver iterations per step (capped at 500) |
+| `maximum_solver_iterations` | `int` | `250` | Maximum solver iterations per step (capped at 500) |
 | `task_pool` | `ThreadPoolExecutor` | `None` | Thread pool for concurrent solver matrix assembly |
 
 See [Solvers](simulation/solvers.md) and [Preconditioners](simulation/preconditioners.md) for details.
@@ -295,7 +295,7 @@ tuned_config = config.copy(
     scheme="implicit",
     pressure_solver="gmres",
     pressure_preconditioner="amg",
-    maximum_iterations=400,
+    maximum_solver_iterations=400,
 )
 ```
 
