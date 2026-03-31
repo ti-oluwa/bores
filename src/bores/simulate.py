@@ -181,9 +181,9 @@ def _validate_pressure_range(
 
 
 def _check_saturation_changes(
-    max_oil_saturation_change: float,
-    max_water_saturation_change: float,
-    max_gas_saturation_change: float,
+    maximum_oil_saturation_change: float,
+    maximum_water_saturation_change: float,
+    maximum_gas_saturation_change: float,
     max_allowed_oil_saturation_change: float,
     max_allowed_water_saturation_change: float,
     max_allowed_gas_saturation_change: float,
@@ -195,9 +195,9 @@ def _check_saturation_changes(
     their limits, return the maximum phase saturation change and the corresponding allowed maximum.
     If no violations occur, report a non-violated result with zeros for the max changes.
 
-    :param max_oil_saturation_change: Maximum oil saturation change observed.
-    :param max_water_saturation_change: Maximum water saturation change observed.
-    :param max_gas_saturation_change: Maximum gas saturation change observed.
+    :param maximum_oil_saturation_change: Maximum oil saturation change observed.
+    :param maximum_water_saturation_change: Maximum water saturation change observed.
+    :param maximum_gas_saturation_change: Maximum gas saturation change observed.
     :param max_allowed_oil_saturation_change: Maximum allowed oil saturation change.
     :param max_allowed_water_saturation_change: Maximum allowed water saturation change.
     :param max_allowed_gas_saturation_change: Maximum allowed gas saturation change.
@@ -213,41 +213,41 @@ def _check_saturation_changes(
     max_tolerable_oil_saturation_change = max_allowed_oil_saturation_change * (
         1 + oil_tolerance
     )
-    if max_oil_saturation_change > max_tolerable_oil_saturation_change:
+    if maximum_oil_saturation_change > max_tolerable_oil_saturation_change:
         violated = True
         # Start assuming oil saturation change is the largest so far
-        max_phase_saturation_change = max_oil_saturation_change
+        max_phase_saturation_change = maximum_oil_saturation_change
         max_allowed_phase_saturation_change = max_allowed_oil_saturation_change
         messages.append(
-            f"Oil saturation change {max_oil_saturation_change:.6f} exceeded maximum allowed {max_allowed_oil_saturation_change:.6f}."
+            f"Oil saturation change {maximum_oil_saturation_change:.6f} exceeded maximum allowed {max_allowed_oil_saturation_change:.6f}."
         )
 
     water_tolerance = max(tolerance, 0.005 * max_allowed_water_saturation_change)
     max_tolerable_water_saturation_change = max_allowed_water_saturation_change * (
         1 + water_tolerance
     )
-    if max_water_saturation_change > max_tolerable_water_saturation_change:
+    if maximum_water_saturation_change > max_tolerable_water_saturation_change:
         violated = True
         # If water saturation change is the largest so far, update the max values
-        if max_water_saturation_change > max_phase_saturation_change:
-            max_phase_saturation_change = max_water_saturation_change
+        if maximum_water_saturation_change > max_phase_saturation_change:
+            max_phase_saturation_change = maximum_water_saturation_change
             max_allowed_phase_saturation_change = max_allowed_water_saturation_change
         messages.append(
-            f"Water saturation change {max_water_saturation_change:.6f} exceeded maximum allowed {max_allowed_water_saturation_change:.6f}."
+            f"Water saturation change {maximum_water_saturation_change:.6f} exceeded maximum allowed {max_allowed_water_saturation_change:.6f}."
         )
 
     gas_tolerance = max(tolerance, 0.005 * max_allowed_gas_saturation_change)
     max_tolerable_gas_saturation_change = max_allowed_gas_saturation_change * (
         1 + gas_tolerance
     )
-    if max_gas_saturation_change > max_tolerable_gas_saturation_change:
+    if maximum_gas_saturation_change > max_tolerable_gas_saturation_change:
         violated = True
         # If gas saturation change is the largest so far, update the max values
-        if max_gas_saturation_change > max_phase_saturation_change:
-            max_phase_saturation_change = max_gas_saturation_change
+        if maximum_gas_saturation_change > max_phase_saturation_change:
+            max_phase_saturation_change = maximum_gas_saturation_change
             max_allowed_phase_saturation_change = max_allowed_gas_saturation_change
         messages.append(
-            f"Gas saturation change {max_gas_saturation_change:.6f} exceeded maximum allowed {max_allowed_gas_saturation_change:.6f}."
+            f"Gas saturation change {maximum_gas_saturation_change:.6f} exceeded maximum allowed {max_allowed_gas_saturation_change:.6f}."
         )
 
     message = "\n".join(messages) if messages else None
@@ -377,11 +377,11 @@ def _run_impes_step(
 
     pressure_solution = pressure_result.value
     padded_pressure_grid = pressure_solution.pressure_grid
-    max_pressure_change = pressure_solution.max_pressure_change
-    max_allowed_pressure_change = config.max_pressure_change
-    if max_pressure_change > max_allowed_pressure_change:
+    maximum_pressure_change = pressure_solution.maximum_pressure_change
+    max_allowed_pressure_change = config.maximum_pressure_change
+    if maximum_pressure_change > max_allowed_pressure_change:
         message = (
-            f"Pressure change {max_pressure_change:.6f} psi "
+            f"Pressure change {maximum_pressure_change:.6f} psi "
             f"exceeded maximum allowed {max_allowed_pressure_change:.6f} psi "
             f"at time step {time_step}."
         )
@@ -393,7 +393,7 @@ def _run_impes_step(
             success=False,
             message=message,
             timer_kwargs={
-                "max_pressure_change": max_pressure_change,
+                "maximum_pressure_change": maximum_pressure_change,
                 "max_allowed_pressure_change": max_allowed_pressure_change,
             },
         )
@@ -507,12 +507,12 @@ def _run_impes_step(
         )
     )
     flash_saturation_check = _check_saturation_changes(
-        max_oil_saturation_change=flash_oil_saturation_change,
-        max_water_saturation_change=flash_water_saturation_change,
-        max_gas_saturation_change=flash_gas_saturation_change,
-        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
-        max_allowed_water_saturation_change=config.max_water_saturation_change,
-        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+        maximum_oil_saturation_change=flash_oil_saturation_change,
+        maximum_water_saturation_change=flash_water_saturation_change,
+        maximum_gas_saturation_change=flash_gas_saturation_change,
+        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
     )
     if flash_saturation_check.violated:
         message = (
@@ -527,7 +527,7 @@ def _run_impes_step(
             success=False,
             message=message,
             timer_kwargs={
-                "max_saturation_change": flash_saturation_check.max_phase_saturation_change,
+                "maximum_saturation_change": flash_saturation_check.max_phase_saturation_change,
                 "max_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
             },
         )
@@ -650,19 +650,19 @@ def _run_impes_step(
 
     saturation_solution = saturation_result.value
     saturation_change_result = _check_saturation_changes(
-        max_oil_saturation_change=saturation_solution.max_oil_saturation_change,
-        max_water_saturation_change=saturation_solution.max_water_saturation_change,
-        max_gas_saturation_change=saturation_solution.max_gas_saturation_change,
-        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
-        max_allowed_water_saturation_change=config.max_water_saturation_change,
-        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+        maximum_oil_saturation_change=saturation_solution.maximum_oil_saturation_change,
+        maximum_water_saturation_change=saturation_solution.maximum_water_saturation_change,
+        maximum_gas_saturation_change=saturation_solution.maximum_gas_saturation_change,
+        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
     )
     timer_kwargs = {
-        "max_cfl_encountered": saturation_solution.max_cfl_encountered,
+        "maximum_cfl_encountered": saturation_solution.maximum_cfl_encountered,
         "cfl_threshold": saturation_solution.cfl_threshold,
-        "max_pressure_change": max_pressure_change,
+        "maximum_pressure_change": maximum_pressure_change,
         "max_allowed_pressure_change": max_allowed_pressure_change,
-        "max_saturation_change": saturation_change_result.max_phase_saturation_change
+        "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
         or None,
         "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
         or None,
@@ -686,9 +686,9 @@ def _run_impes_step(
         At time step {time_step}, saturation change limits were violated:
         {saturation_change_result.message}
 
-        Oil saturation change: {saturation_solution.max_oil_saturation_change:.6f},
-        Water saturation change: {saturation_solution.max_water_saturation_change:.6f},
-        Gas saturation change: {saturation_solution.max_gas_saturation_change:.6f}.
+        Oil saturation change: {saturation_solution.maximum_oil_saturation_change:.6f},
+        Water saturation change: {saturation_solution.maximum_water_saturation_change:.6f},
+        Gas saturation change: {saturation_solution.maximum_gas_saturation_change:.6f}.
         """
         logger.debug(message)
         return StepResult(
@@ -878,11 +878,11 @@ def _run_sequential_implicit_step(
 
     pressure_solution = pressure_result.value
     padded_pressure_grid = pressure_solution.pressure_grid
-    max_pressure_change = pressure_solution.max_pressure_change
-    max_allowed_pressure_change = config.max_pressure_change
-    if max_pressure_change > max_allowed_pressure_change:
+    maximum_pressure_change = pressure_solution.maximum_pressure_change
+    max_allowed_pressure_change = config.maximum_pressure_change
+    if maximum_pressure_change > max_allowed_pressure_change:
         message = (
-            f"Pressure change {max_pressure_change:.6f} psi "
+            f"Pressure change {maximum_pressure_change:.6f} psi "
             f"exceeded maximum allowed {max_allowed_pressure_change:.6f} psi "
             f"at time step {time_step}."
         )
@@ -894,7 +894,7 @@ def _run_sequential_implicit_step(
             success=False,
             message=message,
             timer_kwargs={
-                "max_pressure_change": max_pressure_change,
+                "maximum_pressure_change": maximum_pressure_change,
                 "max_allowed_pressure_change": max_allowed_pressure_change,
             },
         )
@@ -994,12 +994,12 @@ def _run_sequential_implicit_step(
         )
     )
     flash_saturation_check = _check_saturation_changes(
-        max_oil_saturation_change=flash_oil_saturation_change,
-        max_water_saturation_change=flash_water_saturation_change,
-        max_gas_saturation_change=flash_gas_saturation_change,
-        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
-        max_allowed_water_saturation_change=config.max_water_saturation_change,
-        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+        maximum_oil_saturation_change=flash_oil_saturation_change,
+        maximum_water_saturation_change=flash_water_saturation_change,
+        maximum_gas_saturation_change=flash_gas_saturation_change,
+        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
     )
     if flash_saturation_check.violated:
         message = (
@@ -1014,7 +1014,7 @@ def _run_sequential_implicit_step(
             success=False,
             message=message,
             timer_kwargs={
-                "max_saturation_change": flash_saturation_check.max_phase_saturation_change,
+                "maximum_saturation_change": flash_saturation_check.max_phase_saturation_change,
                 "max_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
             },
         )
@@ -1056,17 +1056,17 @@ def _run_sequential_implicit_step(
     )
     saturation_solution = saturation_result.value
     saturation_change_result = _check_saturation_changes(
-        max_oil_saturation_change=saturation_solution.max_oil_saturation_change,
-        max_water_saturation_change=saturation_solution.max_water_saturation_change,
-        max_gas_saturation_change=saturation_solution.max_gas_saturation_change,
-        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
-        max_allowed_water_saturation_change=config.max_water_saturation_change,
-        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+        maximum_oil_saturation_change=saturation_solution.maximum_oil_saturation_change,
+        maximum_water_saturation_change=saturation_solution.maximum_water_saturation_change,
+        maximum_gas_saturation_change=saturation_solution.maximum_gas_saturation_change,
+        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
     )
     timer_kwargs = {
-        "max_pressure_change": max_pressure_change,
+        "maximum_pressure_change": maximum_pressure_change,
         "max_allowed_pressure_change": max_allowed_pressure_change,
-        "max_saturation_change": saturation_change_result.max_phase_saturation_change
+        "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
         or None,
         "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
         or None,
@@ -1091,9 +1091,9 @@ def _run_sequential_implicit_step(
         At time step {time_step}, saturation change limits were violated:
         {saturation_change_result.message}
 
-        Oil saturation change: {saturation_solution.max_oil_saturation_change:.6f},
-        Water saturation change: {saturation_solution.max_water_saturation_change:.6f},
-        Gas saturation change: {saturation_solution.max_gas_saturation_change:.6f}.
+        Oil saturation change: {saturation_solution.maximum_oil_saturation_change:.6f},
+        Water saturation change: {saturation_solution.maximum_water_saturation_change:.6f},
+        Gas saturation change: {saturation_solution.maximum_gas_saturation_change:.6f}.
         """
         logger.debug(message)
         return StepResult(
@@ -1231,8 +1231,8 @@ def _run_full_sequential_implicit_step(
     """
     saturation_tolerance = config.saturation_outer_convergence_tolerance
     pressure_tolerance = config.pressure_outer_convergence_tolerance
-    max_newton_iterations = config.max_newton_iterations
-    max_outer_iterations = config.max_outer_iterations
+    maximum_newton_iterations = config.maximum_newton_iterations
+    maximum_outer_iterations = config.maximum_outer_iterations
 
     logger.debug(
         f"Outer iteration tolerances - "
@@ -1262,16 +1262,16 @@ def _run_full_sequential_implicit_step(
     saturation_result = None
     saturation_solution = None
     saturation_change_result = None
-    max_pressure_change = 0.0
+    maximum_pressure_change = 0.0
     final_timer_kwargs: typing.Dict[str, typing.Any] = {}
 
     logger.debug(
-        f"Starting outer iteration loop (max {max_outer_iterations} iterations) "
+        f"Starting outer iteration loop (max {maximum_outer_iterations} iterations) "
         f"at time step {time_step}..."
     )
 
-    for iteration in range(max_outer_iterations):
-        logger.debug(f"Outer iteration {iteration + 1}/{max_outer_iterations}")
+    for iteration in range(maximum_outer_iterations):
+        logger.debug(f"Outer iteration {iteration + 1}/{maximum_outer_iterations}")
         injection_rates = _make_rates(grid_shape)
         production_rates = _make_rates(grid_shape)
         injection_bhps = _make_bhps(grid_shape)
@@ -1315,12 +1315,12 @@ def _run_full_sequential_implicit_step(
 
         pressure_solution = pressure_result.value
         padded_pressure_grid = pressure_solution.pressure_grid
-        max_pressure_change = pressure_solution.max_pressure_change
-        max_allowed_pressure_change = config.max_pressure_change
+        maximum_pressure_change = pressure_solution.maximum_pressure_change
+        max_allowed_pressure_change = config.maximum_pressure_change
 
-        if max_pressure_change > max_allowed_pressure_change:
+        if maximum_pressure_change > max_allowed_pressure_change:
             message = (
-                f"Pressure change {max_pressure_change:.6f} psi exceeded maximum "
+                f"Pressure change {maximum_pressure_change:.6f} psi exceeded maximum "
                 f"allowed {max_allowed_pressure_change:.6f} psi at time step "
                 f"{time_step}, outer iteration {iteration + 1}."
             )
@@ -1332,7 +1332,7 @@ def _run_full_sequential_implicit_step(
                 success=False,
                 message=message,
                 timer_kwargs={
-                    "max_pressure_change": max_pressure_change,
+                    "maximum_pressure_change": maximum_pressure_change,
                     "max_allowed_pressure_change": max_allowed_pressure_change,
                 },
             )
@@ -1398,7 +1398,7 @@ def _run_full_sequential_implicit_step(
         )
 
         flash_saturation_check = _check_saturation_changes(
-            max_oil_saturation_change=float(
+            maximum_oil_saturation_change=float(
                 np.max(
                     np.abs(
                         iter_fluid_properties.oil_saturation_grid
@@ -1406,7 +1406,7 @@ def _run_full_sequential_implicit_step(
                     )
                 )
             ),
-            max_water_saturation_change=float(
+            maximum_water_saturation_change=float(
                 np.max(
                     np.abs(
                         iter_fluid_properties.water_saturation_grid
@@ -1414,7 +1414,7 @@ def _run_full_sequential_implicit_step(
                     )
                 )
             ),
-            max_gas_saturation_change=float(
+            maximum_gas_saturation_change=float(
                 np.max(
                     np.abs(
                         iter_fluid_properties.gas_saturation_grid
@@ -1422,9 +1422,9 @@ def _run_full_sequential_implicit_step(
                     )
                 )
             ),
-            max_allowed_oil_saturation_change=config.max_oil_saturation_change,
-            max_allowed_water_saturation_change=config.max_water_saturation_change,
-            max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+            max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+            max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+            max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
         )
         if flash_saturation_check.violated:
             message = (
@@ -1440,7 +1440,7 @@ def _run_full_sequential_implicit_step(
                 success=False,
                 message=message,
                 timer_kwargs={
-                    "max_saturation_change": flash_saturation_check.max_phase_saturation_change,
+                    "maximum_saturation_change": flash_saturation_check.max_phase_saturation_change,
                     "max_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
                 },
             )
@@ -1497,21 +1497,21 @@ def _run_full_sequential_implicit_step(
 
         saturation_solution = saturation_result.value
         saturation_change_result = _check_saturation_changes(
-            max_oil_saturation_change=saturation_solution.max_oil_saturation_change,
-            max_water_saturation_change=saturation_solution.max_water_saturation_change,
-            max_gas_saturation_change=saturation_solution.max_gas_saturation_change,
-            max_allowed_oil_saturation_change=config.max_oil_saturation_change,
-            max_allowed_water_saturation_change=config.max_water_saturation_change,
-            max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+            maximum_oil_saturation_change=saturation_solution.maximum_oil_saturation_change,
+            maximum_water_saturation_change=saturation_solution.maximum_water_saturation_change,
+            maximum_gas_saturation_change=saturation_solution.maximum_gas_saturation_change,
+            max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+            max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+            max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
         )
         if saturation_change_result.violated:
             message = (
                 f"At time step {time_step}, outer iteration {iteration + 1}, "
                 f"saturation change limits were violated:\n"
                 f"{saturation_change_result.message}\n\n"
-                f"Oil saturation change:   {saturation_solution.max_oil_saturation_change:.6f}\n"
-                f"Water saturation change: {saturation_solution.max_water_saturation_change:.6f}\n"
-                f"Gas saturation change:   {saturation_solution.max_gas_saturation_change:.6f}"
+                f"Oil saturation change:   {saturation_solution.maximum_oil_saturation_change:.6f}\n"
+                f"Water saturation change: {saturation_solution.maximum_water_saturation_change:.6f}\n"
+                f"Gas saturation change:   {saturation_solution.maximum_gas_saturation_change:.6f}"
             )
             logger.debug(message)
             return StepResult(
@@ -1521,7 +1521,7 @@ def _run_full_sequential_implicit_step(
                 success=False,
                 message=message,
                 timer_kwargs={
-                    "max_saturation_change": saturation_change_result.max_phase_saturation_change,
+                    "maximum_saturation_change": saturation_change_result.max_phase_saturation_change,
                     "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change,
                 },
             )
@@ -1565,7 +1565,7 @@ def _run_full_sequential_implicit_step(
 
         # If Newton converged very easily, coupling is weak, stop iteration early.
         newton_iterations = saturation_solution.newton_iterations
-        newton_utilization = newton_iterations / max_newton_iterations
+        newton_utilization = newton_iterations / maximum_newton_iterations
         if newton_utilization < 0.25:  # used less than 25% of Newton budget
             logger.debug(
                 f"Newton converged in {newton_iterations} iterations (utilization {newton_utilization:.0%}), "
@@ -1603,9 +1603,9 @@ def _run_full_sequential_implicit_step(
             ),
         )
         if total_saturation_change_from_bop < 0.1 * min(
-            config.max_oil_saturation_change,
-            config.max_water_saturation_change,
-            config.max_gas_saturation_change,
+            config.maximum_oil_saturation_change,
+            config.maximum_water_saturation_change,
+            config.maximum_gas_saturation_change,
         ):
             logger.debug(
                 f"Total saturation change from start of timestep {total_saturation_change_from_bop:.3e} is small, "
@@ -1659,9 +1659,9 @@ def _run_full_sequential_implicit_step(
         )
 
         final_timer_kwargs = {
-            "max_pressure_change": max_pressure_change,
+            "maximum_pressure_change": maximum_pressure_change,
             "max_allowed_pressure_change": max_allowed_pressure_change,
-            "max_saturation_change": saturation_change_result.max_phase_saturation_change
+            "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
             or None,
             "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
             or None,
@@ -1717,7 +1717,7 @@ def _run_full_sequential_implicit_step(
 
     if not outer_converged:
         logger.warning(
-            f"Outer iteration did not converge after {config.max_outer_iterations} "
+            f"Outer iteration did not converge after {config.maximum_outer_iterations} "
             f"iteration(s) at time step {time_step}. Proceeding with last solution."
         )
 
@@ -1829,12 +1829,12 @@ def _run_explicit_step(
         pad_width=pad_width,
     )
     pressure_solution = pressure_result.value
-    max_pressure_change = pressure_solution.max_pressure_change
-    max_allowed_pressure_change = config.max_pressure_change
+    maximum_pressure_change = pressure_solution.maximum_pressure_change
+    max_allowed_pressure_change = config.maximum_pressure_change
     timer_kwargs = {
-        "max_cfl_encountered": pressure_solution.max_cfl_encountered,
+        "maximum_cfl_encountered": pressure_solution.maximum_cfl_encountered,
         "cfl_threshold": pressure_solution.cfl_threshold,
-        "max_pressure_change": max_pressure_change,
+        "maximum_pressure_change": maximum_pressure_change,
         "max_allowed_pressure_change": max_allowed_pressure_change,
     }
 
@@ -1851,9 +1851,9 @@ def _run_explicit_step(
             timer_kwargs=timer_kwargs,
         )
 
-    if max_pressure_change > max_allowed_pressure_change:
+    if maximum_pressure_change > max_allowed_pressure_change:
         message = (
-            f"Pressure change {max_pressure_change:.6f} psi "
+            f"Pressure change {maximum_pressure_change:.6f} psi "
             f"exceeded maximum allowed {max_allowed_pressure_change:.6f} psi "
             f"at time step {time_step}."
         )
@@ -1865,7 +1865,7 @@ def _run_explicit_step(
             success=False,
             message=message,
             timer_kwargs={
-                "max_pressure_change": max_pressure_change,
+                "maximum_pressure_change": maximum_pressure_change,
                 "max_allowed_pressure_change": max_allowed_pressure_change,
             },
         )
@@ -1967,19 +1967,19 @@ def _run_explicit_step(
 
     saturation_solution = saturation_result.value
     saturation_change_result = _check_saturation_changes(
-        max_oil_saturation_change=saturation_solution.max_oil_saturation_change,
-        max_water_saturation_change=saturation_solution.max_water_saturation_change,
-        max_gas_saturation_change=saturation_solution.max_gas_saturation_change,
-        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
-        max_allowed_water_saturation_change=config.max_water_saturation_change,
-        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+        maximum_oil_saturation_change=saturation_solution.maximum_oil_saturation_change,
+        maximum_water_saturation_change=saturation_solution.maximum_water_saturation_change,
+        maximum_gas_saturation_change=saturation_solution.maximum_gas_saturation_change,
+        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
     )
     timer_kwargs = {
-        "max_cfl_encountered": saturation_solution.max_cfl_encountered,
+        "maximum_cfl_encountered": saturation_solution.maximum_cfl_encountered,
         "cfl_threshold": saturation_solution.cfl_threshold,
-        "max_pressure_change": max_pressure_change,
+        "maximum_pressure_change": maximum_pressure_change,
         "max_allowed_pressure_change": max_allowed_pressure_change,
-        "max_saturation_change": saturation_change_result.max_phase_saturation_change
+        "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
         or None,
         "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
         or None,
@@ -2003,9 +2003,9 @@ def _run_explicit_step(
         At time step {time_step}, saturation change limits were violated:
         {saturation_change_result.message} 
 
-        Oil saturation change: {saturation_solution.max_oil_saturation_change:.6f}, 
-        Water saturation change: {saturation_solution.max_water_saturation_change:.6f}, 
-        Gas saturation change: {saturation_solution.max_gas_saturation_change:.6f}.
+        Oil saturation change: {saturation_solution.maximum_oil_saturation_change:.6f}, 
+        Water saturation change: {saturation_solution.maximum_water_saturation_change:.6f}, 
+        Gas saturation change: {saturation_solution.maximum_gas_saturation_change:.6f}.
         """
         logger.error(message)
         return StepResult(
@@ -2128,12 +2128,12 @@ def _run_explicit_step(
         )
     )
     flash_saturation_check = _check_saturation_changes(
-        max_oil_saturation_change=flash_oil_saturation_change,
-        max_water_saturation_change=flash_water_saturation_change,
-        max_gas_saturation_change=flash_gas_saturation_change,
-        max_allowed_oil_saturation_change=config.max_oil_saturation_change,
-        max_allowed_water_saturation_change=config.max_water_saturation_change,
-        max_allowed_gas_saturation_change=config.max_gas_saturation_change,
+        maximum_oil_saturation_change=flash_oil_saturation_change,
+        maximum_water_saturation_change=flash_water_saturation_change,
+        maximum_gas_saturation_change=flash_gas_saturation_change,
+        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
     )
     if flash_saturation_check.violated:
         message = (
@@ -2148,7 +2148,7 @@ def _run_explicit_step(
             success=False,
             message=message,
             timer_kwargs={
-                "max_saturation_change": flash_saturation_check.max_phase_saturation_change,
+                "maximum_saturation_change": flash_saturation_check.max_phase_saturation_change,
                 "max_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
             },
         )
@@ -2751,7 +2751,7 @@ def run(
                     # Now we can accept the proposed time step size and we now agree that this is a new step
                     logger.debug(f"Time step {new_step} completed successfully.")
                     timer.accept_step(step_size=step_size, **result.timer_kwargs)
-                    if config.log_interval:
+                    if log_interval:
                         log_progress(
                             step=timer.step,
                             step_size=step_size,

@@ -72,7 +72,7 @@ Read the error message. It tells you which parameter failed and what the valid r
 
 ### How to Fix
 
-1. **Increase `max_iterations`** in `Config` (from 250 to 500 or 1000). This is the simplest fix and often works.
+1. **Increase `maximum_iterations`** in `Config` (from 250 to 500 or 1000). This is the simplest fix and often works.
 
 2. **Use a stronger preconditioner.** Switch from `"ilu"` to `"amg"`, or add a solver fallback chain (`pressure_solver=["bicgstab", "lgmres"]`).
 

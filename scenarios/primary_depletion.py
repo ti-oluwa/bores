@@ -89,10 +89,10 @@ def setup_run():
     run.config = run.config.with_updates(
         wells=wells,
         timer=timer,
-        max_gas_saturation_change=0.05,
-        max_oil_saturation_change=0.05,
-        max_water_saturation_change=0.05,
-        max_pressure_change=200.0,
+        maximum_gas_saturation_change=0.05,
+        maximum_oil_saturation_change=0.05,
+        maximum_water_saturation_change=0.05,
+        maximum_pressure_change=200.0,
     )
     return Path, bores, run
 

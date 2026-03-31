@@ -120,7 +120,7 @@ config = bores.Config(
     scheme="implicit",
     pressure_convergence_tolerance=1e-6,    # Tighter for pressure
     saturation_convergence_tolerance=1e-4,  # Relaxed for saturation
-    max_iterations=250,                      # Max solver iterations per step
+    maximum_iterations=250,                      # Max solver iterations per step
 )
 ```
 
@@ -160,13 +160,13 @@ config = bores.Config(
     # Solver convergence
     pressure_convergence_tolerance=1e-6,
     saturation_convergence_tolerance=1e-4,
-    max_iterations=250,
+    maximum_iterations=250,
 
     # Saturation change limits (trigger timestep rejection if exceeded)
-    max_oil_saturation_change=0.5,
-    max_water_saturation_change=0.4,
-    max_gas_saturation_change=0.85,
-    max_pressure_change=100.0,         # psi per step
+    maximum_oil_saturation_change=0.5,
+    maximum_water_saturation_change=0.4,
+    maximum_gas_saturation_change=0.85,
+    maximum_pressure_change=100.0,         # psi per step
 
     # CFL thresholds (explicit and IMPES saturation)
     saturation_cfl_threshold=0.6,
@@ -182,6 +182,6 @@ The `pressure_convergence_tolerance` controls when the iterative solver consider
 
 The `saturation_convergence_tolerance` plays the same role for the implicit saturation solver. It can be more relaxed than the pressure tolerance because the saturation transport equation is typically better conditioned.
 
-The `max_iterations` parameter caps how many iterations the solver attempts before giving up. If the solver hits this limit, the time step is rejected and retried with a smaller step size. The default of 250 is generous; well-conditioned problems typically converge in 20 to 50 iterations.
+The `maximum_iterations` parameter caps how many iterations the solver attempts before giving up. If the solver hits this limit, the time step is rejected and retried with a smaller step size. The default of 250 is generous; well-conditioned problems typically converge in 20 to 50 iterations.
 
-The saturation and pressure change limits (`max_oil_saturation_change`, `max_pressure_change`, etc.) are safety valves. If any cell's saturation or pressure changes by more than these limits in a single step, the step is rejected and retried with a smaller time step. This prevents large, potentially unphysical jumps in the solution. You can tighten these limits for more conservative behavior or relax them for faster simulations.
+The saturation and pressure change limits (`maximum_oil_saturation_change`, `maximum_pressure_change`, etc.) are safety valves. If any cell's saturation or pressure changes by more than these limits in a single step, the step is rejected and retried with a smaller time step. This prevents large, potentially unphysical jumps in the solution. You can tighten these limits for more conservative behavior or relax them for faster simulations.

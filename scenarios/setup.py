@@ -326,14 +326,14 @@ def setup_config(Path, bores, pvt_tables):
         rock_fluid_tables=rock_fluid_tables,
         scheme="impes",
         output_frequency=1,
-        max_iterations=200,
+        maximum_iterations=200,
         pressure_solver="bicgstab",
         pressure_preconditioner="cached_ilu",
         log_interval=5,
         pvt_tables=pvt_tables,
         wells=None,
         boundary_conditions=boundary_conditions,
-        max_gas_saturation_change=0.85,
+        maximum_gas_saturation_change=0.85,
     )
 
     # Save base config

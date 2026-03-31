@@ -34,9 +34,9 @@ __all__ = ["evolve_pressure"]
 @attrs.frozen
 class ExplicitPressureSolution:
     pressure_grid: ThreeDimensionalGrid
-    max_cfl_encountered: float
+    maximum_cfl_encountered: float
     cfl_threshold: float
-    max_pressure_change: float
+    maximum_pressure_change: float
 
 
 def evolve_pressure(
@@ -169,9 +169,9 @@ def evolve_pressure(
             scheme="explicit",
             value=ExplicitPressureSolution(
                 pressure_grid=current_oil_pressure_grid.astype(dtype, copy=False),
-                max_cfl_encountered=pressure_cfl,
+                maximum_cfl_encountered=pressure_cfl,
                 cfl_threshold=max_pressure_cfl,
-                max_pressure_change=0.0,
+                maximum_pressure_change=0.0,
             ),
             message=f"Pressure evolution failed with CFL={pressure_cfl:.4f}.",
         )
@@ -309,7 +309,7 @@ def evolve_pressure(
         cell_size_y=cell_size_y,
         time_step_size_in_days=time_step_size_in_days,
     )
-    max_pressure_change = np.max(
+    maximum_pressure_change = np.max(
         np.abs(updated_oil_pressure_grid - current_oil_pressure_grid)
     )
     return EvolutionResult(
@@ -317,9 +317,9 @@ def evolve_pressure(
         scheme="explicit",
         value=ExplicitPressureSolution(
             pressure_grid=updated_oil_pressure_grid.astype(dtype, copy=False),
-            max_cfl_encountered=pressure_cfl,
+            maximum_cfl_encountered=pressure_cfl,
             cfl_threshold=max_pressure_cfl,
-            max_pressure_change=max_pressure_change,
+            maximum_pressure_change=maximum_pressure_change,
         ),
         message=f"Pressure evolution from time step {time_step} successful with CFL={pressure_cfl:.4f}.",
     )
@@ -368,7 +368,7 @@ def compute_pressure_cfl_number(
     :return: Maximum CFL number across all cells
     """
     cell_count_x, cell_count_y, cell_count_z = porosity_grid.shape
-    max_cfl = 0.0
+    maximum_cfl = 0.0
 
     for i in range(1, cell_count_x - 1):
         for j in range(1, cell_count_y - 1):
@@ -414,8 +414,8 @@ def compute_pressure_cfl_number(
                         cell_porosity * cell_compressibility * cell_volume
                     )
 
-                    max_cfl = max(max_cfl, cell_cfl)
-    return max_cfl
+                    maximum_cfl = max(maximum_cfl, cell_cfl)
+    return maximum_cfl
 
 
 @numba.njit(cache=True)

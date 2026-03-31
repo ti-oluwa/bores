@@ -150,12 +150,12 @@ config = bores.Config(
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     jacobian_assembly_method="analytical",
-    max_pressure_change=1800,
+    maximum_pressure_change=1800,
 )
 
 # Run the simulation and collect states
-states = list(bores.run(model, config))
-final = states[-1]
+states = list(bores.monitor(model, config))
+final = states[-1][0]
 print(f"Completed {final.step} steps in {final.time_in_days:.1f} days")
 print(
     f"Final avg pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi"

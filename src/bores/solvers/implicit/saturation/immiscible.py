@@ -48,9 +48,9 @@ class ImplicitSaturationSolution:
     gas_saturation_grid: ThreeDimensionalGrid
     newton_iterations: int
     final_residual_norm: float
-    max_water_saturation_change: float
-    max_oil_saturation_change: float
-    max_gas_saturation_change: float
+    maximum_water_saturation_change: float
+    maximum_oil_saturation_change: float
+    maximum_gas_saturation_change: float
 
 
 @attrs.frozen
@@ -2231,10 +2231,10 @@ def solve_implicit_saturation(
     rock_compressibility: float,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
-    max_newton_iterations: int = 12,
+    maximum_newton_iterations: int = 12,
     newton_tolerance: float = 1e-6,
-    line_search_max_cuts: int = 4,
-    max_saturation_change: float = 0.05,
+    maximum_line_search_cuts: int = 4,
+    maximum_saturation_change: float = 0.05,
     saturation_convergence_tolerance: float = 1e-4,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
@@ -2305,7 +2305,7 @@ def solve_implicit_saturation(
         pad_width=pad_width,
     )
 
-    for iteration in range(max_newton_iterations):
+    for iteration in range(maximum_newton_iterations):
         # Apply saturation boundary condition to ensure consistency between bghost and edge/boundary cells
         apply_saturation_boundary_conditions(
             padded_water_saturation_grid=water_saturation_grid,
@@ -2438,7 +2438,7 @@ def solve_implicit_saturation(
             solver=config.saturation_solver,
             preconditioner=config.saturation_preconditioner,
             rtol=config.saturation_convergence_tolerance,
-            max_iterations=config.max_iterations,
+            maximum_iterations=config.maximum_iterations,
             fallback_to_direct=True,
         )
 
@@ -2450,12 +2450,12 @@ def solve_implicit_saturation(
 
         # Damp Newton step
         max_raw_change = float(np.max(np.abs(saturation_change)))
-        if max_raw_change > max_saturation_change:
-            damping_factor = max_saturation_change / max_raw_change
+        if max_raw_change > maximum_saturation_change:
+            damping_factor = maximum_saturation_change / max_raw_change
             saturation_change = saturation_change * damping_factor
             logger.debug(
                 f"Damped Newton step by {damping_factor:.3f} "
-                f"(max |∆S| = {max_raw_change:.4f} > {max_saturation_change})"
+                f"(max |∆S| = {max_raw_change:.4f} > {maximum_saturation_change})"
             )
 
         # Backtracking line search
@@ -2475,7 +2475,7 @@ def solve_implicit_saturation(
             cell_count_z=cell_count_z,
         )
 
-        for ls_iteration in range(line_search_max_cuts):
+        for ls_iteration in range(maximum_line_search_cuts):
             water_residual_trial, gas_residual_trial = compute_residual(
                 water_saturation_grid=water_saturation_grid_trial,
                 oil_saturation_grid=oil_saturation_grid_trial,
@@ -2591,13 +2591,13 @@ def solve_implicit_saturation(
                 )
             break
 
-    max_water_saturation_change = float(
+    maximum_water_saturation_change = float(
         np.max(np.abs(water_saturation_grid - old_water_saturation_grid))
     )
-    max_oil_saturation_change = float(
+    maximum_oil_saturation_change = float(
         np.max(np.abs(oil_saturation_grid - old_oil_saturation_grid))
     )
-    max_gas_saturation_change = float(
+    maximum_gas_saturation_change = float(
         np.max(np.abs(gas_saturation_grid - old_gas_saturation_grid))
     )
     solution = ImplicitSaturationSolution(
@@ -2606,9 +2606,9 @@ def solve_implicit_saturation(
         gas_saturation_grid=gas_saturation_grid.astype(dtype, copy=False),
         newton_iterations=final_iteration,
         final_residual_norm=final_residual_norm,  # type: ignore
-        max_water_saturation_change=max_water_saturation_change,
-        max_oil_saturation_change=max_oil_saturation_change,
-        max_gas_saturation_change=max_gas_saturation_change,
+        maximum_water_saturation_change=maximum_water_saturation_change,
+        maximum_oil_saturation_change=maximum_oil_saturation_change,
+        maximum_gas_saturation_change=maximum_gas_saturation_change,
     )
     if converged:
         return EvolutionResult(
@@ -2623,7 +2623,7 @@ def solve_implicit_saturation(
         scheme="implicit",
         success=False,
         message=(
-            f"Newton did not converge after {max_newton_iterations} iterations. "
+            f"Newton did not converge after {maximum_newton_iterations} iterations. "
             f"Final relative residual: {final_residual_norm / initial_residual_norm:.2e}"
         ),
         metadata=convergence_history,
@@ -2697,9 +2697,9 @@ def evolve_saturation(
         gas_compressibility_grid=fluid_properties.gas_compressibility_grid,
         rock_compressibility=rock_properties.compressibility,
         pad_width=pad_width,
-        max_newton_iterations=config.max_newton_iterations,
+        maximum_newton_iterations=config.maximum_newton_iterations,
         newton_tolerance=config.newton_tolerance,
-        line_search_max_cuts=config.line_search_max_cuts,
-        max_saturation_change=config.max_saturation_change,
+        maximum_line_search_cuts=config.maximum_line_search_cuts,
+        maximum_saturation_change=config.maximum_saturation_change,
         saturation_convergence_tolerance=config.saturation_convergence_tolerance,
     )

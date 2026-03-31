@@ -189,7 +189,7 @@ config = bores.Config(
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     jacobian_assembly_method="analytical",
-    max_pressure_change=1800,
+    maximum_pressure_change=1800,
 )
 
 # Run the simulation and collect states

@@ -1130,7 +1130,7 @@ def _get_solver_func(
 def solve_linear_system(
     A_csr: typing.Union[csr_array, csr_matrix],
     b: npt.NDArray,
-    max_iterations: int,
+    maximum_iterations: int,
     rtol: typing.Optional[float] = None,
     atol: typing.Optional[float] = None,
     solver: typing.Union[Solver, typing.Iterable[Solver]] = "bicgstab",
@@ -1150,7 +1150,7 @@ def solve_linear_system(
 
     :param A: Coefficient matrix in CSR format.
     :param b: Right-hand side vector.
-    :param max_iterations: Maximum number of iterations for each solver.
+    :param maximum_iterations: Maximum number of iterations for each solver.
     :param solver: (Iterative) solver or sequence of solvers to use ("bicgstab", "gmres", "lgmres", "tfqmr"), or custom callable(s).
         If a sequence is provided, solvers will be tried in order until one converges.
     :param preconditioner: Type of preconditioner to use ("ilu", "amg", "diagonal"), or None.
@@ -1190,19 +1190,19 @@ def solve_linear_system(
             M=M,
             rtol=rtol,
             atol=atol,
-            maxiter=max_iterations,
+            maxiter=maximum_iterations,
             callback=None,
         )
         if info == 0:
             return np.ascontiguousarray(x), M
         else:
             logger.warning(
-                f"Solver {solver_func!r} failed to converge within {max_iterations} iterations. Info: {info}"
+                f"Solver {solver_func!r} failed to converge within {maximum_iterations} iterations. Info: {info}"
             )
 
     if not fallback_to_direct or is_direct:
         raise SolverError(
-            f"All solvers failed to converge within {max_iterations} iterations."
+            f"All solvers failed to converge within {maximum_iterations} iterations."
         )
 
     logger.info("Falling back to direct solver (spsolve).")

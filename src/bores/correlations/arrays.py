@@ -832,7 +832,7 @@ def compute_gas_compressibility_factor_hall_yarborough(
     h2s_mole_fraction: FloatOrArray = 0.0,
     co2_mole_fraction: FloatOrArray = 0.0,
     n2_mole_fraction: FloatOrArray = 0.0,
-    max_iterations: int = 50,
+    maximum_iterations: int = 50,
     tolerance: float = 1e-10,
 ) -> NDimensionalGrid[NDimension]:
     """
@@ -862,7 +862,7 @@ def compute_gas_compressibility_factor_hall_yarborough(
     :param h2s_mole_fraction: H₂S mole fraction (0.0 to 1.0)
     :param co2_mole_fraction: CO₂ mole fraction (0.0 to 1.0)
     :param n2_mole_fraction: N₂ mole fraction (0.0 to 1.0)
-    :param max_iterations: Maximum Newton-Raphson iterations
+    :param maximum_iterations: Maximum Newton-Raphson iterations
     :param tolerance: Convergence tolerance
     :return: Compressibility factor Z array (dimensionless)
 
@@ -907,7 +907,7 @@ def compute_gas_compressibility_factor_hall_yarborough(
     active_mask = Pr >= 0.01
 
     # Newton-Raphson iteration (vectorized)
-    for _ in range(max_iterations):
+    for _ in range(maximum_iterations):
         y_old = y.copy()
 
         # Function f(y) and its derivative f'(y)
@@ -962,7 +962,7 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     h2s_mole_fraction: FloatOrArray = 0.0,
     co2_mole_fraction: FloatOrArray = 0.0,
     n2_mole_fraction: FloatOrArray = 0.0,
-    max_iterations: int = 50,
+    maximum_iterations: int = 50,
     tolerance: float = 1e-10,
 ) -> NDimensionalGrid[NDimension]:
     """
@@ -994,7 +994,7 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     :param h2s_mole_fraction: H₂S mole fraction (0.0 to 1.0)
     :param co2_mole_fraction: CO₂ mole fraction (0.0 to 1.0)
     :param n2_mole_fraction: N₂ mole fraction (0.0 to 1.0)
-    :param max_iterations: Maximum iterations for density convergence
+    :param maximum_iterations: Maximum iterations for density convergence
     :param tolerance: Convergence tolerance
     :return: Compressibility factor Z array (dimensionless)
 
@@ -1042,7 +1042,7 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     active_mask = Pr >= 0.01
 
     # Iterative solution for Z (vectorized)
-    for _ in range(max_iterations):
+    for _ in range(maximum_iterations):
         Z_old = Z.copy()
 
         # Reduced density: ρr = 0.27 * Pr / (Z * Tr)
@@ -3067,7 +3067,7 @@ def estimate_solution_gor(
     temperature: NDimensionalGrid[NDimension],
     oil_api_gravity: NDimensionalGrid[NDimension],
     gas_gravity: NDimensionalGrid[NDimension],
-    max_iterations: int = 20,
+    maximum_iterations: int = 20,
     tolerance: float = 1e-4,
 ) -> NDimensionalGrid[NDimension]:
     """
@@ -3094,7 +3094,7 @@ def estimate_solution_gor(
     :param temperature: Reservoir temperature array (°F)
     :param oil_api_gravity: Oil API gravity array (°API, typically 15-50)
     :param gas_gravity: Gas specific gravity array (dimensionless, typically 0.6-1.2)
-    :param max_iterations: Maximum iterations for convergence (default: 20)
+    :param maximum_iterations: Maximum iterations for convergence (default: 20)
     :param tolerance: Relative tolerance for convergence (default: 1e-4)
     :return: Solution gas-to-oil ratio Rs array (SCF/STB)
 
@@ -3120,7 +3120,7 @@ def estimate_solution_gor(
             temperature=temperature_flat[i],
             oil_api_gravity=api_gravity_flat[i],
             gas_gravity=gas_gravity_flat[i],
-            max_iterations=max_iterations,
+            maximum_iterations=maximum_iterations,
             tolerance=tolerance,
         )
 

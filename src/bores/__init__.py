@@ -24,6 +24,7 @@ from .fluids import *
 from .fractures import *
 from .grids import *
 from .models import *
+from .monitoring import *
 from .relperm import *
 from .serialization import *
 from .serialization import register_ndarray_serializers

@@ -1774,7 +1774,7 @@ def build_oil_pvt_data(
                     temperature_grid=temperature_grid,
                     oil_api_gravity_grid=oil_api_gravity_table,
                     gas_gravity_grid=np.full((n_p, n_t), gas_gravity, dtype=dtype),
-                    max_iterations=20,
+                    maximum_iterations=20,
                     tolerance=1e-4,
                 )
             )

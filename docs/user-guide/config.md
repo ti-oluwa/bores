@@ -134,7 +134,7 @@ See [Schemes](simulation/schemes.md) for detailed information on each evolution 
 | `saturation_preconditioner` | `str` or `None` | `"ilu"` | Preconditioner for saturation solvers |
 | `pressure_convergence_tolerance` | `float` | `1e-6` | Relative convergence tolerance for pressure |
 | `saturation_convergence_tolerance` | `float` | `1e-4` | Relative convergence tolerance for saturation |
-| `max_iterations` | `int` | `250` | Maximum solver iterations per step (capped at 500) |
+| `maximum_iterations` | `int` | `250` | Maximum solver iterations per step (capped at 500) |
 | `task_pool` | `ThreadPoolExecutor` | `None` | Thread pool for concurrent solver matrix assembly |
 
 See [Solvers](simulation/solvers.md) and [Preconditioners](simulation/preconditioners.md) for details.
@@ -145,18 +145,18 @@ See [Solvers](simulation/solvers.md) and [Preconditioners](simulation/preconditi
 |---|---|---|---|
 | `saturation_cfl_threshold` | `float` | `0.7` | Maximum saturation CFL number |
 | `pressure_cfl_threshold` | `float` | `0.9` | Maximum pressure CFL number |
-| `max_oil_saturation_change` | `float` | `0.6` | Maximum oil saturation change per step |
-| `max_water_saturation_change` | `float` | `0.6` | Maximum water saturation change per step |
-| `max_gas_saturation_change` | `float` | `0.5` | Maximum gas saturation change per step |
-| `max_pressure_change` | `float` | `500.0` | Maximum pressure change per step (psi) |
+| `maximum_oil_saturation_change` | `float` | `0.6` | Maximum oil saturation change per step |
+| `maximum_water_saturation_change` | `float` | `0.6` | Maximum water saturation change per step |
+| `maximum_gas_saturation_change` | `float` | `0.5` | Maximum gas saturation change per step |
+| `maximum_pressure_change` | `float` | `500.0` | Maximum pressure change per step (psi) |
 
 !!! tip "Gas Saturation Change Limits"
 
-    The default `max_gas_saturation_change` of 0.5 is intentionally lenient. Gas saturation can change rapidly during solution gas liberation or gas injection, and tightening this limit forces very small timesteps that slow the simulation significantly without meaningful accuracy gains. Only lower this value when you specifically need fine resolution of gas saturation evolution, such as detailed gas coning studies or near-critical fluid behavior. For most simulations, leave it at the default or increase it further.
+    The default `maximum_gas_saturation_change` of 0.5 is intentionally lenient. Gas saturation can change rapidly during solution gas liberation or gas injection, and tightening this limit forces very small timesteps that slow the simulation significantly without meaningful accuracy gains. Only lower this value when you specifically need fine resolution of gas saturation evolution, such as detailed gas coning studies or near-critical fluid behavior. For most simulations, leave it at the default or increase it further.
 
 !!! tip "Pressure Change Limits"
 
-    The default `max_pressure_change` of 500 psi is appropriate for most field-scale models with initial pressures above 3,000 psi. For lower-pressure reservoirs or simulations with rapid pressure transients (well shutins, gas breakthrough), you may need a tighter limit. A useful rule of thumb is to keep `max_pressure_change` below 10 to 15% of the initial reservoir pressure. For example, a shallow reservoir at 1,500 psi might use `max_pressure_change=150.0`, while a deep HPHT reservoir at 12,000 psi can comfortably use the default or even `max_pressure_change=800.0`.
+    The default `maximum_pressure_change` of 500 psi is appropriate for most field-scale models with initial pressures above 3,000 psi. For lower-pressure reservoirs or simulations with rapid pressure transients (well shutins, gas breakthrough), you may need a tighter limit. A useful rule of thumb is to keep `maximum_pressure_change` below 10 to 15% of the initial reservoir pressure. For example, a shallow reservoir at 1,500 psi might use `maximum_pressure_change=150.0`, while a deep HPHT reservoir at 12,000 psi can comfortably use the default or even `maximum_pressure_change=800.0`.
 
 See [Time Step Control](simulation/timestep-control.md) for guidance on adjusting these.
 
@@ -295,7 +295,7 @@ tuned_config = config.copy(
     scheme="implicit",
     pressure_solver="gmres",
     pressure_preconditioner="amg",
-    max_iterations=400,
+    maximum_iterations=400,
 )
 ```
 
@@ -394,8 +394,8 @@ config = bores.Config(
     wells=wells,
     pressure_solver="gmres",
     pressure_preconditioner="amg",
-    max_water_saturation_change=0.15,
-    max_pressure_change=50.0,
+    maximum_water_saturation_change=0.15,
+    maximum_pressure_change=50.0,
 )
 ```
 
@@ -413,6 +413,6 @@ config = bores.Config(
     wells=wells,
     miscibility_model="todd_longstaff",
     freeze_saturation_pressure=False,
-    max_pressure_change=75.0,
+    maximum_pressure_change=75.0,
 )
 ```

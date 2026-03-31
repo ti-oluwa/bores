@@ -88,7 +88,7 @@ The `Timer` manages timestep size through several mechanisms working together:
 
 **CFL-based adjustment.** For the explicit scheme, the `Timer` monitors the CFL number and adjusts the step size to keep it below the safety margin. This is the primary stability control for explicit simulations.
 
-**Change-based limits.** The `Config` specifies maximum allowable changes per timestep for pressure (`max_pressure_change`, default 100 psi) and for each phase saturation (`max_oil_saturation_change`, `max_water_saturation_change`, `max_gas_saturation_change`). If any of these limits are exceeded, the step is rejected and retried with a smaller timestep.
+**Change-based limits.** The `Config` specifies maximum allowable changes per timestep for pressure (`maximum_pressure_change`, default 100 psi) and for each phase saturation (`maximum_oil_saturation_change`, `maximum_water_saturation_change`, `maximum_gas_saturation_change`). If any of these limits are exceeded, the step is rejected and retried with a smaller timestep.
 
 ```python
 import bores

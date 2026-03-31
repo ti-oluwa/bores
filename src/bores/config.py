@@ -62,7 +62,7 @@ class Config(
     )
     """Relative convergence tolerance for saturation iterative solvers (default is 1e-4). Transport matrix tend to be more well conditioned."""
 
-    max_iterations: int = attrs.field(  # type: ignore
+    maximum_iterations: int = attrs.field(  # type: ignore
         default=250,
         validator=attrs.validators.and_(
             attrs.validators.ge(1),  # type: ignore[arg-type]
@@ -191,7 +191,7 @@ class Config(
     residual_gas_drainage_ratio: float = 0.5
     """Ratio to compute gas drainage residual from imbibition value."""
 
-    max_oil_saturation_change: float = 0.6
+    maximum_oil_saturation_change: float = 0.6
     """
     Maximum allowable oil saturation change (absolute, fractional) per time step.
 
@@ -200,7 +200,7 @@ class Config(
     step is reduced or rejected.
     """
 
-    max_water_saturation_change: float = attrs.field(  # type: ignore
+    maximum_water_saturation_change: float = attrs.field(  # type: ignore
         default=0.6, validator=attrs.validators.ge(0)
     )
     """
@@ -211,7 +211,7 @@ class Config(
     step is reduced or rejected.
     """
 
-    max_gas_saturation_change: float = attrs.field(  # type: ignore
+    maximum_gas_saturation_change: float = attrs.field(  # type: ignore
         default=0.5, validator=attrs.validators.ge(0)
     )
     """
@@ -222,7 +222,7 @@ class Config(
     step is reduced or rejected.
     """
 
-    max_pressure_change: float = attrs.field(  # type: ignore
+    maximum_pressure_change: float = attrs.field(  # type: ignore
         default=1000.0, validator=attrs.validators.ge(0)
     )
     """
@@ -259,7 +259,7 @@ class Config(
     Note: Larger changes can cause density/viscosity jumps and well control issues.
     """
 
-    max_newton_iterations: int = attrs.field(  # type: ignore
+    maximum_newton_iterations: int = attrs.field(  # type: ignore
         default=15,
         validator=attrs.validators.and_(
             attrs.validators.ge(1),  # type: ignore[arg-type]
@@ -273,7 +273,7 @@ class Config(
     )
     """Relative residual tolerance for Newton convergence in implicit solvers."""
 
-    line_search_max_cuts: int = attrs.field(  # type: ignore
+    maximum_line_search_cuts: int = attrs.field(  # type: ignore
         default=4,
         validator=attrs.validators.and_(
             attrs.validators.ge(0),  # type: ignore[arg-type]
@@ -282,7 +282,7 @@ class Config(
     )
     """Maximum line search bisections per Newton step."""
 
-    max_saturation_change: float = attrs.field(
+    maximum_saturation_change: float = attrs.field(
         default=0.05,
         validator=attrs.validators.and_(
             attrs.validators.gt(0.0),
@@ -515,7 +515,7 @@ class Config(
     sufficient workers to service both simultaneously.
     """
 
-    max_outer_iterations: int = attrs.field(
+    maximum_outer_iterations: int = attrs.field(
         default=5,
         validator=attrs.validators.and_(
             attrs.validators.ge(1),
@@ -531,21 +531,6 @@ class Config(
     10-15 only for strongly coupled systems (e.g. near-critical fluids,
     high-rate gas injection).
     """
-
-    pressure_outer_convergence_tolerance: float = attrs.field(
-        default=1e-2,
-        validator=attrs.validators.and_(
-            attrs.validators.gt(0.0),
-            attrs.validators.le(0.1),
-        ),
-    )
-    saturation_outer_convergence_tolerance: float = attrs.field(
-        default=1e-2,
-        validator=attrs.validators.and_(
-            attrs.validators.gt(0.0),
-            attrs.validators.le(0.1),
-        ),
-    )
 
     _lock: threading.Lock = attrs.field(
         factory=threading.Lock, init=False, repr=False, hash=False

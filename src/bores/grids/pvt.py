@@ -671,7 +671,7 @@ def build_estimated_solution_gas_to_oil_ratio_grid(
     temperature_grid: NDimensionalGrid[NDimension],
     oil_api_gravity_grid: NDimensionalGrid[NDimension],
     gas_gravity_grid: NDimensionalGrid[NDimension],
-    max_iterations: int = 20,
+    maximum_iterations: int = 20,
     tolerance: float = 1e-4,
 ) -> NDimensionalGrid[NDimension]:
     """
@@ -692,7 +692,7 @@ def build_estimated_solution_gas_to_oil_ratio_grid(
     :param temperature_grid: N-Dimensional array of temperature values (°F)
     :param oil_api_gravity_grid: N-Dimensional array of oil API gravity values (°API)
     :param gas_gravity_grid: N-Dimensional array of gas gravity values (dimensionless)
-    :param max_iterations: Maximum iterations for convergence at each point (default: 20)
+    :param maximum_iterations: Maximum iterations for convergence at each point (default: 20)
     :param tolerance: Relative tolerance for convergence (default: 1e-4)
     :return: N-Dimensional array of solution gas-to-oil ratios (SCF/STB)
 
@@ -718,7 +718,7 @@ def build_estimated_solution_gas_to_oil_ratio_grid(
         temperature=temperature_grid,
         oil_api_gravity=oil_api_gravity_grid,
         gas_gravity=gas_gravity_grid,
-        max_iterations=max_iterations,
+        maximum_iterations=maximum_iterations,
         tolerance=tolerance,
     )
     return result  # type: ignore[return-value]

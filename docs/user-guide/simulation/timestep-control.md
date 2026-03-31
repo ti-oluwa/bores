@@ -142,10 +142,10 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    max_oil_saturation_change=0.5,      # Default
-    max_water_saturation_change=0.4,    # Default
-    max_gas_saturation_change=0.85,     # Default
-    max_pressure_change=100.0,          # Default, psi
+    maximum_oil_saturation_change=0.5,      # Default
+    maximum_water_saturation_change=0.4,    # Default
+    maximum_gas_saturation_change=0.85,     # Default
+    maximum_pressure_change=100.0,          # Default, psi
 )
 ```
 

@@ -315,12 +315,12 @@ config = bores.Config(
     pressure_solver="bicgstab",
     pressure_preconditioner="ilu",
     pressure_convergence_tolerance=1e-6,
-    max_iterations=250,
+    maximum_iterations=250,
 
     # Stability controls
-    max_pressure_change=100.0,           # psi per step
-    max_oil_saturation_change=0.5,       # fraction per step
-    max_water_saturation_change=0.4,     # fraction per step
+    maximum_pressure_change=100.0,           # psi per step
+    maximum_oil_saturation_change=0.5,       # fraction per step
+    maximum_water_saturation_change=0.4,     # fraction per step
 )
 ```
 
@@ -331,7 +331,7 @@ config = bores.Config(
         ```python
         screening_config = config.with_updates(
             output_frequency=10,             # Output every 10th step
-            max_pressure_change=200.0,       # Relax stability constraints
+            maximum_pressure_change=200.0,       # Relax stability constraints
             pressure_preconditioner="diagonal",  # Cheap preconditioner
         )
         ```
@@ -341,8 +341,8 @@ config = bores.Config(
         ```python
         accurate_config = config.with_updates(
             pressure_convergence_tolerance=1e-8,
-            max_pressure_change=50.0,        # Tighter stability constraints
-            max_water_saturation_change=0.2,
+            maximum_pressure_change=50.0,        # Tighter stability constraints
+            maximum_water_saturation_change=0.2,
             pressure_preconditioner="cpr",   # Strong preconditioner
         )
         ```

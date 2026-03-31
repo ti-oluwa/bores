@@ -151,8 +151,8 @@ If you encounter convergence issues, try reducing `max_step_size` to 1 to 2 days
 ```python
 config = bores.Config(
     ...,
-    max_gas_saturation_change=0.5,
-    max_pressure_change=75.0,
+    maximum_gas_saturation_change=0.5,
+    maximum_pressure_change=75.0,
 )
 ```
 

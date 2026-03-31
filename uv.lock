@@ -361,6 +361,7 @@ dependencies = [
     { name = "orjson" },
     { name = "plotly" },
     { name = "pyamg" },
+    { name = "rich" },
     { name = "scikit-image", version = "0.25.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scikit-image", version = "0.26.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and platform_machine != 'x86_64') or (python_full_version < '3.11' and sys_platform == 'darwin')" },
@@ -370,6 +371,7 @@ dependencies = [
     { name = "scipy-stubs", version = "1.15.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy-stubs", version = "1.17.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "thermo" },
+    { name = "tqdm" },
     { name = "trame" },
     { name = "types-cachetools" },
     { name = "types-pyyaml" },
@@ -423,11 +425,13 @@ requires-dist = [
     { name = "plotly", specifier = ">=6.2.0" },
     { name = "pyamg", specifier = ">=5.3.0" },
     { name = "pyvista", extras = ["jupyter"], marker = "extra == 'pyvista'", specifier = ">=0.44.0" },
+    { name = "rich", specifier = ">=14.3.3" },
     { name = "scikit-image", specifier = ">=0.25.2" },
     { name = "scipy", marker = "platform_machine != 'x86_64' or sys_platform == 'darwin'", specifier = ">=1.13.0" },
     { name = "scipy", marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'", specifier = ">=1.13.0", index = "https://urob.github.io/numpy-mkl" },
     { name = "scipy-stubs", specifier = ">=1.15.3.0" },
     { name = "thermo", specifier = ">=0.4.2" },
+    { name = "tqdm", specifier = ">=4.67.3" },
     { name = "trame", specifier = ">=3.12.0" },
     { name = "types-cachetools", specifier = ">=6.2.0.20251022" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20250915" },
@@ -5402,6 +5406,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/1a/d7592328d037d36f2d2462f4bc1fbb383eec9278bc786c1b111cbbd44cfa/tornado-6.5.4-cp39-abi3-win32.whl", hash = "sha256:1768110f2411d5cd281bac0a090f707223ce77fd110424361092859e089b38d1", size = 446481, upload-time = "2025-12-15T19:21:00.008Z" },
     { url = "https://files.pythonhosted.org/packages/d6/6d/c69be695a0a64fd37a97db12355a035a6d90f79067a3cf936ec2b1dc38cd/tornado-6.5.4-cp39-abi3-win_amd64.whl", hash = "sha256:fa07d31e0cd85c60713f2b995da613588aa03e1303d75705dca6af8babc18ddc", size = 446886, upload-time = "2025-12-15T19:21:01.287Z" },
     { url = "https://files.pythonhosted.org/packages/50/49/8dc3fd90902f70084bd2cd059d576ddb4f8bb44c2c7c0e33a11422acb17e/tornado-6.5.4-cp39-abi3-win_arm64.whl", hash = "sha256:053e6e16701eb6cbe641f308f4c1a9541f91b6261991160391bfc342e8a551a1", size = 445910, upload-time = "2025-12-15T19:21:02.571Z" },
+]
+
+[[package]]
+name = "tqdm"
+version = "4.67.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/e1/3079a9ff9b8e11b846c6ac5c8b5bfb7ff225eee721825310c91b3b50304f/tqdm-4.67.3-py3-none-any.whl", hash = "sha256:ee1e4c0e59148062281c49d80b25b67771a127c85fc9676d3be5f243206826bf", size = 78374, upload-time = "2026-02-03T17:35:50.982Z" },
 ]
 
 [[package]]

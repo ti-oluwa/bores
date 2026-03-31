@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 @attrs.frozen
 class CFLMeta:
     cfl_threshold: float
-    max_cfl_encountered: float
+    maximum_cfl_encountered: float
     cell: typing.Tuple[int, int, int]
     time_step: int
     violated: bool
@@ -64,11 +64,11 @@ class ExplicitSaturationSolution:
     water_saturation_grid: ThreeDimensionalGrid
     oil_saturation_grid: ThreeDimensionalGrid
     gas_saturation_grid: ThreeDimensionalGrid
-    max_cfl_encountered: float
+    maximum_cfl_encountered: float
     cfl_threshold: float
-    max_oil_saturation_change: float
-    max_water_saturation_change: float
-    max_gas_saturation_change: float
+    maximum_oil_saturation_change: float
+    maximum_water_saturation_change: float
+    maximum_gas_saturation_change: float
     solvent_concentration_grid: typing.Optional[ThreeDimensionalGrid] = None
 
 
@@ -286,13 +286,13 @@ def evolve_saturation(
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_properties.compressibility,
     )
-    max_oil_saturation_change = np.max(
+    maximum_oil_saturation_change = np.max(
         np.abs(updated_oil_saturation_grid - current_oil_saturation_grid)
     )
-    max_water_saturation_change = np.max(
+    maximum_water_saturation_change = np.max(
         np.abs(updated_water_saturation_grid - current_water_saturation_grid)
     )
-    max_gas_saturation_change = np.max(
+    maximum_gas_saturation_change = np.max(
         np.abs(updated_gas_saturation_grid - current_gas_saturation_grid)
     )
 
@@ -303,7 +303,7 @@ def evolve_saturation(
             int(cfl_violation_info[2]),
             int(cfl_violation_info[3]),
         )
-        max_cfl_encountered = cfl_violation_info[4]
+        maximum_cfl_encountered = cfl_violation_info[4]
         cfl_threshold = cfl_violation_info[5]
         # Compute details for error message
         cell_thickness = thickness_grid[i, j, k]
@@ -379,7 +379,7 @@ def evolve_saturation(
         msg = f"""
         CFL condition violated at cell ({i - pad_width}, {j - pad_width}, {k - pad_width}) at timestep {time_step}:
 
-        Max CFL number {max_cfl_encountered:.4f} exceeds limit {cfl_threshold:.4f}.
+        Max CFL number {maximum_cfl_encountered:.4f} exceeds limit {cfl_threshold:.4f}.
 
         Pressure diagnostics:
         Cell pressure = {cell_pressure:.2f} psi, Bubble point = {cell_bubble_point:.2f} psi ({pressure_state})
@@ -407,18 +407,18 @@ def evolve_saturation(
                 gas_saturation_grid=updated_gas_saturation_grid.astype(
                     dtype, copy=False
                 ),
-                max_cfl_encountered=max_cfl_encountered,
+                maximum_cfl_encountered=maximum_cfl_encountered,
                 cfl_threshold=cfl_threshold,
-                max_oil_saturation_change=max_oil_saturation_change,
-                max_water_saturation_change=max_water_saturation_change,
-                max_gas_saturation_change=max_gas_saturation_change,
+                maximum_oil_saturation_change=maximum_oil_saturation_change,
+                maximum_water_saturation_change=maximum_water_saturation_change,
+                maximum_gas_saturation_change=maximum_gas_saturation_change,
             ),
             scheme="explicit",
             message=msg,
             metadata=SaturationEvolutionMeta(
                 cfl_info=CFLMeta(
                     cfl_threshold=cfl_threshold,
-                    max_cfl_encountered=max_cfl_encountered,
+                    maximum_cfl_encountered=maximum_cfl_encountered,
                     cell=(i - pad_width, j - pad_width, k - pad_width),
                     time_step=time_step,
                     violated=True,
@@ -443,7 +443,7 @@ def evolve_saturation(
         )
 
     cfl_threshold = cfl_violation_info[5]
-    max_cfl_encountered = cfl_violation_info[4]
+    maximum_cfl_encountered = cfl_violation_info[4]
     # Convert padded index to unpadded index
     cfl_i, cfl_j, cfl_k = (
         int(cfl_violation_info[1]) - pad_width,
@@ -457,18 +457,18 @@ def evolve_saturation(
             ),
             oil_saturation_grid=updated_oil_saturation_grid.astype(dtype, copy=False),
             gas_saturation_grid=updated_gas_saturation_grid.astype(dtype, copy=False),
-            max_cfl_encountered=max_cfl_encountered,
+            maximum_cfl_encountered=maximum_cfl_encountered,
             cfl_threshold=cfl_threshold,
-            max_oil_saturation_change=max_oil_saturation_change,
-            max_water_saturation_change=max_water_saturation_change,
-            max_gas_saturation_change=max_gas_saturation_change,
+            maximum_oil_saturation_change=maximum_oil_saturation_change,
+            maximum_water_saturation_change=maximum_water_saturation_change,
+            maximum_gas_saturation_change=maximum_gas_saturation_change,
         ),
         scheme="explicit",
         success=True,
         metadata=SaturationEvolutionMeta(
             cfl_info=CFLMeta(
                 cfl_threshold=cfl_threshold,
-                max_cfl_encountered=max_cfl_encountered,
+                maximum_cfl_encountered=maximum_cfl_encountered,
                 cell=(cfl_i, cfl_j, cfl_k),
                 time_step=time_step,
                 violated=False,
@@ -995,7 +995,7 @@ def apply_updates(
     :param gas_compressibility_grid: 3D grid of gas compressibilities (psi⁻¹).
     :param rock_compressibility: Scalar rock (pore) compressibility (psi⁻¹).
     :return: Tuple of (updated_water_sat, updated_oil_sat, updated_gas_sat, cfl_violation_info)
-    where `cfl_violation_info` is array [violated (bool), i, j, k, cfl_number, max_cfl]
+    where `cfl_violation_info` is array [violated (bool), i, j, k, cfl_number, maximum_cfl]
     """
     apply_pvt_correction = (
         pressure_change_grid is not None
@@ -1008,9 +1008,9 @@ def apply_updates(
     updated_oil_saturation_grid = oil_saturation_grid.copy()
     updated_gas_saturation_grid = gas_saturation_grid.copy()
 
-    # CFL violation tracking: [violated, i, j, k, cfl_number, max_cfl]
+    # CFL violation tracking: [violated, i, j, k, cfl_number, maximum_cfl]
     cfl_violation_info = np.zeros(6, dtype=dtype)
-    max_cfl_encountered = 0.0
+    maximum_cfl_encountered = 0.0
 
     # Parallel loop over interior cells
     for i in numba.prange(1, cell_count_x - 1):  # type: ignore
@@ -1049,7 +1049,7 @@ def apply_updates(
 
                 # CFL check
                 cfl_number = (total_outflow * time_step_in_days) / cell_pore_volume
-                if cfl_number > cfl_threshold and cfl_number > max_cfl_encountered:
+                if cfl_number > cfl_threshold and cfl_number > maximum_cfl_encountered:
                     # Record max CFL encountered
                     cfl_violation_info[0] = 1.0  # violated flag
                     cfl_violation_info[1] = float(i)
@@ -1057,7 +1057,7 @@ def apply_updates(
                     cfl_violation_info[3] = float(k)
                     cfl_violation_info[4] = cfl_number
                     cfl_violation_info[5] = cfl_threshold
-                    max_cfl_encountered = cfl_number
+                    maximum_cfl_encountered = cfl_number
 
                 # Calculate saturation changes
                 oil_saturation_change = (

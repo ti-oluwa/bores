@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 @attrs.frozen
 class ImplicitPressureSolution:
     pressure_grid: ThreeDimensionalGrid
-    max_pressure_change: float
+    maximum_pressure_change: float
 
 
 def evolve_pressure(
@@ -344,7 +344,7 @@ def evolve_pressure(
             A_csr=jacobian,
             b=residual_vector,
             rtol=config.pressure_convergence_tolerance,
-            max_iterations=config.max_iterations,
+            maximum_iterations=config.maximum_iterations,
             solver=config.pressure_solver,
             preconditioner=config.pressure_preconditioner,
             fallback_to_direct=True,
@@ -354,7 +354,7 @@ def evolve_pressure(
         return EvolutionResult(
             value=ImplicitPressureSolution(
                 pressure_grid=current_oil_pressure_grid.astype(dtype, copy=False),
-                max_pressure_change=0.0,  # No change since solve failed
+                maximum_pressure_change=0.0,  # No change since solve failed
             ),
             success=False,
             scheme="implicit",
@@ -369,11 +369,11 @@ def evolve_pressure(
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
     )
-    max_pressure_change = np.max(np.abs(new_pressure_grid - current_oil_pressure_grid))
+    maximum_pressure_change = np.max(np.abs(new_pressure_grid - current_oil_pressure_grid))
     return EvolutionResult(
         value=ImplicitPressureSolution(
             pressure_grid=new_pressure_grid.astype(dtype, copy=False),
-            max_pressure_change=max_pressure_change,
+            maximum_pressure_change=maximum_pressure_change,
         ),
         success=True,
         scheme="implicit",

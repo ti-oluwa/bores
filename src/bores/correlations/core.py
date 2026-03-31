@@ -814,7 +814,7 @@ def compute_gas_compressibility_factor_hall_yarborough(
     h2s_mole_fraction: float = 0.0,
     co2_mole_fraction: float = 0.0,
     n2_mole_fraction: float = 0.0,
-    max_iterations: int = 50,
+    maximum_iterations: int = 50,
     tolerance: float = 1e-10,
 ) -> float:
     """
@@ -848,7 +848,7 @@ def compute_gas_compressibility_factor_hall_yarborough(
     :param h2s_mole_fraction: H₂S mole fraction (0.0 to 1.0)
     :param co2_mole_fraction: CO₂ mole fraction (0.0 to 1.0)
     :param n2_mole_fraction: N₂ mole fraction (0.0 to 1.0)
-    :param max_iterations: Maximum Newton-Raphson iterations
+    :param maximum_iterations: Maximum Newton-Raphson iterations
     :param tolerance: Convergence tolerance
     :return: Compressibility factor Z (dimensionless)
 
@@ -892,7 +892,7 @@ def compute_gas_compressibility_factor_hall_yarborough(
     y = min(0.9, max(0.01, y))
 
     # Newton-Raphson iteration
-    for _ in range(max_iterations):
+    for _ in range(maximum_iterations):
         y_old = y
 
         # Function f(y) and its derivative f'(y)
@@ -950,7 +950,7 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     h2s_mole_fraction: float = 0.0,
     co2_mole_fraction: float = 0.0,
     n2_mole_fraction: float = 0.0,
-    max_iterations: int = 50,
+    maximum_iterations: int = 50,
     tolerance: float = 1e-10,
 ) -> float:
     """
@@ -986,7 +986,7 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     :param h2s_mole_fraction: H₂S mole fraction (0.0 to 1.0)
     :param co2_mole_fraction: CO₂ mole fraction (0.0 to 1.0)
     :param n2_mole_fraction: N₂ mole fraction (0.0 to 1.0)
-    :param max_iterations: Maximum iterations for density convergence
+    :param maximum_iterations: Maximum iterations for density convergence
     :param tolerance: Convergence tolerance
     :return: Compressibility factor Z (dimensionless)
 
@@ -1034,7 +1034,7 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     Z = 1.0
 
     # Iterative solution for Z
-    for _ in range(max_iterations):
+    for _ in range(maximum_iterations):
         Z_old = Z
 
         # Reduced density: ρr = 0.27 * Pr / (Z * Tr)
@@ -2892,7 +2892,7 @@ def estimate_solution_gor(
     temperature: float,
     oil_api_gravity: float,
     gas_gravity: float,
-    max_iterations: int = 20,
+    maximum_iterations: int = 20,
     tolerance: float = 1e-4,
 ) -> float:
     """
@@ -2919,7 +2919,7 @@ def estimate_solution_gor(
     :param temperature: Reservoir temperature (°F)
     :param oil_api_gravity: Oil API gravity in degrees API (typically 15-50)
     :param gas_gravity: Gas specific gravity relative to air (typically 0.6-1.2)
-    :param max_iterations: Maximum iterations for convergence (default: 20)
+    :param maximum_iterations: Maximum iterations for convergence (default: 20)
     :param tolerance: Relative tolerance for convergence (default: 1e-4)
     :return: Solution gas-to-oil ratio Rs in SCF/STB
 
@@ -2941,7 +2941,7 @@ def estimate_solution_gor(
     rs_max = 5000.0  # Practical upper limit for Rs (SCF/STB)
     rs_current = max(rs_min, min(rs_current, rs_max))
 
-    for _ in range(max_iterations):
+    for _ in range(maximum_iterations):
         # Compute bubble point pressure from current Rs estimate
         pb_current = _compute_bubble_point_pressure_vazquez_beggs(
             gas_gravity=gas_gravity,

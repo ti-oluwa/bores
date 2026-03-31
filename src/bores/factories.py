@@ -542,7 +542,7 @@ def reservoir_model(
                 temperature=temperature_grid,
                 oil_api_gravity=oil_api_gravity_grid,
                 gas_gravity=gas_gravity_grid,
-                max_iterations=20,
+                maximum_iterations=20,
                 tolerance=1e-4,
             )
 
@@ -641,17 +641,17 @@ def reservoir_model(
             oil_api_gravity_grid=oil_api_gravity_grid,
         )
 
-        max_iterations = 10
+        maximum_iterations = 10
         convergence_tolerance = 1e-7  # psi⁻¹
         oil_compressibility_estimate = np.full_like(pressure_grid, 1e-5)
 
         logger.debug(
-            "Beginning iterative Bo/Co bootstrap (max_iterations=%d, tolerance=%.2e).",
-            max_iterations,
+            "Beginning iterative Bo/Co bootstrap (maximum_iterations=%d, tolerance=%.2e).",
+            maximum_iterations,
             convergence_tolerance,
         )
         max_change = 0.0
-        for iteration in range(max_iterations):
+        for iteration in range(maximum_iterations):
             # Step 1: Build Bo using current Co estimate
             oil_formation_volume_factor_grid = build_oil_formation_volume_factor_grid(
                 pressure_grid=pressure_grid,
@@ -682,7 +682,7 @@ def reservoir_model(
                 )
             )
             logger.debug(
-                f"Bo/Co iteration {iteration + 1}/{max_iterations}: max ΔCo = {max_change:.3e} psi⁻¹.",
+                f"Bo/Co iteration {iteration + 1}/{maximum_iterations}: max ΔCo = {max_change:.3e} psi⁻¹.",
             )
 
             oil_compressibility_estimate = oil_compressibility_updated
@@ -694,7 +694,7 @@ def reservoir_model(
                 break
         else:
             warnings.warn(
-                f"Bo/Co bootstrap did not converge within {max_iterations} iterations "
+                f"Bo/Co bootstrap did not converge within {maximum_iterations} iterations "
                 f"(final max ΔCo = {max_change:.3e} psi⁻¹). "
                 "Results may be less accurate for volatile or heavy oils. "
                 "Consider providing pre-computed `oil_compressibility_table`.",
