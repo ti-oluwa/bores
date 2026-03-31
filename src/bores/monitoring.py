@@ -620,7 +620,7 @@ def monitor(
     `RunStats` is the same object throughout the run and accumulates
     data in-place, oil_saturation it remains valid for inspection after the loop.
 
-    The Rich live panel and tqdm bar run concurrently with the simulation
+    The Rich live panel and/or tqdm bar run concurrently with the simulation
     loop and are torn down cleanly on both normal completion and exceptions.
     A plain-text summary is always emitted to the logger at INFO level when
     the generator is exhausted or closed.
@@ -664,7 +664,7 @@ def monitor(
             )
         _config = typing.cast(Config, config)
 
-    # Suppress logging from run(); monitor handles all output and stats
+    # Suppress logging from `run(...)`; monitor handles all output and stats
     _config = _config.with_updates(log_interval=0)
     total_simulation_time: float = float(_config.timer.simulation_time)
     stats = RunStats()
@@ -684,7 +684,6 @@ def monitor(
         _timer_kwargs.clear()
         _timer_kwargs.update(step_result.timer_kwargs)
 
-    # tqdm bar
     tqdm_bar: typing.Optional[tqdm] = None  # type: ignore[type-arg]
     if monitor.use_tqdm:
         tqdm_bar = tqdm(
@@ -700,7 +699,6 @@ def monitor(
             dynamic_ncols=True,
         )
 
-    # Rich Live context.
     # All logging from bores.* is redirected through the same `Console` that
     # owns the `Live` panel. This prevents the default stderr handler from
     # writing lines that force Rich to re-render and print a new panel frame
@@ -764,13 +762,11 @@ def monitor(
             diagnostics = _build_step_diagnostics(state, wall_ms, _timer_kwargs)
             stats.record(diagnostics)
             last_diagnostics = diagnostics
-
             extended = (
                 monitor.extended_every > 0
                 and stats.accepted_steps % monitor.extended_every == 0
             )
 
-            # Rich update
             if (
                 live is not None
                 and stats.accepted_steps % monitor.refresh_interval == 0
@@ -786,7 +782,6 @@ def monitor(
                     )
                 )
 
-            # tqdm update
             if tqdm_bar is not None:
                 new_percentage = min(
                     diagnostics.elapsed_time / total_simulation_time * 100, 100.0
