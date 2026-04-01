@@ -38,8 +38,8 @@ rock_fluid_tables = bores.RockFluidTables(
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(days=1),
-        max_step_size=bores.Time(days=10),
-        min_step_size=bores.Time(hours=1),
+        maximum_step_size=bores.Time(days=10),
+        minimum_step_size=bores.Time(hours=1),
         simulation_time=bores.Time(years=3),
     ),
     rock_fluid_tables=rock_fluid_tables,
@@ -58,8 +58,8 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(days=1),
-        max_step_size=bores.Time(days=10),
-        min_step_size=bores.Time(hours=1),
+        maximum_step_size=bores.Time(days=10),
+        minimum_step_size=bores.Time(hours=1),
         simulation_time=bores.Time(years=3),
     ),
     rock_fluid_tables=rock_fluid_tables,
@@ -370,8 +370,8 @@ Setting `disable_capillary_effects=True` is equivalent to `capillary_strength_fa
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(days=2),
-        max_step_size=bores.Time(days=30),
-        min_step_size=bores.Time(days=1),
+        maximum_step_size=bores.Time(days=30),
+        minimum_step_size=bores.Time(days=1),
         simulation_time=bores.Time(years=10),
     ),
     rock_fluid_tables=rock_fluid_tables,
@@ -386,8 +386,8 @@ config = bores.Config(
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(days=0.5),
-        max_step_size=bores.Time(days=5),
-        min_step_size=bores.Time(hours=1),
+        maximum_step_size=bores.Time(days=5),
+        minimum_step_size=bores.Time(hours=1),
         simulation_time=bores.Time(years=5),
     ),
     rock_fluid_tables=rock_fluid_tables,
@@ -405,8 +405,8 @@ config = bores.Config(
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(hours=6),
-        max_step_size=bores.Time(days=3),
-        min_step_size=bores.Time(minutes=30),
+        maximum_step_size=bores.Time(days=3),
+        minimum_step_size=bores.Time(minutes=30),
         simulation_time=bores.Time(years=3),
     ),
     rock_fluid_tables=rock_fluid_tables,

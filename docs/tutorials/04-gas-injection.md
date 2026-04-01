@@ -198,8 +198,8 @@ rock_fluid_tables = bores.RockFluidTables(
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(days=0.5),
-        max_step_size=bores.Time(days=5),
-        min_step_size=bores.Time(hours=0.5),
+        maximum_step_size=bores.Time(days=5),
+        minimum_step_size=bores.Time(hours=0.5),
         simulation_time=bores.Time(days=1095),  # 3 years
     ),
     rock_fluid_tables=rock_fluid_tables,
@@ -217,7 +217,7 @@ Gas is much more compressible and mobile than water, so the pressure and saturat
     If you encounter convergence issues during gas injection, try:
 
     1. Reducing `initial_step_size` to `Time(hours=6)` or smaller
-    2. Reducing `max_step_size` to `Time(days=3)`
+    2. Reducing `maximum_step_size` to `Time(days=3)`
     3. Increasing the gas Corey exponent (e.g., 3.0) to smooth the gas relative permeability curve
     4. These adjustments help the solver handle the high-mobility gas front
 

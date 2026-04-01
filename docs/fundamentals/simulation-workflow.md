@@ -61,8 +61,8 @@ import bores
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(hours=1),
-        max_step_size=bores.Time(days=1),
-        min_step_size=bores.Time(seconds=10),
+        maximum_step_size=bores.Time(days=1),
+        minimum_step_size=bores.Time(seconds=10),
         simulation_time=bores.Time(days=365),
     ),
     rock_fluid_tables=rock_fluid_tables,
@@ -72,7 +72,7 @@ config = bores.Config(
 ```
 
 !!! warning "Stability with the Explicit Scheme"
-    The explicit scheme requires smaller timesteps than IMPES to remain stable. BORES monitors the CFL number at each step and will reject steps that exceed the configured `pressure_cfl_threshold` (default 0.9) or `saturation_cfl_threshold` (default 0.6). If your simulation is rejecting many steps, try reducing `max_step_size` in the `Timer` or switching to `scheme="impes"`.
+    The explicit scheme requires smaller timesteps than IMPES to remain stable. BORES monitors the CFL number at each step and will reject steps that exceed the configured `pressure_cfl_threshold` (default 0.9) or `saturation_cfl_threshold` (default 0.6). If your simulation is rejecting many steps, try reducing `maximum_step_size` in the `Timer` or switching to `scheme="impes"`.
 
 ## Timestep Control
 
@@ -82,7 +82,7 @@ The `Timer` manages timestep size through several mechanisms working together:
 
 **Ramp-up at simulation start.** The initial timestep is typically small (specified by `initial_step_size`) and grows gradually over the first several steps. This protects against the pressure transient that often occurs at the very start of a simulation when wells first begin operating.
 
-**Growth on success.** After each successful timestep, the `Timer` may increase the next step size, subject to `max_growth_per_step` (default 1.3, meaning at most 30% growth per step) and `max_step_size`. Growth is also controlled by a cooldown period (`growth_cooldown_steps`) that prevents aggressive growth immediately after a failure.
+**Growth on success.** After each successful timestep, the `Timer` may increase the next step size, subject to `maximum_growth_per_step` (default 1.3, meaning at most 30% growth per step) and `maximum_step_size`. Growth is also controlled by a cooldown period (`growth_cooldown_steps`) that prevents aggressive growth immediately after a failure.
 
 **Backoff on failure.** When a timestep is rejected (because pressure or saturation changes exceeded their limits, or the solver failed to converge), the `Timer` reduces the step size by `backoff_factor` (default 0.5) and retries. If multiple consecutive failures occur, it uses `aggressive_backoff_factor` (default 0.25) for a more dramatic reduction.
 
@@ -97,19 +97,19 @@ Time = bores.Time
 
 timer = bores.Timer(
     initial_step_size=Time(days=0.5),     # Start with half-day steps
-    max_step_size=Time(days=30),          # Allow up to 30-day steps
-    min_step_size=Time(minutes=30),       # Never go below 30 minutes
+    maximum_step_size=Time(days=30),          # Allow up to 30-day steps
+    minimum_step_size=Time(minutes=30),       # Never go below 30 minutes
     simulation_time=Time(years=10),       # Run for 10 years
-    max_growth_per_step=1.3,              # Grow at most 30% per step
+    maximum_growth_per_step=1.3,              # Grow at most 30% per step
     backoff_factor=0.5,                   # Halve step size on failure
 )
 ```
 
 !!! tip "Timer Settings for Different Problems"
-    - **Waterflooding (slow fronts):** `initial_step_size=Time(days=1)`, `max_step_size=Time(days=30)`
-    - **Gas injection (fast fronts):** `initial_step_size=Time(hours=6)`, `max_step_size=Time(days=5)`
+    - **Waterflooding (slow fronts):** `initial_step_size=Time(days=1)`, `maximum_step_size=Time(days=30)`
+    - **Gas injection (fast fronts):** `initial_step_size=Time(hours=6)`, `maximum_step_size=Time(days=5)`
     - **Early-time transient (well startup):** `initial_step_size=Time(minutes=30)`, allow ramp-up
-    - **Depletion (slow, uniform):** `initial_step_size=Time(days=5)`, `max_step_size=Time(days=60)`
+    - **Depletion (slow, uniform):** `initial_step_size=Time(days=5)`, `maximum_step_size=Time(days=60)`
 
 ## What Happens Each Timestep
 

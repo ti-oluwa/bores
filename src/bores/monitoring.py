@@ -973,7 +973,7 @@ def monitor(
     :yields: Tuple of `(state, stats)` - the model state and the live `RunStats`, if `return_stats` is True.
         Else, the model state only is returned.
         accumulator after each accepted output step.
-    :raises ValueError: If `input` is a `ReservoirModel` and `config` is not provided.
+    :raises ValidationError: If `input` is a `ReservoirModel` and `config` is not provided.
     """
     if monitor is None:
         monitor = MonitorConfig()
@@ -1158,7 +1158,7 @@ def monitor(
             bores_logger.propagate = original_propagate
 
         if tqdm_bar is not None:
-            tqdm_bar.update(100.0 - last_percentage)  # Ensure bar reaches 100 %
+            tqdm_bar.update(float(100.0 - last_percentage))  # Ensure bar reaches 100 %
             tqdm_bar.close()
 
         # Print the summary table

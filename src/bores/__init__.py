@@ -13,7 +13,6 @@ import numba
 cpu_count = os.cpu_count() or 1
 numba.set_num_threads(int(os.environ.get("NUMBA_NUM_THREADS", cpu_count)))
 
-from ._precision import *
 from .analyses import *
 from .boundary_conditions import *
 from .capillary_pressures import *
@@ -26,6 +25,7 @@ from .fractures import *
 from .grids import *
 from .models import *
 from .monitoring import *
+from .precision import *
 from .relperm import *
 from .serialization import *
 from .serialization import register_ndarray_serializers

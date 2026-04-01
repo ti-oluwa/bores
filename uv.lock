@@ -370,6 +370,9 @@ dependencies = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://urob.github.io/numpy-mkl" }, marker = "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform != 'darwin'" },
     { name = "scipy-stubs", version = "1.15.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy-stubs", version = "1.17.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tbb" },
+    { name = "tbb-devel" },
+    { name = "tbb4py" },
     { name = "thermo" },
     { name = "tqdm" },
     { name = "trame" },
@@ -430,6 +433,9 @@ requires-dist = [
     { name = "scipy", marker = "platform_machine != 'x86_64' or sys_platform == 'darwin'", specifier = ">=1.13.0" },
     { name = "scipy", marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'", specifier = ">=1.13.0", index = "https://urob.github.io/numpy-mkl" },
     { name = "scipy-stubs", specifier = ">=1.15.3.0" },
+    { name = "tbb", specifier = ">=2022.3.1" },
+    { name = "tbb-devel", specifier = ">=2022.3.1" },
+    { name = "tbb4py", specifier = ">=2022.3.1" },
     { name = "thermo", specifier = ">=0.4.2" },
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "trame", specifier = ">=3.12.0" },
@@ -5220,6 +5226,38 @@ dependencies = [
 wheels = [
     { url = "https://files.pythonhosted.org/packages/08/59/8d381a2cfe8d36c4f4ff9f94769ff2809bfc16014d888360b0e24c7e5c6b/tbb-2022.3.1-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:534c089eca6bcf148408684c156229d5f09c01d323b685b15739f41985b529d7", size = 4178630, upload-time = "2026-01-22T05:30:20.589Z" },
     { url = "https://files.pythonhosted.org/packages/68/ef/d01ec56a854949efc727c8cac8941325a2020f345a786e64ca6ad3a05611/tbb-2022.3.1-py3-none-win_amd64.whl", hash = "sha256:8187e4c50a77c75c51ca9395febddd3a67d88dcb4cc537947d68d244925710f7", size = 422729, upload-time = "2026-01-22T05:30:51.916Z" },
+]
+
+[[package]]
+name = "tbb-devel"
+version = "2022.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tbb" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/58/1115e6488e0f125649ef5c8934798e7a8593081beef2a7bf643f02f08a43/tbb_devel-2022.3.1-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:96e2c883e1707f9e4430f6026661957ffcd2982ed342356c5ff81a69d1b10e70", size = 6746385, upload-time = "2026-01-22T05:30:30.194Z" },
+    { url = "https://files.pythonhosted.org/packages/35/9a/ac5866ebd55315a7558b4809bb779c22968566b9a7dcfddc7525cdd4cece/tbb_devel-2022.3.1-py3-none-win_amd64.whl", hash = "sha256:9e9d3b01fbbbf4b71a3ea4f2a337863071823b8a98fe457918153f9804d7a42e", size = 6279479, upload-time = "2026-01-22T05:30:49.495Z" },
+]
+
+[[package]]
+name = "tbb4py"
+version = "2022.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tbb" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/37/05869223d2df7ca22cd10b832274fc816ff106415974a1c732531b0cd4fc/tbb4py-2022.3.1-py310-none-manylinux_2_28_x86_64.whl", hash = "sha256:7188af9ffb9f523d4fa8f1dac3e9b8f6a96aa57f056d6eadc9e354e873507b02", size = 370635, upload-time = "2026-01-22T05:30:15.401Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/c9/d8e80a0235ffa1812fe971f095c56c24a4f1af67c7e5a660e40a83a3ceef/tbb4py-2022.3.1-py310-none-win_amd64.whl", hash = "sha256:ed31cb2893fe32f90afe243c7e41d08cdb8671e9e67d570e4b73f16facc9cd07", size = 53181, upload-time = "2026-01-22T05:30:54.668Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/a8/f194a2e43474409d527468ffe5f1bf47fbff2451dc0472cf41591d813203/tbb4py-2022.3.1-py311-none-manylinux_2_28_x86_64.whl", hash = "sha256:ccea8f193424678172f3991d9816b563e3f2f1b167a0cda3b8c3a6ebe5aa1e6e", size = 370646, upload-time = "2026-01-22T05:30:22.866Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/61/38c30addbff687eea796615e9e4dd95a4aad6a0af960a654eef70c26a87d/tbb4py-2022.3.1-py311-none-win_amd64.whl", hash = "sha256:ad48928f2d54243c0ad7164de2898656ad82ae3e3e500de1343dabdff0a21a97", size = 53223, upload-time = "2026-01-22T05:30:46.765Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/66/38c2984446ca16e2ecf231fa8a98f216dc105d26e9f6ce4a9f805b32e256/tbb4py-2022.3.1-py312-none-manylinux_2_28_x86_64.whl", hash = "sha256:39d280a163337e9a2c53dd73001a9a800e36e560012559ae5b9d1f38cb257d9f", size = 371341, upload-time = "2026-01-22T05:30:27.44Z" },
+    { url = "https://files.pythonhosted.org/packages/30/f1/e945b2511ded51b263a4608499d0f60ca83d02cd6cdd872f5db50a73ead0/tbb4py-2022.3.1-py312-none-win_amd64.whl", hash = "sha256:1b377bbd894da983211a07077cb430d877e3978c6bc647f71ed075402001339f", size = 46832, upload-time = "2026-01-22T05:30:44.767Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/d7/0ccd74180cc64e528473227d884a911ec637673ce56cb641d9573c2518e6/tbb4py-2022.3.1-py313-none-manylinux_2_28_x86_64.whl", hash = "sha256:f0d473f409e1ecb5e895ac6b6d7014e143d5c874daf241a19b7a949288213492", size = 211220, upload-time = "2026-01-22T05:30:25.276Z" },
+    { url = "https://files.pythonhosted.org/packages/36/b2/3e34ced8ce1fc09403d613ecd8bf18daa1c98c018a96a9320176bd0353f2/tbb4py-2022.3.1-py313-none-win_amd64.whl", hash = "sha256:5d9ada7bb1ff7d366e35e0d3739f99847bee2a0dfeb39926fae0d3f94889d49c", size = 46843, upload-time = "2026-01-22T05:30:42.724Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/14/3599ed722992ceee9595d7423457bbc5d8d836def06aabab6a201a597c24/tbb4py-2022.3.1-py39-none-manylinux_2_28_x86_64.whl", hash = "sha256:e053241cc0c0e0c4c59d97169f89d2c7b36e722f93b3c9045f0b6a9f284a1db4", size = 370668, upload-time = "2026-01-22T05:30:17.501Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/0b/5fe62565ae0218cd21a8d090b350b5ee879645921c25cf47f59f999d4310/tbb4py-2022.3.1-py39-none-win_amd64.whl", hash = "sha256:acdea643988b4d1359dcf5714fcb918574db03b0d9b216cdd4d8639101e81c33", size = 53143, upload-time = "2026-01-22T05:30:41.123Z" },
 ]
 
 [[package]]

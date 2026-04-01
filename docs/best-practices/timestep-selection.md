@@ -22,23 +22,23 @@ $$
 
 where $v$ is the flow velocity, $\Delta t$ is the timestep, and $\Delta x$ is the cell size. Higher velocities (near wells, in high-permeability zones) and smaller cells both push the CFL number higher for a given timestep.
 
-In BORES, the `max_cfl_number` parameter on the `Timer` controls the stability limit. The default is 0.9, which provides a 10% safety margin below the theoretical limit of 1.0. If the simulation detects that the CFL number has been exceeded during a step, it rejects the step and retries with a smaller timestep.
+In BORES, the `maximum_cfl_number` parameter on the `Timer` controls the stability limit. The default is 0.9, which provides a 10% safety margin below the theoretical limit of 1.0. If the simulation detects that the CFL number has been exceeded during a step, it rejects the step and retries with a smaller timestep.
 
 ```python
 import bores
 
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1),
-    max_step_size=bores.Time(days=30),
-    min_step_size=bores.Time(seconds=1),
+    maximum_step_size=bores.Time(days=30),
+    minimum_step_size=bores.Time(seconds=1),
     simulation_time=bores.Time(years=5),
-    max_cfl_number=0.9,   # Default, good for most problems
+    maximum_cfl_number=0.9,   # Default, good for most problems
 )
 ```
 
-!!! tip "When to Lower max_cfl_number"
+!!! tip "When to Lower maximum_cfl_number"
 
-    If you see oscillations in saturation or pressure even though the simulation is not rejecting steps, try lowering `max_cfl_number` to 0.7 or 0.5. Some problems with sharp permeability contrasts or complex well patterns have local CFL numbers that are not perfectly captured by the global estimate, and a lower target provides extra margin.
+    If you see oscillations in saturation or pressure even though the simulation is not rejecting steps, try lowering `maximum_cfl_number` to 0.7 or 0.5. Some problems with sharp permeability contrasts or complex well patterns have local CFL numbers that are not perfectly captured by the global estimate, and a lower target provides extra margin.
 
 ---
 
@@ -69,12 +69,12 @@ After a successful timestep, the controller tries to increase the timestep for t
 
 | Parameter | Default | Description |
 | --- | --- | --- |
-| `max_growth_per_step` | 1.3 | Maximum multiplicative growth per step (1.3 = 30% increase). |
+| `maximum_growth_per_step` | 1.3 | Maximum multiplicative growth per step (1.3 = 30% increase). |
 | `ramp_up_factor` | `None` | Optional additional growth factor applied when the simulation has been stable for several steps. Set to 1.1 or 1.2 for faster ramp-up. |
 | `growth_cooldown_steps` | 5 | Number of consecutive successful steps required before `ramp_up_factor` is applied. |
 | `step_size_smoothing` | 0.7 | Smoothing factor (0 to 1) that blends the new timestep with the previous one to avoid jumpy behavior. Higher values give smoother transitions. |
 
-The `max_growth_per_step` is the most important parameter. The default of 1.3 means the timestep can grow by at most 30% from one step to the next. This prevents wild jumps after a period of small timesteps. For very stable problems (simple depletion), you can increase this to 1.5 or even 2.0. For problems with sudden events (well shutins, rate changes), keep it at 1.3 or lower.
+The `maximum_growth_per_step` is the most important parameter. The default of 1.3 means the timestep can grow by at most 30% from one step to the next. This prevents wild jumps after a period of small timesteps. For very stable problems (simple depletion), you can increase this to 1.5 or even 2.0. For problems with sudden events (well shutins, rate changes), keep it at 1.3 or lower.
 
 ### Backoff Parameters
 
@@ -89,13 +89,13 @@ The controller automatically chooses between these based on how badly the step f
 
 ### Minimum and Maximum Timestep
 
-The `min_step_size` and `max_step_size` parameters set absolute bounds on the timestep. The minimum prevents the controller from taking infinitesimally small steps that would make the simulation crawl. The maximum prevents individual steps from being so large that accuracy is lost even when the CFL condition would allow it.
+The `minimum_step_size` and `maximum_step_size` parameters set absolute bounds on the timestep. The minimum prevents the controller from taking infinitesimally small steps that would make the simulation crawl. The maximum prevents individual steps from being so large that accuracy is lost even when the CFL condition would allow it.
 
-For most simulations, set `min_step_size` to a value small enough that the solver can always converge (typically 0.1 to 10 seconds), and set `max_step_size` to a value that ensures you capture the time-scale of interest (typically 30 to 90 days for multi-year simulations).
+For most simulations, set `minimum_step_size` to a value small enough that the solver can always converge (typically 0.1 to 10 seconds), and set `maximum_step_size` to a value that ensures you capture the time-scale of interest (typically 30 to 90 days for multi-year simulations).
 
 !!! warning "Minimum Timestep and Simulation Failure"
 
-    If the adaptive controller reduces the timestep to `min_step_size` and the step still fails, the simulation will raise a `SimulationError`. This usually means there is a fundamental problem with the model (extreme permeability contrasts, unphysical fluid properties, or a well operating outside its capacity). See the [Error Handling](errors.md) page for guidance on diagnosing these failures.
+    If the adaptive controller reduces the timestep to `minimum_step_size` and the step still fails, the simulation will raise a `SimulationError`. This usually means there is a fundamental problem with the model (extreme permeability contrasts, unphysical fluid properties, or a well operating outside its capacity). See the [Error Handling](errors.md) page for guidance on diagnosing these failures.
 
 ---
 
@@ -112,11 +112,11 @@ Recommended timer settings for IMPES:
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1),
-    max_step_size=bores.Time(days=30),
-    min_step_size=bores.Time(seconds=1),
+    maximum_step_size=bores.Time(days=30),
+    minimum_step_size=bores.Time(seconds=1),
     simulation_time=bores.Time(years=10),
-    max_cfl_number=0.9,
-    max_growth_per_step=1.3,
+    maximum_cfl_number=0.9,
+    maximum_growth_per_step=1.3,
     backoff_factor=0.5,
 )
 ```
@@ -130,11 +130,11 @@ Recommended adjustments for explicit schemes:
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(hours=1),
-    max_step_size=bores.Time(days=5),
-    min_step_size=bores.Time(milliseconds=100),
+    maximum_step_size=bores.Time(days=5),
+    minimum_step_size=bores.Time(milliseconds=100),
     simulation_time=bores.Time(years=5),
-    max_cfl_number=0.5,        # More conservative for fully explicit
-    max_growth_per_step=1.2,   # Slower growth
+    maximum_cfl_number=0.5,        # More conservative for fully explicit
+    maximum_growth_per_step=1.2,   # Slower growth
 )
 ```
 
@@ -147,11 +147,11 @@ Recommended settings for implicit schemes:
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(days=5),
-    max_step_size=bores.Time(days=90),
-    min_step_size=bores.Time(days=0.1),
+    maximum_step_size=bores.Time(days=90),
+    minimum_step_size=bores.Time(days=0.1),
     simulation_time=bores.Time(years=20),
-    max_cfl_number=5.0,         # Much higher, not a hard limit
-    max_growth_per_step=1.5,    # Can grow faster
+    maximum_cfl_number=5.0,         # Much higher, not a hard limit
+    maximum_growth_per_step=1.5,    # Can grow faster
     ramp_up_factor=1.2,         # Additional growth when stable
 )
 ```
@@ -162,7 +162,7 @@ timer = bores.Timer(
 
 ### Simulation Takes Too Long
 
-If your simulation is running slowly, the most common cause is timesteps that are too small. Check the timer's step history to see if the adaptive controller is keeping the timestep well below `max_step_size`. If so, the CFL condition is the bottleneck, and you have two options: coarsen your grid (see [Grid Design](grid-design.md)) or switch to a fully implicit scheme.
+If your simulation is running slowly, the most common cause is timesteps that are too small. Check the timer's step history to see if the adaptive controller is keeping the timestep well below `maximum_step_size`. If so, the CFL condition is the bottleneck, and you have two options: coarsen your grid (see [Grid Design](grid-design.md)) or switch to a fully implicit scheme.
 
 ### Oscillating Timestep
 
@@ -174,7 +174,7 @@ Well startups create sudden, localized velocity spikes that can violate the CFL 
 
 ### Constant Timestep Mode
 
-For benchmarking or debugging, you may want to disable adaptive control and use a fixed timestep. Simply set `max_step_size` equal to `initial_step_size` and `min_step_size` to the same value. The controller will use that fixed value for every step.
+For benchmarking or debugging, you may want to disable adaptive control and use a fixed timestep. Simply set `maximum_step_size` equal to `initial_step_size` and `minimum_step_size` to the same value. The controller will use that fixed value for every step.
 
 ---
 
@@ -182,10 +182,10 @@ For benchmarking or debugging, you may want to disable adaptive control and use 
 
 | Parameter | When to Adjust | Direction |
 | --- | --- | --- |
-| `max_cfl_number` | Oscillations, instability | Lower (0.5 to 0.7) |
-| `max_growth_per_step` | Timestep jumps too fast | Lower (1.1 to 1.2) |
+| `maximum_cfl_number` | Oscillations, instability | Lower (0.5 to 0.7) |
+| `maximum_growth_per_step` | Timestep jumps too fast | Lower (1.1 to 1.2) |
 | `backoff_factor` | Too many rejected steps | Lower (0.3) for faster recovery |
-| `min_step_size` | Simulation stalls at minimum | Lower, but investigate root cause |
-| `max_step_size` | Missing transient events | Lower to capture short-lived phenomena |
+| `minimum_step_size` | Simulation stalls at minimum | Lower, but investigate root cause |
+| `maximum_step_size` | Missing transient events | Lower to capture short-lived phenomena |
 | `step_size_smoothing` | Erratic timestep behavior | Higher (0.8 to 0.9) |
 | `ramp_up_factor` | Slow recovery after transients | Set to 1.1 to 1.2 |

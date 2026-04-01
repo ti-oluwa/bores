@@ -117,9 +117,9 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 # Rock-fluid tables (Brooks-Corey relative permeability + capillary pressure)
 rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
-        water_exponent=2.0,
+        water_exponent=3.0,
         oil_exponent=1.0,
-        gas_exponent=1.0,
+        gas_exponent=2.0,
         wettability=bores.Wettability.WATER_WET,
         mixing_rule="eclipse_rule",
     ),
@@ -129,10 +129,10 @@ rock_fluid_tables = bores.RockFluidTables(
 )
 timer = bores.Timer(
     initial_step_size=bores.Time(days=5),
-    max_step_size=bores.Time(months=3),
-    min_step_size=bores.Time(hours=1),
+    maximum_step_size=bores.Time(months=3),
+    minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=30),
-    max_rejections=20,
+    maximum_rejections=20,
 )
 
 # Simulation configuration

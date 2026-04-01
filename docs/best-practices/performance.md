@@ -166,11 +166,11 @@ Pass `concurrency=3` for IMPES. The pressure solver submits at most 3 tasks and 
 
 The total number of timesteps directly affects runtime. Fewer, larger timesteps are faster, but accuracy and stability impose upper bounds. The adaptive timer in BORES handles this automatically, but you can influence its behavior:
 
-1. **Set a generous `max_step_size`.** If you know your problem has no short-timescale transients, allow larger maximum timesteps (30 to 90 days for multi-year simulations).
+1. **Set a generous `maximum_step_size`.** If you know your problem has no short-timescale transients, allow larger maximum timesteps (30 to 90 days for multi-year simulations).
 
 2. **Use `ramp_up_factor`.** Setting this to 1.1 or 1.2 lets the timer grow the timestep faster after a period of stability, reaching the maximum step size sooner.
 
-3. **Avoid unnecessary restarts.** Each time the simulation reduces the timestep (due to CFL violation or solver failure), it takes several steps to ramp back up. Reducing the frequency of these events by using a slightly smaller `max_step_size` can actually reduce total runtime compared to an aggressive setting that causes frequent backoffs.
+3. **Avoid unnecessary restarts.** Each time the simulation reduces the timestep (due to CFL violation or solver failure), it takes several steps to ramp back up. Reducing the frequency of these events by using a slightly smaller `maximum_step_size` can actually reduce total runtime compared to an aggressive setting that causes frequent backoffs.
 
 4. **Consider fully implicit for long simulations.** If your simulation runs for 20+ years with 1-day timesteps under IMPES, switching to fully implicit with 30 to 90 day timesteps can reduce the total step count by 10 to 30x, more than offsetting the higher cost per step.
 

@@ -161,10 +161,10 @@ rock_fluid_tables = bores.RockFluidTables(
 )
 timer = bores.Timer(
     initial_step_size=bores.Time(days=5),
-    max_step_size=bores.Time(months=3),
-    min_step_size=bores.Time(hours=1),
+    maximum_step_size=bores.Time(months=3),
+    minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=10),
-    max_rejections=20,
+    maximum_rejections=20,
 )
 
 # Simulation configuration

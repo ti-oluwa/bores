@@ -359,13 +359,14 @@ import numpy as np
 oil_water_table = bores.TwoPhaseRelPermTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
-    wetting_phase_saturation=np.array([0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
+    reference_saturation=np.array([0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
     wetting_phase_relative_permeability=np.array([0.0, 0.01, 0.03, 0.10, 0.22, 0.40, 0.65, 0.80]),
     non_wetting_phase_relative_permeability=np.array([1.0, 0.85, 0.68, 0.40, 0.20, 0.08, 0.01, 0.0]),
+    reference_phase="wetting",
 )
 ```
 
-The `wetting_phase_saturation` array must be monotonically increasing and contain at least two points. BORES uses `np.interp` for interpolation, which means values outside the table range are clamped to the endpoint values (constant extrapolation). This is physically reasonable because relative permeability should be zero at or below residual saturation and at its maximum at or above the maximum saturation.
+The `reference_saturation` array must be monotonically increasing and contain at least two points. BORES uses `np.interp` for interpolation, which means values outside the table range are clamped to the endpoint values (constant extrapolation). This is physically reasonable because relative permeability should be zero at or below residual saturation and at its maximum at or above the maximum saturation.
 
 You can query the table for relative permeability values at any saturation, including full 3D grid arrays:
 
@@ -388,22 +389,24 @@ For three-phase simulation, you combine two `TwoPhaseRelPermTable` objects (one 
 import bores
 import numpy as np
 
-# Oil-water table (water is wetting phase)
+# Oil-water table (water is wetting phase, indexed by Sw)
 oil_water_table = bores.TwoPhaseRelPermTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
-    wetting_phase_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
+    reference_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
     wetting_phase_relative_permeability=np.array([0.0, 0.02, 0.08, 0.20, 0.38, 0.62, 0.80]),
     non_wetting_phase_relative_permeability=np.array([1.0, 0.70, 0.42, 0.20, 0.07, 0.01, 0.0]),
+    reference_phase="wetting",
 )
 
-# Gas-oil table (oil is wetting phase)
+# Gas-oil table (oil is wetting phase, indexed by So)
 gas_oil_table = bores.TwoPhaseRelPermTable(
     wetting_phase=bores.FluidPhase.OIL,
     non_wetting_phase=bores.FluidPhase.GAS,
-    wetting_phase_saturation=np.array([0.15, 0.25, 0.35, 0.50, 0.65, 0.80, 0.85]),
+    reference_saturation=np.array([0.15, 0.25, 0.35, 0.50, 0.65, 0.80, 0.85]),
     wetting_phase_relative_permeability=np.array([0.0, 0.02, 0.08, 0.25, 0.50, 0.82, 1.0]),
     non_wetting_phase_relative_permeability=np.array([0.90, 0.65, 0.40, 0.18, 0.05, 0.005, 0.0]),
+    reference_phase="wetting",
 )
 
 # Combine into three-phase table with Eclipse mixing rule
@@ -414,7 +417,7 @@ relperm_table = bores.ThreePhaseRelPermTable(
 )
 ```
 
-The `ThreePhaseRelPermTable` validates that the phase assignments are consistent: the oil-water table must involve water and oil, the gas-oil table must involve oil and gas, and the gas-oil table must have oil as the wetting phase. If these constraints are violated, BORES raises a `ValidationError` with a clear message explaining the issue.
+The `ThreePhaseRelPermTable` validates that the phase assignments are consistent: the oil-water table must involve water and oil, the gas-oil table must involve oil and gas. If these constraints are violated, BORES raises a `ValidationError` with a clear message explaining the issue.
 
 The mixing rule parameter accepts the same functions as the Brooks-Corey model. If you set `mixing_rule=None`, BORES defaults to a conservative `min(kro_w, kro_g)` rule. The available mixing rules are the same ones listed in the [Three-Phase Mixing Rules](#three-phase-mixing-rules) section above.
 
@@ -510,9 +513,6 @@ kro = oil_water_table.get_non_wetting_phase_relative_permeability(0.45)
 
 # Get both at once
 krw, kro = oil_water_table.get_relative_permeabilities(0.45)
-
-# Using __call__ (returns wetting phase kr only)
-krw = oil_water_table(wetting_phase_saturation=0.45)
 ```
 
 This direct evaluation capability is valuable for generating relative permeability curves for reports, comparing analytical and tabular models side by side, and verifying that your model parameters produce physically reasonable curves before committing to a full simulation run.
@@ -663,9 +663,10 @@ relperm_bc = bores.BrooksCoreyThreePhaseRelPermModel(
 oil_water_table = bores.TwoPhaseRelPermTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
-    wetting_phase_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
+    reference_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
     wetting_phase_relative_permeability=np.array([0.0, 0.02, 0.08, 0.20, 0.38, 0.62, 0.80]),
     non_wetting_phase_relative_permeability=np.array([1.0, 0.70, 0.42, 0.20, 0.07, 0.01, 0.0]),
+    reference_phase="wetting",
 )
 
 # Evaluate both across the same saturation range
@@ -699,6 +700,116 @@ fig.show()
 ```
 
 This kind of comparison is essential for calibration. If the analytical and tabular curves diverge significantly, you should either adjust the Corey exponents to improve the fit or use the tabular data directly for the simulation.
+
+---
+
+## Table Indexing: `reference_saturation` and `reference_phase`
+
+Tabular relative permeability data (and capillary pressure data) often comes from laboratory measurements where the x-axis may represent different phases depending on the experimental protocol and reservoir wettability. To handle this flexibility, BORES introduced `reference_saturation` and `reference_phase` attributes to disambiguate which saturation axis the table is indexed by. This is especially important for correct capillary pressure modeling.
+
+### Understanding `reference_saturation` and `reference_phase`
+
+Both `TwoPhaseRelPermTable` and `ThreePhaseRelPermTable` (as well as capillary pressure tables) store two pieces of information about their indexing:
+
+1. **`reference_saturation`** (NumPy array): The saturation values that form the x-axis of the table. These must be monotonically increasing and have at least two points.
+
+2. **`reference_phase`** (string: `"wetting"` or `"non_wetting"`): A label describing which phase the x-axis represents. This tells consumers (like the simulator) which saturation value to supply when querying the table.
+
+The `reference_phase` attribute does not change how interpolation works — BORES always interpolates using linear (piecewise-linear) methods. Instead, it records metadata so that when the table is used in a three-phase context, the correct saturation is extracted automatically without hard-coding assumptions.
+
+### Common Scenarios
+
+#### Oil-Water (Water-Wet) System
+
+In a water-wet oil-water system, water preferentially occupies small pores and the table is naturally indexed by water saturation $S_w$:
+
+```python
+oil_water_table = bores.TwoPhaseRelPermTable(
+    wetting_phase=bores.FluidPhase.WATER,
+    non_wetting_phase=bores.FluidPhase.OIL,
+    reference_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75]),
+    wetting_phase_relative_permeability=np.array([0.0, 0.02, 0.08, 0.20, 0.38, 0.62, 0.80]),
+    non_wetting_phase_relative_permeability=np.array([1.0, 0.70, 0.42, 0.20, 0.07, 0.01, 0.0]),
+    reference_phase="wetting",  # x-axis is Sw (wetting phase)
+)
+```
+
+Here, `reference_phase="wetting"` means the x-axis represents wetting-phase saturation. When querying the table, you supply `wetting_saturation=0.45` and BORES knows to use that value for interpolation without needing to know anything about the phase pair.
+
+#### Gas-Oil System Indexed by Gas Saturation
+
+In some gas-oil experiments, the table is naturally indexed by gas saturation $S_g$ (the non-wetting phase). This might occur when gas-injection core floods measure data points as a function of increasing gas saturation:
+
+```python
+gas_oil_table = bores.TwoPhaseRelPermTable(
+    wetting_phase=bores.FluidPhase.OIL,
+    non_wetting_phase=bores.FluidPhase.GAS,
+    reference_saturation=np.array([0.0, 0.10, 0.25, 0.40, 0.55, 0.70, 0.85]),
+    wetting_phase_relative_permeability=np.array([0.90, 0.70, 0.45, 0.22, 0.08, 0.01, 0.0]),
+    non_wetting_phase_relative_permeability=np.array([0.0, 0.01, 0.05, 0.15, 0.40, 0.72, 1.0]),
+    reference_phase="non_wetting",  # x-axis is Sg (non-wetting phase)
+)
+```
+
+Here, `reference_phase="non_wetting"` means the x-axis represents non-wetting-phase saturation (gas). When you call the table with `non_wetting_saturation=0.25`, BORES uses that value directly for interpolation. The wetting saturation (oil) is not needed.
+
+#### Gas-Oil System Indexed by Oil Saturation
+
+If the gas-oil table is indexed by oil saturation $S_o$ (the wetting phase in a gas-oil context):
+
+```python
+gas_oil_table = bores.TwoPhaseRelPermTable(
+    wetting_phase=bores.FluidPhase.OIL,
+    non_wetting_phase=bores.FluidPhase.GAS,
+    reference_saturation=np.array([0.15, 0.25, 0.40, 0.60, 0.75, 0.85]),
+    wetting_phase_relative_permeability=np.array([0.0, 0.02, 0.10, 0.40, 0.75, 0.98]),
+    non_wetting_phase_relative_permeability=np.array([0.80, 0.60, 0.35, 0.10, 0.015, 0.0]),
+    reference_phase="wetting",  # x-axis is So (wetting phase in gas-oil system)
+)
+```
+
+Here, `reference_phase="wetting"` means the x-axis is wetting-phase saturation (oil in this gas-oil pair). When querying, you supply `wetting_saturation=0.50` and BORES knows to use it.
+
+### Querying Tables with `reference_phase`
+
+The query interface adapts based on `reference_phase`:
+
+```python
+# For a table with reference_phase="wetting"
+kr_w = oil_water_table.get_wetting_phase_relative_permeability(
+    wetting_saturation=0.45
+)
+# non_wetting_saturation is optional (and ignored)
+
+# For a table with reference_phase="non_wetting"
+kr_g = gas_oil_table.get_non_wetting_phase_relative_permeability(
+    non_wetting_saturation=0.25
+)
+# wetting_saturation is optional (and ignored if present)
+```
+
+If you're building a three-phase table and the two-phase tables have different `reference_phase` values (one indexed by Sw, the other by Sg), BORES handles the dispatch internally—you simply call the three-phase table with all three saturations and it extracts the right values:
+
+```python
+# Oil-water indexed by Sw (wetting), gas-oil indexed by Sg (non-wetting)
+result = three_phase_table.get_relative_permeabilities(
+    water_saturation=0.35,
+    oil_saturation=0.55,
+    gas_saturation=0.10,
+)
+# BORES uses Sw for oil_water_table (reference_phase="wetting")
+# and Sg for gas_oil_table (reference_phase="non_wetting")
+```
+
+### Best Practices for Tabular Data
+
+1. **Record the reference axis.** When you create a `TwoPhaseRelPermTable` from lab data, document and set `reference_phase` to match how the measurements were indexed. Most oil-water tables are indexed by $S_w$, so `reference_phase="wetting"` is common.
+
+2. **Use consistent conventions.** If your gas-oil table is indexed by $S_g$ and your oil-water table is indexed by $S_w$, ensure this is reflected in their `reference_phase` settings. The three-phase table will combine them correctly.
+
+3. **Validate table boundaries.** Ensure `reference_saturation` values span a sensible range for your system. For instance, in a water-oil system, $S_w$ typically ranges from $S_{wc}$ (connate water) to near 1.0 (or less if three phases are present).
+
+4. **Capillary pressure alignment.** If you pair a relative permeability table with a capillary pressure table, ensure both use the same `reference_phase` convention so pressure-saturation relationships remain consistent.
 
 ---
 

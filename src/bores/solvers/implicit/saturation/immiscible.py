@@ -2288,7 +2288,7 @@ def evolve_saturation(
     stagnation_count = 0
     stagnation_patience = config.newton_stagnation_patience
     stagnation_improvement_threshold = config.newton_stagnation_improvement_threshold
-    min_step_size = float(np.sqrt(np.finfo(dtype).eps))
+    minimum_step_size = float(np.sqrt(np.finfo(dtype).eps))
     maximum_newton_iterations = config.maximum_newton_iterations
     newton_tolerance = config.newton_tolerance
     maximum_line_search_cuts = config.maximum_line_search_cuts
@@ -2514,7 +2514,7 @@ def evolve_saturation(
                 break
 
             line_search_factor *= 0.5
-            if (line_search_factor * max_raw_change) < min_step_size:
+            if (line_search_factor * max_raw_change) < minimum_step_size:
                 logger.debug(
                     f"Line search hit precision floor at iteration {iteration}, "
                     f"alpha={line_search_factor}, max_dS={line_search_factor * max_raw_change:.2e}"

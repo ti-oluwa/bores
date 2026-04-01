@@ -43,31 +43,31 @@ import bores
 
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1),
-    max_step_size=bores.Time(days=10),
-    min_step_size=bores.Time(hours=1),
+    maximum_step_size=bores.Time(days=10),
+    minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=3),
 )
 ```
 
 The initial step size is the starting point for the adaptive algorithm. It should be conservative enough that the first few steps succeed without rejection. A good starting point is 0.5 to 2 days for most problems. If you start too large, the timer will reject the first few steps and reduce the size automatically, but each rejection wastes a solver call.
 
-The maximum step size caps how large the timer can grow. Even when conditions are very smooth, you generally do not want steps larger than 10 to 30 days because the linearization errors in PVT property updates accumulate. The minimum step size sets a floor below which the timer will not go. If the timer hits this floor repeatedly, it raises a `TimingError` after `max_rejections` consecutive rejections (default 10), indicating that the problem may be poorly configured.
+The maximum step size caps how large the timer can grow. Even when conditions are very smooth, you generally do not want steps larger than 10 to 30 days because the linearization errors in PVT property updates accumulate. The minimum step size sets a floor below which the timer will not go. If the timer hits this floor repeatedly, it raises a `TimingError` after `maximum_rejections` consecutive rejections (default 10), indicating that the problem may be poorly configured.
 
 ### Full Timer Parameters
 
 | Parameter | Default | Description |
 |---|---|---|
 | `initial_step_size` | (required) | Starting step size in seconds |
-| `max_step_size` | (required) | Upper bound on step size |
-| `min_step_size` | (required) | Lower bound on step size |
+| `maximum_step_size` | (required) | Upper bound on step size |
+| `minimum_step_size` | (required) | Lower bound on step size |
 | `simulation_time` | (required) | Total simulation duration |
-| `max_cfl_number` | 0.9 | Default CFL limit for adaptive adjustments |
+| `maximum_cfl_number` | 0.9 | Default CFL limit for adaptive adjustments |
 | `backoff_factor` | 0.5 | Multiplier when a step is rejected |
 | `aggressive_backoff_factor` | 0.25 | Multiplier for severe rejections |
 | `ramp_up_factor` | `None` | Optional growth multiplier after cooldown |
-| `max_steps` | `None` | Optional hard limit on total step count |
-| `max_rejections` | 10 | Maximum consecutive rejections before error |
-| `max_growth_per_step` | 1.3 | Maximum multiplicative growth per step (30%) |
+| `maximum_steps` | `None` | Optional hard limit on total step count |
+| `maximum_rejections` | 10 | Maximum consecutive rejections before error |
+| `maximum_growth_per_step` | 1.3 | Maximum multiplicative growth per step (30%) |
 | `growth_cooldown_steps` | 5 | Successful steps required before ramp-up |
 | `cfl_safety_margin` | 0.85 | Safety factor applied to CFL targets |
 | `step_size_smoothing` | 0.2 | EMA smoothing factor (0 = none, 1 = max) |
@@ -94,7 +94,7 @@ When a step succeeds, the timer evaluates several adjustment factors:
 
 5. **Performance trend analysis**: The timer tracks the last 10 steps and detects concerning trends. If CFL numbers are consistently high or increasing, or if Newton iterations are consistently above 8, a performance factor below 1.0 further dampens growth.
 
-All factors are multiplied together, then the result is capped by `max_growth_per_step` (default 1.3, meaning no more than 30% growth per step). The final value is smoothed through an exponential moving average controlled by `step_size_smoothing`, which prevents erratic oscillations in step size.
+All factors are multiplied together, then the result is capped by `maximum_growth_per_step` (default 1.3, meaning no more than 30% growth per step). The final value is smoothed through an exponential moving average controlled by `step_size_smoothing`, which prevents erratic oscillations in step size.
 
 ### Step Rejection
 
@@ -117,14 +117,14 @@ The timer also remembers recently failed step sizes and avoids proposing sizes n
 
 ### Constant Step Size Mode
 
-If you set `initial_step_size`, `max_step_size`, and `min_step_size` to the same value, the timer automatically enters constant step size mode. In this mode, all adaptive logic is bypassed and every step uses the specified size:
+If you set `initial_step_size`, `maximum_step_size`, and `minimum_step_size` to the same value, the timer automatically enters constant step size mode. In this mode, all adaptive logic is bypassed and every step uses the specified size:
 
 ```python
 # Fixed 1-day steps
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1),
-    max_step_size=bores.Time(days=1),
-    min_step_size=bores.Time(days=1),
+    maximum_step_size=bores.Time(days=1),
+    minimum_step_size=bores.Time(days=1),
     simulation_time=bores.Time(years=1),
 )
 ```
@@ -190,7 +190,7 @@ config = bores.Config(
 
 The saturation CFL threshold (0.6) is more conservative than the pressure threshold (0.9) because saturation transport is hyperbolic and more sensitive to CFL violations. The pressure equation is parabolic (or elliptic in incompressible limits) and tolerates higher CFL numbers.
 
-These thresholds interact with the timer's `max_cfl_number` (default 0.9) and `cfl_safety_margin` (default 0.85). The timer targets a CFL of `threshold * safety_margin`, so with defaults the effective target for saturation is approximately 0.51 and for pressure approximately 0.77.
+These thresholds interact with the timer's `maximum_cfl_number` (default 0.9) and `cfl_safety_margin` (default 0.85). The timer targets a CFL of `threshold * safety_margin`, so with defaults the effective target for saturation is approximately 0.51 and for pressure approximately 0.77.
 
 !!! tip "CFL and Scheme Selection"
 
@@ -205,15 +205,15 @@ The `ramp_up_factor` provides an additional multiplicative growth on top of the 
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(days=0.5),
-    max_step_size=bores.Time(days=15),
-    min_step_size=bores.Time(hours=1),
+    maximum_step_size=bores.Time(days=15),
+    minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=5),
     ramp_up_factor=1.2,              # 20% extra growth
     growth_cooldown_steps=5,          # After 5 stable steps
 )
 ```
 
-The ramp-up factor is useful when you want the simulation to reach large step sizes quickly after an initial transient period (for example, after well startup or injection rate changes). Without it, the timer grows conservatively based solely on the monitoring criteria. With a ramp-up factor of 1.2, the timer can grow up to 56% per step (1.3 max growth * 1.2 ramp-up), though this is still capped by `max_step_size`.
+The ramp-up factor is useful when you want the simulation to reach large step sizes quickly after an initial transient period (for example, after well startup or injection rate changes). Without it, the timer grows conservatively based solely on the monitoring criteria. With a ramp-up factor of 1.2, the timer can grow up to 56% per step (1.3 max growth * 1.2 ramp-up), though this is still capped by `maximum_step_size`.
 
 Setting `ramp_up_factor` to `None` (the default) disables this feature entirely, relying solely on the adaptive criteria for growth.
 
@@ -268,8 +268,8 @@ This is particularly valuable for long-running simulations where you want to res
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1),
-    max_step_size=bores.Time(days=10),
-    min_step_size=bores.Time(hours=1),
+    maximum_step_size=bores.Time(days=10),
+    minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=3),
 )
 ```
@@ -281,8 +281,8 @@ Waterfloods have moderate dynamics with a fairly smooth saturation front. The de
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(days=0.5),
-    max_step_size=bores.Time(days=5),
-    min_step_size=bores.Time(hours=0.5),
+    maximum_step_size=bores.Time(days=5),
+    minimum_step_size=bores.Time(hours=0.5),
     simulation_time=bores.Time(years=3),
 )
 ```
@@ -294,8 +294,8 @@ Gas injection creates sharper fronts and higher velocities. Smaller initial and 
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(days=2),
-    max_step_size=bores.Time(days=30),
-    min_step_size=bores.Time(days=1),
+    maximum_step_size=bores.Time(days=30),
+    minimum_step_size=bores.Time(days=1),
     simulation_time=bores.Time(years=10),
 )
 ```
@@ -307,8 +307,8 @@ Depletion has very smooth, gradual pressure decline with no injection fronts. La
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(hours=6),
-    max_step_size=bores.Time(days=10),
-    min_step_size=bores.Time(minutes=30),
+    maximum_step_size=bores.Time(days=10),
+    minimum_step_size=bores.Time(minutes=30),
     simulation_time=bores.Time(years=5),
     ramp_up_factor=1.15,
     growth_cooldown_steps=3,

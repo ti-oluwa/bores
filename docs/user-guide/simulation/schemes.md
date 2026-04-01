@@ -6,7 +6,17 @@ An evolution scheme determines how the pressure and saturation equations are dis
 
 In black-oil reservoir simulation, you are solving two coupled systems of equations: a pressure equation (derived from mass conservation and Darcy's law) and saturation transport equations (one for each mobile phase). These equations are coupled because pressure depends on fluid saturations (through compressibility and density) and saturations depend on pressure (through flow velocities). The evolution scheme defines how this coupling is handled at each time step.
 
-The scheme is set through the `scheme` parameter in the `Config`:
+The scheme is set through the `scheme` parameter in the `Config`.
+
+Supported values are:
+
+- `impes` — Implicit Pressure / Explicit Saturation (default)
+- `explicit` — Fully explicit pressure and saturation
+- `implicit` — Fully implicit pressure and saturation
+- `sequential-implicit` or `si` — Sequential Implicit (implicit pressure, implicit saturation)
+- `full-sequential-implicit` or `full-si` — Full Sequential Implicit (SI with outer coupling iterations)
+
+Example:
 
 ```python
 import bores
@@ -15,7 +25,7 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="impes",  # "impes", "explicit", or "implicit"
+    scheme="impes",
 )
 ```
 
@@ -47,6 +57,53 @@ IMPES is the best balance for most problems. It handles pressure diffusion (whic
     IMPES is appropriate for the vast majority of black-oil simulations: primary depletion, waterflooding, gas injection, and miscible flooding. It is the default in BORES and in most commercial simulators. Only switch to another scheme if you encounter specific numerical issues that IMPES cannot handle.
 
 ---
+
+## Sequential Implicit (SI)
+
+Sequential Implicit (often abbreviated SI) treats pressure implicitly and then solves saturation implicitly (typically with a Newton-Raphson solver) within the same time step. Compared with IMPES, SI removes the explicit saturation CFL limit because the saturation update is implicit, allowing larger time steps without the oscillations associated with an explicit transport update.
+
+Use SI when IMPES' saturation CFL is too restrictive but you want to avoid the full coupling cost of a monolithic implicit solve.
+
+```python
+config = bores.Config(
+    timer=timer,
+    rock_fluid_tables=rock_fluid_tables,
+    wells=wells,
+    scheme="sequential-implicit",  # or "si"
+)
+```
+
+Key configuration knobs that affect SI behavior:
+
+- `maximum_newton_iterations` — maximum Newton iterations used by the implicit saturation solver.
+- `newton_tolerance` / `newton_saturation_change_tolerance` — convergence and per-iteration saturation-change tolerances for the Newton solver.
+- Saturation and pressure change limits (`maximum_*_saturation_change`, `maximum_pressure_change`) still apply and trigger timestep reduction if exceeded.
+
+SI is a pragmatic middle ground: it is more expensive per step than IMPES (because it runs Newton iterations for saturation) but typically cheaper than a fully monolithic implicit solve and often allows substantially larger steps than IMPES.
+
+## Full Sequential Implicit (Full-SI)
+
+Full Sequential Implicit (also available as `full-sequential-implicit` or `full-si`) is SI augmented with an outer iteration loop that alternately re-solves pressure and saturation until the inter-iterate drift between pressure and saturation falls below configured tolerances. This enforces stronger coupling between pressure and saturation without forming a single monolithic Jacobian for the entire coupled system.
+
+```python
+config = bores.Config(
+    timer=timer,
+    rock_fluid_tables=rock_fluid_tables,
+    wells=wells,
+    scheme="full-sequential-implicit",  # or "full-si"
+    maximum_outer_iterations=5,
+    pressure_outer_convergence_tolerance=1e-3,
+    saturation_outer_convergence_tolerance=1e-2,
+)
+```
+
+Important outer-loop parameters:
+
+- `maximum_outer_iterations` — maximum outer coupling iterations (default 5).
+- `pressure_outer_convergence_tolerance` — relative pressure inter-iterate tolerance for outer-loop convergence.
+- `saturation_outer_convergence_tolerance` — absolute saturation inter-iterate tolerance for outer-loop convergence.
+
+Full-SI is appropriate when pressure–saturation coupling is strong (for example, high-rate gas injection, near-critical PVT behaviour, or situations with strong compositional feedback) and you need better coupling than SI provides but want to avoid the complexity or cost of a fully monolithic implicit Jacobian.
 
 ## Explicit
 
@@ -86,63 +143,28 @@ Lowering these thresholds increases stability at the cost of requiring even smal
 
 ---
 
-## Implicit
+## Fully Monolithic Implicit (Planned Future Feature)
 
-The fully implicit scheme treats both pressure and saturation implicitly. Both equations are assembled into linear systems and solved using iterative solvers with preconditioners.
+A fully monolithic implicit scheme — which treats pressure and saturation together in a single coupled Jacobian and solves them simultaneously — is architecturally interesting because it is unconditionally stable and allows arbitrarily large time steps. However, it is **not currently implemented** in BORES.
 
-```python
-config = bores.Config(
-    timer=timer,
-    rock_fluid_tables=rock_fluid_tables,
-    wells=wells,
-    scheme="implicit",
-)
-```
-
-The fully implicit scheme is unconditionally stable, meaning there is no CFL limit on the time step size. You can take very large time steps without worrying about numerical oscillations or instabilities. This makes the implicit scheme attractive for problems where the explicit saturation CFL condition is very restrictive, such as fine-grid simulations, high-permeability contrasts, or simulations with strong capillary pressure effects.
-
-The cost of this stability is higher computational effort per time step. The implicit scheme must solve a larger linear system that couples pressure and saturation, and it typically requires Newton iterations to handle the nonlinearity. Each Newton iteration involves assembling and solving a Jacobian system, which is significantly more expensive than the simple explicit saturation update in IMPES.
-
-The implicit scheme is particularly useful when:
-
-- Fine grids cause the IMPES saturation CFL to require impractically small time steps
-- Strong capillary pressure creates fast local saturation changes
-- High permeability contrasts (>1000:1) cause stability issues with IMPES
-- You want to take very large time steps and are willing to pay more per step
-
-You can control convergence behavior with the following `Config` parameters:
-
-```python
-config = bores.Config(
-    timer=timer,
-    rock_fluid_tables=rock_fluid_tables,
-    wells=wells,
-    scheme="implicit",
-    pressure_convergence_tolerance=1e-6,    # Tighter for pressure
-    saturation_convergence_tolerance=1e-4,  # Relaxed for saturation
-    maximum_solver_iterations=250,                      # Max solver iterations per step
-)
-```
-
-!!! info "Implicit vs IMPES Cost"
-
-    A rough guideline: the implicit scheme costs 3 to 10 times more per time step than IMPES, but can use time steps 5 to 50 times larger. Whether implicit is faster overall depends on the specific problem. For most field-scale models with moderate grid resolution, IMPES wins. For fine-grid studies or problems with severe CFL restrictions, implicit can be faster.
+Instead, use **Full Sequential Implicit** (described above) when you need strong pressure–saturation coupling. Full-SI achieves most of the stability and coupling benefits without the complexity of assembling and solving a single monolithic system. For most applications, the outer-iteration approach in Full-SI strikes a good balance between accuracy, stability, and computational cost.
 
 ---
 
 ## Choosing a Scheme
 
-| Feature | IMPES | Explicit | Implicit |
-|---|---|---|---|
-| Pressure solve | Implicit | Explicit | Implicit |
-| Saturation solve | Explicit | Explicit | Implicit |
-| Stability | Conditionally stable (saturation CFL) | Conditionally stable (both CFL) | Unconditionally stable |
-| Cost per step | Moderate | Low | High |
-| Max time step | Moderate | Small | Large |
-| Best for | Most problems | Debugging, small models | Fine grids, strong capillary |
-| Default | Yes | No | No |
+| Feature | IMPES | Explicit | Sequential Implicit (SI) | Full Sequential Implicit |
+| --- | --- | --- | --- | --- |
+| Pressure solve | Implicit | Explicit | Implicit | Implicit (outer loop) |
+| Saturation solve | Explicit | Explicit | Implicit (Newton) | Implicit with outer coupling |
+| Stability | CFL-limited (saturation) | CFL-limited (both) | Unconditionally stable | Unconditionally stable |
+| Cost per step | Moderate | Low | Higher (Newton iterations) | Highest (outer + Newton loops) |
+| Max time step | Moderate | Small | Large | Large |
+| Pressure–saturation coupling | Weak (one-way per step) | Weak | Moderate (implicit) | Strong (outer iterations) |
+| Best for | Most depletion / waterflood | Debugging, small models | CFL-restricted problems | Strong coupling, near-critical |
+| Default | Yes | No | No | No |
 
-For almost all reservoir simulation work, start with IMPES. If you encounter stability issues (oscillating saturations, frequent timestep rejections, negative saturations), try reducing the time step first. If that does not help, switch to the fully implicit scheme. The explicit scheme is primarily useful for educational purposes and very small, fast-running models.
+**Recommended progression:** Start with IMPES. If the saturation CFL becomes too restrictive (time steps < 0.01 days for field-scale models), switch to SI. If pressure–saturation coupling is strong (high-rate gas injection, near-critical PVT), use Full-SI with `maximum_outer_iterations=5–10`. The explicit scheme is mainly for debugging and education.
 
 ---
 

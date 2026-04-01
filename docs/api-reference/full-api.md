@@ -105,8 +105,8 @@ config = bores.Config(
     timer=bores.Timer(
         simulation_time=bores.Time(days=365),
         initial_step_size=bores.Time(days=1),
-        max_step_size=bores.Time(days=30),
-        min_step_size=bores.Time(days=0.01),
+        maximum_step_size=bores.Time(days=30),
+        minimum_step_size=bores.Time(days=0.01),
     ),
     wells=wells,
     scheme="impes",

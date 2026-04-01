@@ -405,7 +405,7 @@ def _run_impes_step(
             f"exceeded maximum allowed {maximum_allowed_pressure_change:.6f} psi "
             f"at time step {time_step}."
         )
-        logger.error(message)
+        logger.warning(message)
         return StepResult(
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
@@ -689,7 +689,7 @@ def _run_impes_step(
     }
 
     if not saturation_result.success:
-        logger.error(
+        logger.warning(
             f"Explicit saturation evolution failed at time step {time_step}: \n{saturation_result.message}"
         )
         return StepResult(
@@ -895,7 +895,7 @@ def _run_sequential_implicit_step(
         pad_width=pad_width,
     )
     if not pressure_result.success:
-        logger.error(
+        logger.warning(
             f"Implicit pressure evolution failed at time step {time_step}: \n{pressure_result.message}"
         )
         return StepResult(
@@ -916,7 +916,7 @@ def _run_sequential_implicit_step(
             f"exceeded maximum allowed {maximum_allowed_pressure_change:.6f} psi "
             f"at time step {time_step}."
         )
-        logger.error(message)
+        logger.warning(message)
         return StepResult(
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
@@ -1104,7 +1104,7 @@ def _run_sequential_implicit_step(
     }
 
     if not saturation_result.success:
-        logger.error(
+        logger.warning(
             f"Implicit saturation evolution failed at time step {time_step}: \n{saturation_result.message}"
         )
         return StepResult(
@@ -1336,7 +1336,7 @@ def _run_full_sequential_implicit_step(
         )
 
         if not pressure_result.success:
-            logger.error(
+            logger.warning(
                 f"Implicit pressure solve failed at outer iteration "
                 f"{iteration + 1}, time step {time_step}:\n"
                 f"{pressure_result.message}"
@@ -1360,7 +1360,7 @@ def _run_full_sequential_implicit_step(
                 f"allowed {maximum_allowed_pressure_change:.6f} psi at time step "
                 f"{time_step}, outer iteration {iteration + 1}."
             )
-            logger.error(message)
+            logger.warning(message)
             return StepResult(
                 fluid_properties=padded_fluid_properties,
                 rock_properties=padded_rock_properties,
@@ -1468,7 +1468,7 @@ def _run_full_sequential_implicit_step(
                 f"{iteration + 1} violated saturation change limits: "
                 f"{flash_saturation_check.message}"
             )
-            logger.debug(message)
+            logger.warning(message)
             return StepResult(
                 fluid_properties=padded_fluid_properties,
                 rock_properties=padded_rock_properties,
@@ -1518,7 +1518,7 @@ def _run_full_sequential_implicit_step(
         )
 
         if not saturation_result.success:
-            logger.error(
+            logger.warning(
                 f"Implicit saturation solve failed at outer iteration "
                 f"{iteration + 1}, time step {time_step}:\n"
                 f"{saturation_result.message}"
@@ -1549,7 +1549,7 @@ def _run_full_sequential_implicit_step(
                 f"Water saturation change: {saturation_solution.maximum_water_saturation_change:.6f}\n"
                 f"Gas saturation change:   {saturation_solution.maximum_gas_saturation_change:.6f}"
             )
-            logger.debug(message)
+            logger.warning(message)
             return StepResult(
                 fluid_properties=padded_fluid_properties,
                 rock_properties=padded_rock_properties,
@@ -1891,7 +1891,7 @@ def _run_explicit_step(
     }
 
     if not pressure_result.success:
-        logger.error(
+        logger.warning(
             f"Explicit pressure evolution failed at time step {time_step}: \n{pressure_result.message}"
         )
         return StepResult(
@@ -1909,7 +1909,7 @@ def _run_explicit_step(
             f"exceeded maximum allowed {maximum_allowed_pressure_change:.6f} psi "
             f"at time step {time_step}."
         )
-        logger.debug(message)
+        logger.warning(message)
         return StepResult(
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
@@ -2038,7 +2038,7 @@ def _run_explicit_step(
     }
 
     if not saturation_result.success:
-        logger.error(
+        logger.warning(
             f"Explicit saturation evolution failed at time step {time_step}: \n{saturation_result.message}"
         )
         return StepResult(
@@ -2059,7 +2059,7 @@ def _run_explicit_step(
         Water saturation change: {saturation_solution.maximum_water_saturation_change:.6f}, 
         Gas saturation change: {saturation_solution.maximum_gas_saturation_change:.6f}.
         """
-        logger.error(message)
+        logger.warning(message)
         return StepResult(
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
@@ -2192,7 +2192,7 @@ def _run_explicit_step(
             f"Solution gas liberation flash at time step {time_step} violated "
             f"saturation change limits: {flash_saturation_check.message}"
         )
-        logger.debug(message)
+        logger.warning(message)
         return StepResult(
             fluid_properties=padded_fluid_properties,
             rock_properties=padded_rock_properties,
@@ -2460,7 +2460,7 @@ def run(
         config = config or input.config
     else:
         if config is None:
-            raise ValueError(
+            raise ValidationError(
                 "Must provide `config` parameter when `input` is a `ReservoirModel`"
             )
         model = input

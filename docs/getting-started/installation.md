@@ -198,6 +198,146 @@ If `h5py` fails to install, it may be because the HDF5 C library is not availabl
 
 ---
 
+## Numba Threading Layer (Optional Performance Tuning)
+
+BORES uses [Numba](https://numba.readthedocs.io/) for JIT-compiled numerical kernels. By default, Numba uses multiple threads for parallelization across your CPU cores. The threading backend can be configured for optimal performance.
+
+### Threading Backends
+
+Numba supports three threading layers in order of preference:
+
+1. **TBB (Intel Threading Building Blocks)** - Best performance, cross-platform support
+2. **OMP (OpenMP)** - Good performance, widely available
+3. **Workqueue** - Fallback, available on all platforms
+
+**Important**: BORES does not require TBB and will work correctly with any available threading layer. By default, Numba automatically selects the best available option: `tbb → omp → workqueue`.
+
+### Check Your Current Threading Layer
+
+To see which threading layer Numba is currently using, run:
+
+```python
+import numba
+
+def get_threading_backend():
+    try:
+        return numba.threading_layer()
+    except Exception:
+        return "unknown"
+
+print(f"Numba threading layer: {get_threading_backend()}")
+```
+
+Expected output (one of):
+
+    Numba threading layer: tbb
+    Numba threading layer: omp
+    Numba threading layer: workqueue
+
+!!! tip "Thread Pool Size (Optional)"
+
+    BORES automatically configures the thread pool size for optimal performance. You only need to adjust this if you want to override the defaults (e.g., on shared systems to avoid oversubscription).
+
+    To limit the number of threads, set:
+
+    ```bash
+    export NUMBA_NUM_THREADS=4
+    ```
+
+    Or programmatically:
+
+    ```python
+    import numba
+    numba.set_num_threads(4)
+    ```
+
+### Optional: Install TBB for Better Performance
+
+If you want to ensure **TBB** (the fastest threading layer) is used, install it on your platform:
+
+=== "Linux / WSL"
+
+    First, install the system TBB library:
+
+    ```bash
+    sudo apt-get install libtbb-dev
+    ```
+
+    Then install the Python packages:
+
+    ```bash
+    pip install tbb tbb4py
+    uv add tbb tbb4py  # or with uv
+    ```
+
+    Verify TBB is enabled:
+
+    ```python
+    import numba
+    print(numba.threading_layer())  # Should print: tbb
+    ```
+
+=== "macOS"
+
+    Install TBB via Homebrew:
+
+    ```bash
+    brew install tbb
+    ```
+
+    Then install the Python packages:
+
+    ```bash
+    pip install tbb tbb4py
+    uv add tbb tbb4py  # or with uv
+    ```
+
+    Verify TBB is enabled:
+
+    ```python
+    import numba
+    print(numba.threading_layer())  # Should print: tbb
+    ```
+
+=== "Windows"
+
+    Install the Python packages directly (Windows wheels include TBB binaries):
+
+    ```bash
+    pip install tbb tbb4py
+    uv add tbb tbb4py  # or with uv
+    ```
+
+    Verify TBB is enabled:
+
+    ```python
+    import numba
+    print(numba.threading_layer())  # Should print: tbb
+    ```
+
+!!! warning "TBB is Optional"
+
+    - If TBB installation fails, BORES will automatically fall back to OMP or workqueue—no crashes, no errors.
+    - You do **not** need to force the threading layer. Numba handles fallback automatically.
+    - Do **not** set `NUMBA_THREADING_LAYER=tbb` manually, as this will cause crashes if TBB is unavailable.
+
+### Graceful Fallback Behavior
+
+BORES is designed to work reliably with any threading layer. If you want to explicitly ensure safe fallback behavior at startup:
+
+    import os
+    import numba
+
+    # Ensure safe fallback: tbb → omp → workqueue
+    os.environ.setdefault("NUMBA_THREADING_LAYER", "default")
+
+    # Print what's available
+    print(f"Numba threading layer: {numba.threading_layer()}")
+
+    import bores  # Now import BORES
+
+---
+
 ## Platform Notes
 
 ### Linux

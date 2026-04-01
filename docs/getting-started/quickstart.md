@@ -201,8 +201,8 @@ rock_fluid_tables = bores.RockFluidTables(
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(days=1),
-        max_step_size=bores.Time(days=10),
-        min_step_size=bores.Time(hours=1),
+        maximum_step_size=bores.Time(days=10),
+        minimum_step_size=bores.Time(hours=1),
         simulation_time=bores.Time(days=365),
     ),
     rock_fluid_tables=rock_fluid_tables,

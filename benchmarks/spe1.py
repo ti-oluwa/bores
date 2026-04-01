@@ -697,14 +697,14 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     # -------------------------------------------------------------------------
     timer = bores.Timer(
         initial_step_size=bores.Time(days=1.0),
-        max_step_size=bores.Time(days=30.0),
-        min_step_size=bores.Time(minutes=10.0),
+        maximum_step_size=bores.Time(days=30.0),
+        minimum_step_size=bores.Time(minutes=10.0),
         simulation_time=bores.Time(years=10.0),
         maximum_cfl_number=0.5,
         ramp_up_factor=1.3,
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,
-        max_rejections=20,
+        maximum_rejections=20,
     )
 
     # -------------------------------------------------------------------------
@@ -714,7 +714,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="impes",
+        scheme="si",
         output_frequency=1,
         pressure_solver="direct",
         pressure_preconditioner=None,
@@ -1180,7 +1180,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 @app.cell
 def _(analyst):
     mbe = analyst.material_balance_error()
-    print(mbe.oil_mbe)
+    print(mbe.total_mbe)
     return
 
 
@@ -1216,7 +1216,7 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "gas-sat"
+    property = "water-sat"
     figures = []
     timesteps = [320]
     for timestep in timesteps:

@@ -48,8 +48,8 @@ The key parameters are:
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(hours=6),
-        max_step_size=bores.Time(days=3),
-        min_step_size=bores.Time(minutes=30),
+        maximum_step_size=bores.Time(days=3),
+        minimum_step_size=bores.Time(minutes=30),
         simulation_time=bores.Time(years=3),
     ),
     rock_fluid_tables=rock_fluid_tables,
@@ -140,13 +140,13 @@ Recommended timer settings for miscible flooding:
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(hours=6),
-    max_step_size=bores.Time(days=3),
-    min_step_size=bores.Time(minutes=30),
+    maximum_step_size=bores.Time(days=3),
+    minimum_step_size=bores.Time(minutes=30),
     simulation_time=bores.Time(years=3),
 )
 ```
 
-If you encounter convergence issues, try reducing `max_step_size` to 1 to 2 days or tightening the gas saturation change limit:
+If you encounter convergence issues, try reducing `maximum_step_size` to 1 to 2 days or tightening the gas saturation change limit:
 
 ```python
 config = bores.Config(

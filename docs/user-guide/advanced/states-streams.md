@@ -54,32 +54,197 @@ perm_z = state.model.rock_properties.absolute_permeability.z
 
 ### Accessing Flow Properties
 
-Injection and production rates, relative permeabilities, and mobilities are stored directly on the state rather than nested inside the model. Rates are in reservoir cubic feet per day at the cell level.
+Injection and production rates, formation volume factors, bottom-hole pressures, relative permeabilities, and mobilities are stored directly on the state. All rate and pressure quantities are stored as `SparseTensor` objects for memory efficiency.
 
 ```python
-# Injection and production rates (ft³/day per cell)
-oil_injection = state.injection.oil
-water_injection = state.injection.water
-gas_injection = state.injection.gas
+# Injection and production rates (ft³/day per cell, SparseTensor)
+oil_injection = state.injection_rates.oil
+water_injection = state.injection_rates.water
+gas_injection = state.injection_rates.gas
 
-oil_production = state.production.oil
-water_production = state.production.water
-gas_production = state.production.gas
+oil_production = state.production_rates.oil
+water_production = state.production_rates.water
+gas_production = state.production_rates.gas
 
-# Relative permeabilities (dimensionless, 0 to 1)
+# Formation volume factors (bbls/STB for oil/water, ft³/SCF for gas, SparseTensor)
+oil_injection_fvf = state.injection_formation_volume_factors.oil
+water_injection_fvf = state.injection_formation_volume_factors.water
+gas_injection_fvf = state.injection_formation_volume_factors.gas
+
+oil_production_fvf = state.production_formation_volume_factors.oil
+water_production_fvf = state.production_formation_volume_factors.water
+gas_production_fvf = state.production_formation_volume_factors.gas
+
+# Bottom-hole pressures at well perforations (psi, SparseTensor)
+oil_injection_bhp = state.injection_bhps.oil
+water_injection_bhp = state.injection_bhps.water
+gas_injection_bhp = state.injection_bhps.gas
+
+oil_production_bhp = state.production_bhps.oil
+water_production_bhp = state.production_bhps.water
+gas_production_bhp = state.production_bhps.gas
+
+# Relative permeabilities (dimensionless, 0 to 1, regular numpy arrays)
 kro = state.relative_permeabilities.oil
 krw = state.relative_permeabilities.water
 krg = state.relative_permeabilities.gas
 
-# Relative mobilities (cP⁻¹, kr/mu)
+# Relative mobilities (cP⁻¹, kr/mu, regular numpy arrays)
 lambda_o = state.relative_mobilities.oil
 lambda_w = state.relative_mobilities.water
 lambda_g = state.relative_mobilities.gas
 
-# Capillary pressures (psi)
+# Capillary pressures (psi, regular numpy arrays)
 pcow = state.capillary_pressures.oil_water
 pcog = state.capillary_pressures.gas_oil
 ```
+
+### Understanding SparseTensor
+
+Flow rates, formation volume factors, and bottom-hole pressures are stored as `SparseTensor` objects. A `SparseTensor` is a memory-efficient data structure that only stores non-zero entries (or more generally, non-default entries). This is especially useful for well-based quantities like injection rates, which are zero for most cells in the grid (wells only exist at a few locations).
+
+A `SparseTensor` behaves like a sparse array but remains fully compatible with NumPy. You can think of it as a smart dictionary that also knows its overall shape, default fill value, and data type.
+
+#### Common SparseTensor Operations
+
+**Dictionary-like access**: Access values by cell index, getting zero (or the default) for missing entries:
+
+```python
+# Get injection rate at a specific cell (returns 0.0 if no entry)
+oil_rate_at_cell = state.injection_rates.oil[(10, 20, 5)]
+
+# Check if a cell has an explicit entry
+if (10, 20, 5) in state.injection_rates.oil:
+    print("Cell has an injection entry")
+
+# Iterate over cells with non-zero rates
+for cell_index in state.injection_rates.oil:
+    rate = state.injection_rates.oil[cell_index]
+    print(f"Cell {cell_index}: oil injection rate = {rate} ft³/day")
+```
+
+**Properties and metadata**:
+
+```python
+# Number of explicitly stored (non-default) entries
+num_injection_cells = state.injection_rates.oil.nnz
+
+# Check if all entries are zero
+if state.injection_rates.oil.empty:
+    print("No oil injection")
+
+# Get shape (matches grid shape)
+tensor_shape = state.injection_rates.oil.shape
+```
+
+**Converting to dense NumPy arrays**:
+
+```python
+# Convert to a full 3D array (fills missing entries with 0.0)
+oil_rate_grid = state.injection_rates.oil.array()
+# oil_rate_grid has shape matching the reservoir grid, mostly zeros
+
+# Convert to a Python nested list
+oil_rate_list = state.injection_rates.oil.dense()
+
+# Extract as a plain NumPy array with a different dtype
+oil_rate_float32 = state.injection_rates.oil.array(dtype=np.float32)
+```
+
+**Arithmetic operations**:
+
+```python
+# SparseTensors support element-wise operations
+total_rate = state.injection_rates.oil + state.injection_rates.water
+
+# Scalar multiplication
+doubled_rates = state.injection_rates.oil * 2.0
+
+# Absolute value (useful for production, which is negative by convention)
+abs_production = abs(state.production_rates.oil)
+```
+
+#### Practical Example: Computing Total Well Rates
+
+```python
+# Sum all injection rates across all phases and cells
+total_oil_injection = state.injection_rates.oil.sum()
+total_water_injection = state.injection_rates.water.sum()
+total_gas_injection = state.injection_rates.gas.sum()
+
+print(f"Total oil injection: {total_oil_injection} ft³/day")
+
+# Convert reservoir rates to surface rates using FVF
+# (FVF = formation volume factor, which is also a SparseTensor)
+surface_oil_rate = state.injection_rates.oil.sum() / state.injection_formation_volume_factors.oil.array().mean()
+print(f"Surface oil rate (approximate): {surface_oil_rate} STB/day")
+
+# Get oil injection for a specific well's cells
+well_injection_cells = [(10, 20, 5), (10, 20, 6), (10, 20, 7)]  # Perforation cells
+well_oil_rate = sum(
+    state.injection_rates.oil[cell] 
+    for cell in well_injection_cells
+)
+print(f"Oil rate for this well: {well_oil_rate} ft³/day")
+```
+
+#### Working with Formation Volume Factors and Bottom-Hole Pressures
+
+Formation volume factors (FVF) and bottom-hole pressures are also stored as sparse tensors at well locations:
+
+```python
+# Check if specific well has injection bhp data
+well_cell = (10, 20, 5)
+if well_cell in state.injection_bhps.oil:
+    bhp = state.injection_bhps.oil[well_cell]
+    print(f"Oil injection BHP at {well_cell}: {bhp} psi")
+
+# Get all cells with FVF data (non-zero/non-default entries)
+for cell_index in state.injection_formation_volume_factors.oil:
+    fvf = state.injection_formation_volume_factors.oil[cell_index]
+    print(f"Cell {cell_index}: oil FVF = {fvf} bbls/STB")
+
+# Convert rates to surface production accounting for FVF
+# Production rates are negative by convention, so we take absolute value
+total_surface_oil = 0.0
+for cell in state.production_rates.oil:
+    reservoir_rate = abs(state.production_rates.oil[cell])
+    fvf = state.production_formation_volume_factors.oil[cell]
+    if fvf > 0:
+        surface_rate = reservoir_rate * 5.615 / fvf  # 5.615 ft³/bbl conversion
+        total_surface_oil += surface_rate
+print(f"Total surface oil production: {total_surface_oil} STB/day")
+```
+
+#### Number of Non-Zero Entries
+
+Check how many cells have well activity:
+
+```python
+# How many cells have oil injection?
+num_oil_injection_cells = state.injection_rates.oil.nnz
+
+# How many active well perforations total?
+total_perforation_cells = (
+    state.injection_rates.oil.nnz +
+    state.injection_rates.water.nnz +
+    state.injection_rates.gas.nnz +
+    state.production_rates.oil.nnz +
+    state.production_rates.water.nnz +
+    state.production_rates.gas.nnz
+)
+print(f"Total well perforation cells active: {total_perforation_cells}")
+```
+
+#### Why SparseTensor Instead of Dense Arrays?
+
+Wells (sources/sinks) only exist at a few grid cells—typically 1-10 cells per well out of 100,000+ total cells. A dense array would waste most of its memory storing zeros. By using a sparse representation, BORES:
+
+- **Saves memory**: Only stores cells with non-zero rates
+- **Improves performance**: Iterations only touch cells with data
+- **Preserves precision**: No loss of information when converting between sparse and dense forms
+
+When you need a regular NumPy array for analysis, use `.array()` to materialize the dense form. When you're just querying rates for post-processing, iterate directly over the sparse tensor to avoid allocating the full grid.
 
 ### Well Information
 
@@ -151,9 +316,9 @@ The core idea is that you iterate through states exactly once during the simulat
 
 ```python
 from bores.streams import StateStream
-from bores.stores import ZarrStore
+from bores.stores import HDF5Store
 
-store = ZarrStore("simulation_run.zarr")
+store = HDF5Store("simulation_run.h5")
 
 with StateStream(
     states=bores.run(model, config),
@@ -209,8 +374,8 @@ The `consume()` method exhausts the entire stream without yielding any states to
 ```python
 stream = StateStream(
     states=bores.run(model, config),
-    store=ZarrStore("run.zarr"),
-    checkpoint_store=ZarrStore("checkpoints.zarr"),
+    store=HDF5Store("run.h5"),
+    checkpoint_store=HDF5Store("checkpoints.h5"),
     checkpoint_interval=100,
 )
 stream.consume()  # States saved and checkpointed, nothing returned
@@ -360,7 +525,7 @@ When `background_io=True`, disk writes happen in a separate thread, allowing the
 ```python
 with StateStream(
     states=bores.run(model, config),
-    store=ZarrStore("run.zarr"),
+    store=HDF5Store("run.h5"),
     background_io=True,
     max_queue_size=50,
 ) as stream:
@@ -398,8 +563,8 @@ For long-running simulations, checkpointing saves the state at regular intervals
 ```python
 with StateStream(
     states=bores.run(model, config),
-    store=ZarrStore("full_run.zarr"),
-    checkpoint_store=ZarrStore("checkpoints.zarr"),
+    store=HDF5Store("full_run.h5"),
+    checkpoint_store=HDF5Store("checkpoints.h5"),
     checkpoint_interval=100,
 ) as stream:
     for state in stream:
@@ -435,11 +600,11 @@ The most common workflow is to run a simulation with streaming persistence, then
 
 ```python
 import bores
-from bores.stores import ZarrStore
+from bores.stores import HDF5Store
 from bores.streams import StateStream
 from bores.analyses import ModelAnalyst
 
-store = ZarrStore("simulation.zarr")
+store = HDF5Store("simulation.h5")
 with StateStream(
     states=bores.run(model, config),
     store=store,

@@ -78,7 +78,7 @@ Read the error message. It tells you which parameter failed and what the valid r
 
 3. **Switch to 64-bit precision.** Ill-conditioned matrices are more sensitive to floating-point precision. Call `bores.use_64bit_precision()` before building the model.
 
-4. **Reduce the timestep.** Set a smaller `max_step_size` in the timer to keep matrices better conditioned.
+4. **Reduce the timestep.** Set a smaller `maximum_step_size` in the timer to keep matrices better conditioned.
 
 5. **Check the model.** Extreme property contrasts may indicate a model setup error (e.g., a permeability of 0 in a cell that should be part of the flow domain).
 
@@ -94,13 +94,13 @@ See [Solver Selection](solver-selection.md) for detailed guidance.
 
 **Negative pressures.** If the pressure in any cell drops below zero, the simulation raises a `SimulationError`. This usually means wells are producing at a rate that exceeds the reservoir's deliverability. Check your well controls and make sure production rates are achievable at the given reservoir pressure.
 
-**Timestep at minimum.** If the adaptive timer reduces the timestep to `min_step_size` and the step still fails, a `SimulationError` is raised because the simulation cannot make progress. This typically indicates a fundamental model problem (unphysical properties, extreme boundary conditions, or a well operating far outside its capacity).
+**Timestep at minimum.** If the adaptive timer reduces the timestep to `minimum_step_size` and the step still fails, a `SimulationError` is raised because the simulation cannot make progress. This typically indicates a fundamental model problem (unphysical properties, extreme boundary conditions, or a well operating far outside its capacity).
 
-**Saturation constraint violations.** If saturations go negative or exceed 1 after the explicit saturation update, this indicates that the CFL condition was violated. The timer should catch this and reduce the timestep, but if `min_step_size` is too large to maintain stability, the simulation will fail.
+**Saturation constraint violations.** If saturations go negative or exceed 1 after the explicit saturation update, this indicates that the CFL condition was violated. The timer should catch this and reduce the timestep, but if `minimum_step_size` is too large to maintain stability, the simulation will fail.
 
 ### How to Fix
 
-1. **Lower `min_step_size`** in the timer to give the adaptive controller more room to reduce the timestep.
+1. **Lower `minimum_step_size`** in the timer to give the adaptive controller more room to reduce the timestep.
 
 2. **Check well controls.** Make sure production rates are reasonable for the reservoir pressure and permeability. Use `BHPControl` with a minimum BHP to prevent wells from drawing pressure below a physical limit.
 
@@ -116,19 +116,19 @@ See [Solver Selection](solver-selection.md) for detailed guidance.
 
 ### Common Causes
 
-**Invalid timer parameters.** Setting `min_step_size` greater than `max_step_size`, or `initial_step_size` outside the min/max range, will raise a `TimingError`.
+**Invalid timer parameters.** Setting `minimum_step_size` greater than `maximum_step_size`, or `initial_step_size` outside the min/max range, will raise a `TimingError`.
 
 **Simulation time is zero or negative.** The `simulation_time` parameter must be a positive number representing the total simulation duration in seconds.
 
 ### How to Fix
 
-Check that your timer parameters are consistent: `min_step_size <= initial_step_size <= max_step_size` and `simulation_time > 0`. Use the `Time()` helper to convert from human-readable units:
+Check that your timer parameters are consistent: `minimum_step_size <= initial_step_size <= maximum_step_size` and `simulation_time > 0`. Use the `Time()` helper to convert from human-readable units:
 
 ```python
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1),
-    max_step_size=bores.Time(days=30),
-    min_step_size=bores.Time(seconds=1),
+    maximum_step_size=bores.Time(days=30),
+    minimum_step_size=bores.Time(seconds=1),
     simulation_time=bores.Time(years=5),
 )
 ```
@@ -208,6 +208,6 @@ When a simulation fails, follow this sequence:
 
 4. **Try 64-bit precision.** Many convergence and accuracy issues are caused by insufficient floating-point precision. This is a quick test that rules out (or confirms) precision as the cause.
 
-5. **Reduce the timestep.** Set a smaller `max_step_size` and `initial_step_size`. If the simulation works with tiny timesteps, the problem is a CFL or convergence issue that the adaptive controller cannot handle at larger steps.
+5. **Reduce the timestep.** Set a smaller `maximum_step_size` and `initial_step_size`. If the simulation works with tiny timesteps, the problem is a CFL or convergence issue that the adaptive controller cannot handle at larger steps.
 
 6. **Check units.** BORES uses oil-field units throughout: pressure in psi, temperature in degrees Fahrenheit, density in lbm/ft³, viscosity in cP, length in feet, time in seconds (internally). Mixing SI and oil-field values is a common source of non-physical results.

@@ -2137,77 +2137,120 @@ class BrooksCoreyThreePhaseRelPermModel(
         sg = np.atleast_1d(gas_saturation)
         sw, so, sg = np.broadcast_arrays(sw, so, sg)
         zeros = np.zeros_like(sw)
-        saturation_epsilon = c.SATURATION_EPSILON
         minimum_mobile_pore_space = c.MINIMUM_MOBILE_PORE_SPACE
 
         if wettability == Wettability.OIL_WET:
-            finite_difference_epsilon = c.FINITE_DIFFERENCE_EPSILON
-            inv_2_epsilon = 1.0 / (2.0 * finite_difference_epsilon)
-
-            def _corey(sw, so, sg):
-                # Clamp to valid range before calling
-                sw = np.clip(sw, 0.0, 1.0)
-                sg = np.clip(sg, 0.0, 1.0)
-                so = np.clip(1.0 - sw - sg, 0.0, 1.0)
-                return compute_corey_three_phase_relative_permeabilities(
-                    water_saturation=sw,
-                    oil_saturation=so,
-                    gas_saturation=sg,
-                    irreducible_water_saturation=Swc,  # type: ignore[arg-type]
-                    residual_oil_saturation_water=Sorw,  # type: ignore[arg-type]
-                    residual_oil_saturation_gas=Sorg,  # type: ignore[arg-type]
-                    residual_gas_saturation=Sgr,  # type: ignore[arg-type]
-                    water_exponent=water_exponent,
-                    oil_exponent=oil_exponent,
-                    gas_exponent=gas_exponent,
-                    wettability=wettability,
-                    mixing_rule=mixing_rule,
-                    saturation_epsilon=saturation_epsilon,
-                    minimum_mobile_pore_space=minimum_mobile_pore_space,
-                )
-
-            # dSw: perturb Sw, adjust So = 1 - Sw - Sg to maintain constraint
-            krw_sw_fwd, kro_sw_fwd, krg_sw_fwd = _corey(
-                sw + finite_difference_epsilon,
-                1.0 - (sw + finite_difference_epsilon) - sg,
-                sg,
+            # kro (wetting, depends on So)
+            movable_oil_range = 1.0 - Sorw - Sorg  # type: ignore
+            max_residual = np.minimum(Sorw, Sorg)  # type: ignore
+            valid_oil = movable_oil_range > minimum_mobile_pore_space
+            se_o = np.clip(
+                (so - max_residual) / np.where(valid_oil, movable_oil_range, 1.0),
+                0.0,
+                1.0,
             )
-            krw_sw_bwd, kro_sw_bwd, krg_sw_bwd = _corey(
-                sw - finite_difference_epsilon,
-                1.0 - (sw - finite_difference_epsilon) - sg,
-                sg,
+            kro_vals = se_o**oil_exponent
+
+            # dkro/dSo (direct), then dkro/dSw = -dkro/dSo, dkro/dSg = -dkro/dSo
+            d_kro_d_so = np.where(
+                valid_oil & (se_o > 0.0),
+                oil_exponent * se_o ** max(oil_exponent - 1.0, 0.0) / movable_oil_range,
+                zeros,
+            )
+            d_kro_d_sw = zeros.copy()
+            d_kro_d_sg = zeros.copy()
+
+            # krg (non-wetting, depends on Sg)
+            movable_gas_range = 1.0 - Sgr - Swc  # type: ignore
+            valid_gas = movable_gas_range > minimum_mobile_pore_space
+            se_g = np.clip(
+                (sg - Sgr) / np.where(valid_gas, movable_gas_range, 1.0),
+                0.0,
+                1.0,
+            )
+            krg_vals = se_g**gas_exponent
+
+            d_krg_d_sg = np.where(
+                valid_gas & (se_g > 0.0),
+                gas_exponent * se_g ** max(gas_exponent - 1.0, 0.0) / movable_gas_range,
+                zeros,
+            )
+            d_krg_d_sw = zeros.copy()
+            d_krg_d_so = zeros.copy()
+
+            # krw (intermediate phase, via mixing rule)
+            # kro_proxy = (1-kro)^nw,  krg_proxy = (1-krg)^nw
+            one_minus_kro = np.clip(1.0 - kro_vals, 0.0, None)
+            one_minus_krg = np.clip(1.0 - krg_vals, 0.0, None)
+            kro_proxy = one_minus_kro**water_exponent
+            krg_proxy = one_minus_krg**water_exponent
+
+            # d(kro_proxy)/dSo, then chain to dSw/dSg via So=1-Sw-Sg
+            d_kro_proxy_d_so = np.where(
+                one_minus_kro > 0.0,
+                water_exponent
+                * one_minus_kro ** max(water_exponent - 1.0, 0.0)
+                * (-d_kro_d_so),
+                zeros,
+            )
+            d_kro_proxy_d_sw = -d_kro_proxy_d_so  # So = 1-Sw-Sg
+            d_kro_proxy_d_sg = -d_kro_proxy_d_so
+
+            # d(krg_proxy)/dSg (krg depends only on Sg)
+            d_krg_proxy_d_sg = np.where(
+                one_minus_krg > 0.0,
+                water_exponent
+                * one_minus_krg ** max(water_exponent - 1.0, 0.0)
+                * (-d_krg_d_sg),
+                zeros,
+            )
+            d_krg_proxy_d_sw = zeros.copy()
+            d_krg_proxy_d_so = zeros.copy()
+
+            # Mixing rule partial derivatives (FD on mixing rule only, 10 evals)
+            (
+                d_krw_d_kro_proxy,
+                d_krw_d_krg_proxy,
+                d_krw_d_sw_explicit,
+                d_krw_d_so_explicit,
+                d_krw_d_sg_explicit,
+            ) = _mixing_rule_partial_derivatives(
+                mixing_rule=mixing_rule,
+                kro_water_two_phase=kro_proxy,
+                kro_gas_two_phase=krg_proxy,
+                water_saturation=sw,
+                oil_saturation=so,
+                gas_saturation=sg,
+                epsilon=c.FINITE_DIFFERENCE_EPSILON,
             )
 
-            # dSg: perturb Sg, adjust So = 1 - Sw - Sg to maintain constraint
-            krw_sg_fwd, kro_sg_fwd, krg_sg_fwd = _corey(
-                sw,
-                1.0 - sw - (sg + finite_difference_epsilon),
-                sg + finite_difference_epsilon,
+            # Chain rule for krw
+            d_krw_d_sw = (
+                d_krw_d_kro_proxy * d_kro_proxy_d_sw
+                + d_krw_d_krg_proxy * d_krg_proxy_d_sw
+                + d_krw_d_sw_explicit
             )
-            krw_sg_bwd, kro_sg_bwd, krg_sg_bwd = _corey(
-                sw,
-                1.0 - sw - (sg - finite_difference_epsilon),
-                sg - finite_difference_epsilon,
+            d_krw_d_so = (
+                d_krw_d_kro_proxy * d_kro_proxy_d_so
+                + d_krw_d_krg_proxy * d_krg_proxy_d_so
+                + d_krw_d_so_explicit
+            )
+            d_krw_d_sg = (
+                d_krw_d_kro_proxy * d_kro_proxy_d_sg
+                + d_krw_d_krg_proxy * d_krg_proxy_d_sg
+                + d_krw_d_sg_explicit
             )
 
-            # dSo: So is not a free variable (So = 1 - Sw - Sg), so its derivatives
-            # are derived from the Sw and Sg derivatives via the chain rule.
-            # dkr/dSo = -dkr/dSw - dkr/dSg (since dSo = -dSw - dSg)
-            # We still compute it for interface compatibility.
             results = (
-                (krw_sw_fwd - krw_sw_bwd) * inv_2_epsilon,  # dkrw/dSw
-                (kro_sw_fwd - kro_sw_bwd) * inv_2_epsilon,  # dkro/dSw
-                (krg_sw_fwd - krg_sw_bwd) * inv_2_epsilon,  # dkrg/dSw
-                # dkr/dSo = -dkr/dSw - dkr/dSg from chain rule
-                -((krw_sw_fwd - krw_sw_bwd) + (krw_sg_fwd - krw_sg_bwd))
-                * inv_2_epsilon,
-                -((kro_sw_fwd - kro_sw_bwd) + (kro_sg_fwd - kro_sg_bwd))
-                * inv_2_epsilon,
-                -((krg_sw_fwd - krg_sw_bwd) + (krg_sg_fwd - krg_sg_bwd))
-                * inv_2_epsilon,
-                (krw_sg_fwd - krw_sg_bwd) * inv_2_epsilon,  # dkrw/dSg
-                (kro_sg_fwd - kro_sg_bwd) * inv_2_epsilon,  # dkro/dSg
-                (krg_sg_fwd - krg_sg_bwd) * inv_2_epsilon,  # dkrg/dSg
+                d_krw_d_sw,
+                d_kro_d_sw,
+                d_krg_d_sw,
+                d_krw_d_so,
+                d_kro_d_so,
+                d_krg_d_so,
+                d_krw_d_sg,
+                d_kro_d_sg,
+                d_krg_d_sg,
             )
             if is_scalar:
                 results = tuple(float(np.ravel(r)[0]) for r in results)
@@ -3022,80 +3065,144 @@ class LETThreePhaseRelPermModel(
         sg = np.atleast_1d(gas_saturation)
         sw, so, sg = np.broadcast_arrays(sw, so, sg)
         zeros = np.zeros_like(sw)
-        saturation_epsilon = c.SATURATION_EPSILON
         minimum_mobile_pore_space = c.MINIMUM_MOBILE_PORE_SPACE
 
         if wettability == Wettability.OIL_WET:
-            finite_difference_epsilon = c.FINITE_DIFFERENCE_EPSILON
-            inv_2_epsilon = 1.0 / (2.0 * finite_difference_epsilon)
+            # kro (wetting, depends on So)
+            movable_oil_range = 1.0 - Sorw - Sorg  # type: ignore
+            max_residual = np.minimum(Sorw, Sorg)  # type: ignore
+            valid_oil = movable_oil_range > minimum_mobile_pore_space
+            se_o = np.clip(
+                (so - max_residual) / np.where(valid_oil, movable_oil_range, 1.0),
+                0.0,
+                1.0,
+            )
 
-            def _let(sw, so, sg):
-                sw = np.clip(sw, 0.0, 1.0)
-                sg = np.clip(sg, 0.0, 1.0)
-                so = np.clip(1.0 - sw - sg, 0.0, 1.0)
-                return compute_let_three_phase_relative_permeabilities(
-                    water_saturation=sw,
-                    oil_saturation=so,
-                    gas_saturation=sg,
-                    irreducible_water_saturation=Swc,  # type: ignore[arg-type]
-                    residual_oil_saturation_water=Sorw,  # type: ignore[arg-type]
-                    residual_oil_saturation_gas=Sorg,  # type: ignore[arg-type]
-                    residual_gas_saturation=Sgr,  # type: ignore[arg-type]
-                    water_L=water_params.L,
-                    water_E=water_params.E,
-                    water_T=water_params.T,
-                    oil_water_L=oil_water_params.L,
-                    oil_water_E=oil_water_params.E,
-                    oil_water_T=oil_water_params.T,
-                    gas_oil_L=gas_oil_params.L,
-                    gas_oil_E=gas_oil_params.E,
-                    gas_oil_T=gas_oil_params.T,
-                    gas_L=gas_params.L,
-                    gas_E=gas_params.E,
-                    gas_T=gas_params.T,
-                    max_water_relperm=krw_max,
-                    max_oil_relperm=kro_max,
-                    max_gas_relperm=krg_max,
-                    wettability=wettability,
-                    mixing_rule=mixing_rule,
-                    saturation_epsilon=saturation_epsilon,
-                    minimum_mobile_pore_space=minimum_mobile_pore_space,
+            d_kro_d_so = np.where(
+                valid_oil,
+                _let_curve_slope_wrt_normalized_saturation(
+                    se_o,
+                    oil_water_params.L,
+                    oil_water_params.E,
+                    oil_water_params.T,
+                    kro_max,
                 )
+                / movable_oil_range,
+                zeros,
+            )
+            d_kro_d_sw = zeros.copy()
+            d_kro_d_sg = zeros.copy()
 
-            krw_sw_fwd, kro_sw_fwd, krg_sw_fwd = _let(
-                sw + finite_difference_epsilon,
-                1.0 - (sw + finite_difference_epsilon) - sg,
-                sg,
+            # krg (non-wetting, depends on Sg)
+            movable_gas_range = 1.0 - Sgr - Swc  # type: ignore
+            valid_gas = movable_gas_range > minimum_mobile_pore_space
+            se_g = np.clip(
+                (sg - Sgr) / np.where(valid_gas, movable_gas_range, 1.0),
+                0.0,
+                1.0,
             )
-            krw_sw_bwd, kro_sw_bwd, krg_sw_bwd = _let(
-                sw - finite_difference_epsilon,
-                1.0 - (sw - finite_difference_epsilon) - sg,
-                sg,
+
+            d_krg_d_sg = np.where(
+                valid_gas,
+                _let_curve_slope_wrt_normalized_saturation(
+                    se_g, gas_params.L, gas_params.E, gas_params.T, krg_max
+                )
+                / movable_gas_range,
+                zeros,
             )
-            krw_sg_fwd, kro_sg_fwd, krg_sg_fwd = _let(
-                sw,
-                1.0 - sw - (sg + finite_difference_epsilon),
-                sg + finite_difference_epsilon,
+            d_krg_d_sw = zeros.copy()
+            d_krg_d_so = zeros.copy()
+
+            # krw (intermediate, via mixing rule)
+            # Two-phase krw proxies (unit-endpoint, same as forward path)
+            movable_water_range_ow = 1.0 - Swc - Sorw  # type: ignore
+            valid_water_ow = movable_water_range_ow > minimum_mobile_pore_space
+            se_w_ow = np.clip(
+                (sw - Swc) / np.where(valid_water_ow, movable_water_range_ow, 1.0),
+                0.0,
+                1.0,
             )
-            krw_sg_bwd, kro_sg_bwd, krg_sg_bwd = _let(
-                sw,
-                1.0 - sw - (sg - finite_difference_epsilon),
-                sg - finite_difference_epsilon,
+            krw_ow = _let_relperm(
+                se_w_ow, water_params.L, water_params.E, water_params.T
+            )
+
+            movable_water_range_gw = 1.0 - Swc - Sgr  # type: ignore
+            valid_water_gw = movable_water_range_gw > minimum_mobile_pore_space
+            se_w_gw = np.clip(
+                (sw - Swc) / np.where(valid_water_gw, movable_water_range_gw, 1.0),
+                0.0,
+                1.0,
+            )
+            krw_gw = _let_relperm(
+                se_w_gw, water_params.L, water_params.E, water_params.T
+            )
+
+            # d(krw_ow)/dSw — depends only on Sw
+            d_krw_ow_d_sw = np.where(
+                valid_water_ow,
+                _let_curve_slope_wrt_normalized_saturation(
+                    se_w_ow, water_params.L, water_params.E, water_params.T, 1.0
+                )
+                / movable_water_range_ow,
+                zeros,
+            )
+            # d(krw_gw)/dSw — depends only on Sw
+            d_krw_gw_d_sw = np.where(
+                valid_water_gw,
+                _let_curve_slope_wrt_normalized_saturation(
+                    se_w_gw, water_params.L, water_params.E, water_params.T, 1.0
+                )
+                / movable_water_range_gw,
+                zeros,
+            )
+            # krw_ow and krw_gw have no So or Sg dependence
+            d_krw_ow_d_so = zeros.copy()
+            d_krw_ow_d_sg = zeros.copy()
+            d_krw_gw_d_so = zeros.copy()
+            d_krw_gw_d_sg = zeros.copy()
+
+            (
+                d_krw_d_krw_ow,
+                d_krw_d_krw_gw,
+                d_krw_d_sw_explicit,
+                d_krw_d_so_explicit,
+                d_krw_d_sg_explicit,
+            ) = _mixing_rule_partial_derivatives(
+                mixing_rule=mixing_rule,
+                kro_water_two_phase=krw_ow,
+                kro_gas_two_phase=krw_gw,
+                water_saturation=sw,
+                oil_saturation=so,
+                gas_saturation=sg,
+                epsilon=c.FINITE_DIFFERENCE_EPSILON,
+            )
+
+            d_krw_d_sw = krw_max * (
+                d_krw_d_krw_ow * d_krw_ow_d_sw
+                + d_krw_d_krw_gw * d_krw_gw_d_sw
+                + d_krw_d_sw_explicit
+            )
+            d_krw_d_so = krw_max * (
+                d_krw_d_krw_ow * d_krw_ow_d_so
+                + d_krw_d_krw_gw * d_krw_gw_d_so
+                + d_krw_d_so_explicit
+            )
+            d_krw_d_sg = krw_max * (
+                d_krw_d_krw_ow * d_krw_ow_d_sg
+                + d_krw_d_krw_gw * d_krw_gw_d_sg
+                + d_krw_d_sg_explicit
             )
 
             results = (
-                (krw_sw_fwd - krw_sw_bwd) * inv_2_epsilon,
-                (kro_sw_fwd - kro_sw_bwd) * inv_2_epsilon,
-                (krg_sw_fwd - krg_sw_bwd) * inv_2_epsilon,
-                -((krw_sw_fwd - krw_sw_bwd) + (krw_sg_fwd - krw_sg_bwd))
-                * inv_2_epsilon,
-                -((kro_sw_fwd - kro_sw_bwd) + (kro_sg_fwd - kro_sg_bwd))
-                * inv_2_epsilon,
-                -((krg_sw_fwd - krg_sw_bwd) + (krg_sg_fwd - krg_sg_bwd))
-                * inv_2_epsilon,
-                (krw_sg_fwd - krw_sg_bwd) * inv_2_epsilon,
-                (kro_sg_fwd - kro_sg_bwd) * inv_2_epsilon,
-                (krg_sg_fwd - krg_sg_bwd) * inv_2_epsilon,
+                d_krw_d_sw,
+                d_kro_d_sw,
+                d_krg_d_sw,
+                d_krw_d_so,
+                d_kro_d_so,
+                d_krg_d_so,
+                d_krw_d_sg,
+                d_kro_d_sg,
+                d_krg_d_sg,
             )
             if is_scalar:
                 results = tuple(float(np.ravel(r)[0]) for r in results)

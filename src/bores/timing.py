@@ -6,7 +6,7 @@ from collections import deque
 from datetime import timedelta
 
 import attrs
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
 
 from bores.constants import c
 from bores.errors import TimingError, ValidationError
@@ -57,7 +57,7 @@ def Time(
     return delta.total_seconds()
 
 
-class StepMetricsDict(typing.TypedDict):
+class StepMetricsDict(TypedDict):
     """Dictionary representation of step metrics."""
 
     step_number: int
@@ -67,21 +67,21 @@ class StepMetricsDict(typing.TypedDict):
     success: bool
 
 
-class TimerState(typing.TypedDict):
+class TimerState(TypedDict):
     """Complete state of a timer instance for serialization."""
 
     initial_step_size: float
-    max_step_size: float
-    min_step_size: float
+    maximum_step_size: float
+    minimum_step_size: float
     simulation_time: float
     maximum_cfl_number: float
     cfl_safety_margin: float
     ramp_up_factor: typing.Optional[float]
     backoff_factor: float
     aggressive_backoff_factor: float
-    max_steps: typing.Optional[int]
-    max_rejections: int
-    max_growth_per_step: float
+    maximum_steps: typing.Optional[int]
+    maximum_rejections: int
+    maximum_growth_per_step: float
     step_size_smoothing: float
     growth_cooldown_steps: int
     failure_memory_window: int
@@ -118,9 +118,9 @@ class Timer(StoreSerializable):
 
     initial_step_size: float
     """Initial time step size in seconds."""
-    max_step_size: float
+    maximum_step_size: float
     """Maximum allowable time step size in seconds."""
-    min_step_size: float
+    minimum_step_size: float
     """Minimum allowable time step size in seconds."""
     simulation_time: float
     """Total simulation time in seconds."""
@@ -132,13 +132,13 @@ class Timer(StoreSerializable):
     """Factor by which to reduce time step size on failed steps."""
     aggressive_backoff_factor: float = 0.25
     """Factor by which to aggressively reduce time step size on failed steps."""
-    max_steps: typing.Optional[int] = None
+    maximum_steps: typing.Optional[int] = None
     """Maximum number of time steps to run for."""
 
     # Adaptive parameters
     growth_cooldown_steps: int = 5
     """Minimum successful steps required before allowing aggressive growth. Higher values lead to more conservative growth."""
-    max_growth_per_step: float = 1.3
+    maximum_growth_per_step: float = 1.3
     """Maximum multiplicative growth allowed per step (e.g., 1.3 = 30% max growth). Lower values lead to much smoother growth."""
     cfl_safety_margin: float = 0.85
     """Safety factor for CFL-based adjustments (target below max CFL)."""
@@ -162,7 +162,7 @@ class Timer(StoreSerializable):
     """Number of accepted time steps completed so far (0-indexed)."""
     last_step_failed: bool = attrs.field(init=False, default=False)
     """Whether the most recent step attempt was rejected."""
-    max_rejections: int = 10
+    maximum_rejections: int = 10
     """Maximum number of consecutive time step rejections allowed."""
     rejection_count: int = attrs.field(init=False, default=0)
     """Count of consecutive time step rejections."""
@@ -182,8 +182,8 @@ class Timer(StoreSerializable):
         self.step_size = self.initial_step_size
         self.ema_step_size = self.initial_step_size
         self.use_constant_step_size = (
-            self.initial_step_size == self.max_step_size
-            and self.initial_step_size == self.min_step_size
+            self.initial_step_size == self.maximum_step_size
+            and self.initial_step_size == self.minimum_step_size
         )
         self.recent_metrics = deque(maxlen=self.metrics_history_size)
         self.failed_step_sizes = deque(maxlen=self.failure_memory_window)
@@ -202,7 +202,7 @@ class Timer(StoreSerializable):
         # Use small tolerance for floating-point comparison
         if self.elapsed_time >= (self.simulation_time - 1e-9):
             return True
-        return self.max_steps is not None and self.step >= self.max_steps
+        return self.maximum_steps is not None and self.step >= self.maximum_steps
 
     @property
     def time_remaining(self) -> float:
@@ -215,7 +215,7 @@ class Timer(StoreSerializable):
         if self.time_remaining <= 0:
             return True
 
-        return self.max_steps is not None and self.step >= self.max_steps
+        return self.maximum_steps is not None and self.step >= self.maximum_steps
 
     def _is_near_failed_size(self, dt: float, tolerance: float = 0.15) -> bool:
         """Check if proposed step size is near a recently failed size."""
@@ -279,8 +279,8 @@ class Timer(StoreSerializable):
         remaining_time = self.time_remaining
         if dt > remaining_time:
             return (
-                max(remaining_time, self.min_step_size)
-                if remaining_time >= self.min_step_size
+                max(remaining_time, self.minimum_step_size)
+                if remaining_time >= self.minimum_step_size
                 else remaining_time
             )
 
@@ -318,20 +318,20 @@ class Timer(StoreSerializable):
         :param maximum_allowed_pressure_change: The allowed pressure change threshold.
         :return: The new/adjusted time step size in seconds.
         """
-        if self.rejection_count >= self.max_rejections:
+        if self.rejection_count >= self.maximum_rejections:
             raise TimingError(
                 "Maximum number of consecutive time step rejections exceeded"
             )
 
         # Warn when approaching rejection limit
-        rejection_threshold = int(0.7 * self.max_rejections)
+        rejection_threshold = int(0.7 * self.maximum_rejections)
         if (
             self.rejection_count >= rejection_threshold
-            and self.rejection_count < self.max_rejections
+            and self.rejection_count < self.maximum_rejections
         ):
             logger.warning(
                 f"Time step rejection count ({self.rejection_count}) is approaching "
-                f"maximum allowed ({self.max_rejections}). Consider adjusting simulation "
+                f"maximum allowed ({self.maximum_rejections}). Consider adjusting simulation "
                 f"parameters or initial conditions."
             )
 
@@ -365,27 +365,26 @@ class Timer(StoreSerializable):
         self.next_step_size *= factor
 
         # Warn when hitting minimum step size
-        if self.next_step_size < self.min_step_size:
+        if self.next_step_size < self.minimum_step_size:
             logger.warning(
                 f"Step size {self.next_step_size:.6e} would be below minimum "
-                f"{self.min_step_size:.6e}. Clamping to minimum."
+                f"{self.minimum_step_size:.6e}. Clamping to minimum."
             )
-        self.next_step_size = max(self.next_step_size, self.min_step_size)
+        self.next_step_size = max(self.next_step_size, self.minimum_step_size)
 
         # Check if we're stuck at minimum step size (panic mode detection)
-        if self.next_step_size <= self.min_step_size * 1.01:
+        if self.next_step_size <= self.minimum_step_size * 1.01:
             min_failures = sum(
-                1 for s in self.failed_step_sizes if s <= self.min_step_size * 1.1
+                1 for s in self.failed_step_sizes if s <= self.minimum_step_size * 1.1
             )
             if min_failures >= 3:
                 logger.error(
                     f"Repeated failures ({min_failures}) at or near minimum step size "
-                    f"({self.min_step_size:.6e}). Simulation may be unstable."
+                    f"({self.minimum_step_size:.6e}). Simulation may be unstable."
                 )
 
         # Update EMA to reflect the reduction
         self.ema_step_size = self.next_step_size
-
         self.last_step_failed = True
         self.rejection_count += 1
         self.steps_since_last_failure = 0
@@ -457,26 +456,26 @@ class Timer(StoreSerializable):
 
             if overshoot_ratio > 3.0:
                 # Very large saturation changes. Apply aggressive reduction
-                sat_factor = 0.25
+                saturation_factor = 0.25
                 logger.debug(
                     f"Severe saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
                 )
             elif overshoot_ratio > 2.0:
                 # Large saturation changes
-                sat_factor = 0.4
+                saturation_factor = 0.4
                 logger.debug(
                     f"Large saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
                 )
             else:
                 # Moderate overshoot. Apply proportional reduction
-                sat_factor = (
+                saturation_factor = (
                     maximum_allowed_saturation_change / maximum_saturation_change
                 )
-                sat_factor = max(sat_factor, 0.5)  # Don't reduce too much
+                saturation_factor = max(saturation_factor, 0.5)  # Don't reduce too much
                 logger.debug(
                     f"Moderate saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
                 )
-            factors.append(sat_factor)
+            factors.append(saturation_factor)
 
         # Pressure change backoff
         if (
@@ -514,25 +513,25 @@ class Timer(StoreSerializable):
         if newton_iterations is not None:
             if newton_iterations > 20:
                 # Solver really struggling. Apply aggressive reduction
-                newton_iter_factor = 0.3
+                newton_iteration_factor = 0.3
                 logger.debug(
                     f"Newton solver struggling severely: {newton_iterations} iterations"
                 )
-                factors.append(newton_iter_factor)
+                factors.append(newton_iteration_factor)
             elif newton_iterations > 15:
                 # Solver struggling. Apply moderate reduction
-                newton_iter_factor = 0.5
+                newton_iteration_factor = 0.5
                 logger.debug(
                     f"Newton solver struggling: {newton_iterations} iterations"
                 )
-                factors.append(newton_iter_factor)
+                factors.append(newton_iteration_factor)
             elif newton_iterations > 10:
                 # Solver having some difficulty
-                newton_iter_factor = 0.7
+                newton_iteration_factor = 0.7
                 logger.debug(
                     f"Newton solver having difficulty: {newton_iterations} iterations"
                 )
-                factors.append(newton_iter_factor)
+                factors.append(newton_iteration_factor)
 
         # If we have specific information, use the most conservative (smallest) factor
         if factors:
@@ -653,7 +652,7 @@ class Timer(StoreSerializable):
             cfl_ratio = target_cfl / maximum_cfl_encountered
 
             # Cap CFL-based growth to prevent wild jumps when CFL is very low
-            cfl_ratio = min(cfl_ratio, self.max_growth_per_step)
+            cfl_ratio = min(cfl_ratio, self.maximum_growth_per_step)
 
             # Be more conservative if we were close to the limit
             proximity_to_limit = maximum_cfl_encountered / maximum_cfl
@@ -683,47 +682,47 @@ class Timer(StoreSerializable):
             and maximum_allowed_saturation_change is not None
             and maximum_saturation_change > 0.0
         ):
-            sat_utilization = (
+            saturation_utilization = (
                 maximum_saturation_change / maximum_allowed_saturation_change
             )
 
-            if sat_utilization > 0.95:
+            if saturation_utilization > 0.95:
                 # Very close to limit. Reduce step size
-                sat_factor = 0.85
+                saturation_factor = 0.85
                 logger.debug(
-                    f"Saturation change very high ({sat_utilization:.2%}), reducing step"
+                    f"Saturation change very high ({saturation_utilization:.2%}), reducing step"
                 )
-            elif sat_utilization > 0.85:
+            elif saturation_utilization > 0.85:
                 # Getting close, maintain or slightly reduce
-                sat_factor = 0.95
+                saturation_factor = 0.95
                 logger.debug(
-                    f"Saturation change high ({sat_utilization:.2%}), maintaining step"
+                    f"Saturation change high ({saturation_utilization:.2%}), maintaining step"
                 )
-            elif sat_utilization > 0.7:
+            elif saturation_utilization > 0.7:
                 # Moderate usage, allow modest growth
-                sat_factor = 1.05
+                saturation_factor = 1.05
                 logger.debug(
-                    f"Saturation change moderate ({sat_utilization:.2%}), modest growth"
+                    f"Saturation change moderate ({saturation_utilization:.2%}), modest growth"
                 )
-            elif sat_utilization < 0.3:
+            elif saturation_utilization < 0.3:
                 # Very low usage, could grow more aggressively
-                sat_factor = min(
+                saturation_factor = min(
                     1.3,
                     maximum_allowed_saturation_change / maximum_saturation_change * 0.8,
                 )
                 logger.debug(
-                    f"Saturation change low ({sat_utilization:.2%}), allowing growth"
+                    f"Saturation change low ({saturation_utilization:.2%}), allowing growth"
                 )
             else:
                 # Normal range. Apply proportional adjustment
-                sat_factor = min(
+                saturation_factor = min(
                     1.15,
                     maximum_allowed_saturation_change / maximum_saturation_change * 0.9,
                 )
                 logger.debug(
-                    f"Saturation change normal ({sat_utilization:.2%}), proportional growth"
+                    f"Saturation change normal ({saturation_utilization:.2%}), proportional growth"
                 )
-            adjustment_factors.append(("Saturation", sat_factor))
+            adjustment_factors.append(("Saturation", saturation_factor))
 
         # Pressure change adjustment with intelligent scaling
         if (
@@ -731,33 +730,35 @@ class Timer(StoreSerializable):
             and maximum_allowed_pressure_change is not None
             and maximum_pressure_change > 0.0
         ):
-            pres_utilization = maximum_pressure_change / maximum_allowed_pressure_change
+            pressure_utilization = (
+                maximum_pressure_change / maximum_allowed_pressure_change
+            )
 
-            if pres_utilization > 0.95:
+            if pressure_utilization > 0.95:
                 # Very close to limit. Reduce step size
                 pressure_factor = 0.85
                 logger.debug(
-                    f"Pressure change very high ({pres_utilization:.2%}), reducing step"
+                    f"Pressure change very high ({pressure_utilization:.2%}), reducing step"
                 )
-            elif pres_utilization > 0.85:
+            elif pressure_utilization > 0.85:
                 # Getting close. Maintain or slightly reduce
                 pressure_factor = 0.95
                 logger.debug(
-                    f"Pressure change high ({pres_utilization:.2%}), maintaining step"
+                    f"Pressure change high ({pressure_utilization:.2%}), maintaining step"
                 )
-            elif pres_utilization > 0.7:
+            elif pressure_utilization > 0.7:
                 # Moderate usage. Allow modest growth
                 pressure_factor = 1.05
                 logger.debug(
-                    f"Pressure change moderate ({pres_utilization:.2%}), modest growth"
+                    f"Pressure change moderate ({pressure_utilization:.2%}), modest growth"
                 )
-            elif pres_utilization < 0.3:
+            elif pressure_utilization < 0.3:
                 # Very low usage, could grow more aggressively
                 pressure_factor = min(
                     1.3, maximum_allowed_pressure_change / maximum_pressure_change * 0.8
                 )
                 logger.debug(
-                    f"Pressure change low ({pres_utilization:.2%}), allowing growth"
+                    f"Pressure change low ({pressure_utilization:.2%}), allowing growth"
                 )
             else:
                 # Normal range. Apply proportional adjustment
@@ -766,7 +767,7 @@ class Timer(StoreSerializable):
                     maximum_allowed_pressure_change / maximum_pressure_change * 0.9,
                 )
                 logger.debug(
-                    f"Pressure change normal ({pres_utilization:.2%}), proportional growth"
+                    f"Pressure change normal ({pressure_utilization:.2%}), proportional growth"
                 )
             adjustment_factors.append(("Pressure", pressure_factor))
 
@@ -779,17 +780,17 @@ class Timer(StoreSerializable):
         # Newton iteration-based adjustment
         if newton_iterations is not None:
             if newton_iterations > 10:
-                newton_iter_factor = 0.7
+                newton_iteration_factor = 0.7
                 logger.debug(
                     f"High Newton iterations ({newton_iterations}), reducing step"
                 )
-                adjustment_factors.append(("Newton", newton_iter_factor))
+                adjustment_factors.append(("Newton", newton_iteration_factor))
             elif newton_iterations < 4 and self.steps_since_last_failure >= 3:
-                newton_iter_factor = 1.2
+                newton_iteration_factor = 1.2
                 logger.debug(
                     f"Low Newton iterations ({newton_iterations}), allowing growth"
                 )
-                adjustment_factors.append(("Newton", newton_iter_factor))
+                adjustment_factors.append(("Newton", newton_iteration_factor))
 
         # Apply all adjustment factors
         if adjustment_factors:
@@ -831,7 +832,7 @@ class Timer(StoreSerializable):
                 logger.debug("Ramp-up suppressed: too close to limits")
 
         # Limit growth rate relative to current step
-        max_allowed_growth = self.step_size * self.max_growth_per_step
+        max_allowed_growth = self.step_size * self.maximum_growth_per_step
         if dt > max_allowed_growth:
             logger.debug(f"Capping growth from {dt:.6e} to {max_allowed_growth:.6e}")
             dt = max_allowed_growth
@@ -844,8 +845,8 @@ class Timer(StoreSerializable):
             )
 
         # Enforce absolute bounds
-        dt = min(dt, self.max_step_size)
-        dt = max(dt, self.min_step_size)
+        dt = min(dt, self.maximum_step_size)
+        dt = max(dt, self.minimum_step_size)
 
         # Apply smoothing via EMA
         # Initialize EMA on first step (more robust than checking == 0.0)
@@ -895,17 +896,17 @@ class Timer(StoreSerializable):
         """
         return {
             "initial_step_size": self.initial_step_size,
-            "max_step_size": self.max_step_size,
-            "min_step_size": self.min_step_size,
+            "maximum_step_size": self.maximum_step_size,
+            "minimum_step_size": self.minimum_step_size,
             "simulation_time": self.simulation_time,
             "maximum_cfl_number": self.maximum_cfl_number,
             "cfl_safety_margin": self.cfl_safety_margin,
             "ramp_up_factor": self.ramp_up_factor,
             "backoff_factor": self.backoff_factor,
             "aggressive_backoff_factor": self.aggressive_backoff_factor,
-            "max_steps": self.max_steps,
-            "max_growth_per_step": self.max_growth_per_step,
-            "max_rejections": self.max_rejections,
+            "maximum_steps": self.maximum_steps,
+            "maximum_growth_per_step": self.maximum_growth_per_step,
+            "maximum_rejections": self.maximum_rejections,
             "step_size_smoothing": self.step_size_smoothing,
             "growth_cooldown_steps": self.growth_cooldown_steps,
             "failure_memory_window": self.failure_memory_window,
@@ -951,8 +952,8 @@ class Timer(StoreSerializable):
         """
         required_keys = {
             "initial_step_size",
-            "max_step_size",
-            "min_step_size",
+            "maximum_step_size",
+            "minimum_step_size",
             "simulation_time",
             "elapsed_time",
             "step",
@@ -964,17 +965,17 @@ class Timer(StoreSerializable):
 
         config_params = {
             "initial_step_size": state["initial_step_size"],
-            "max_step_size": state["max_step_size"],
-            "min_step_size": state["min_step_size"],
+            "maximum_step_size": state["maximum_step_size"],
+            "minimum_step_size": state["minimum_step_size"],
             "simulation_time": state["simulation_time"],
             "maximum_cfl_number": state.get("maximum_cfl_number", 1.0),
             "cfl_safety_margin": state.get("cfl_safety_margin", 0.9),
             "ramp_up_factor": state.get("ramp_up_factor"),
             "backoff_factor": state.get("backoff_factor", 0.5),
             "aggressive_backoff_factor": state.get("aggressive_backoff_factor", 0.25),
-            "max_steps": state.get("max_steps"),
-            "max_rejections": state.get("max_rejections", 10),
-            "max_growth_per_step": state.get("max_growth_per_step", 1.5),
+            "maximum_steps": state.get("maximum_steps"),
+            "maximum_rejections": state.get("maximum_rejections", 10),
+            "maximum_growth_per_step": state.get("maximum_growth_per_step", 1.5),
             "step_size_smoothing": state.get("step_size_smoothing", 0.7),
             "growth_cooldown_steps": state.get("growth_cooldown_steps", 5),
             "failure_memory_window": state.get("failure_memory_window", 10),

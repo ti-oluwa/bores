@@ -250,12 +250,13 @@ import numpy as np
 oil_water_capillary_pressure_table = bores.TwoPhaseCapillaryPressureTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
-    wetting_phase_saturation=np.array([0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80]),
+    reference_saturation=np.array([0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80]),
     capillary_pressure=np.array([25.0, 12.0, 7.5, 4.2, 2.8, 1.8, 1.0, 0.3]),
+    reference_phase="wetting",
 )
 ```
 
-The `wetting_phase_saturation` array must be monotonically increasing and contain at least two points. Capillary pressure values should decrease as wetting phase saturation increases (more water means lower capillary pressure in a water-wet system). BORES uses `np.interp` for fast linear interpolation between table points, with constant extrapolation beyond the table endpoints.
+The `reference_saturation` array must be monotonically increasing and contain at least two points. Capillary pressure values should decrease as wetting phase saturation increases (more water means lower capillary pressure in a water-wet system). BORES uses `np.interp` for fast linear interpolation between table points, with constant extrapolation beyond the table endpoints.
 
 You can query the table at any saturation value or with grid arrays:
 
@@ -276,20 +277,22 @@ For three-phase simulation, combine two `TwoPhaseCapillaryPressureTable` objects
 import bores
 import numpy as np
 
-# Oil-water capillary pressure (water is wetting phase)
+# Oil-water capillary pressure (water is wetting phase, indexed by Sw)
 oil_water_capillary_pressure = bores.TwoPhaseCapillaryPressureTable(
     wetting_phase=bores.FluidPhase.WATER,
     non_wetting_phase=bores.FluidPhase.OIL,
-    wetting_phase_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80]),
+    reference_saturation=np.array([0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80]),
     capillary_pressure=np.array([20.0, 8.5, 4.5, 2.8, 1.5, 0.7, 0.1]),
+    reference_phase="wetting",
 )
 
-# Gas-oil capillary pressure (oil is wetting phase)
+# Gas-oil capillary pressure (oil is wetting phase, indexed by So)
 gas_oil_capillary_pressure = bores.TwoPhaseCapillaryPressureTable(
     wetting_phase=bores.FluidPhase.OIL,
     non_wetting_phase=bores.FluidPhase.GAS,
-    wetting_phase_saturation=np.array([0.15, 0.25, 0.40, 0.55, 0.70, 0.85]),
+    reference_saturation=np.array([0.15, 0.25, 0.40, 0.55, 0.70, 0.85]),
     capillary_pressure=np.array([8.0, 4.5, 2.0, 1.0, 0.4, 0.05]),
+    reference_phase="wetting",
 )
 
 # Combine into three-phase table
@@ -299,7 +302,7 @@ three_phase_capillary_pressure = bores.ThreePhaseCapillaryPressureTable(
 )
 ```
 
-The `ThreePhaseCapillaryPressureTable` validates the phase assignments on construction. The oil-water table must have water and oil as its phases, the gas-oil table must have oil and gas, and the gas-oil table must have oil as the wetting phase. If any of these constraints are violated, BORES raises a `ValidationError`.
+The `ThreePhaseCapillaryPressureTable` validates the phase assignments on construction. The oil-water table must have water and oil as its phases, the gas-oil table must have oil and gas. If any of these constraints are violated, BORES raises a `ValidationError`.
 
 When computing capillary pressures during simulation, the three-phase table looks up $P_{cow}$ from the oil-water table using the wetting phase saturation and $P_{cgo}$ from the gas-oil table using the oil saturation. The two capillary pressures are independent (no mixing rule is needed, unlike relative permeability).
 
@@ -395,9 +398,6 @@ The `TwoPhaseCapillaryPressureTable` can be queried at any saturation using `get
 # Using the oil_water_capillary_pressure_table from earlier
 capillary_pressure_scalar = oil_water_capillary_pressure_table.get_capillary_pressure(0.45)
 print(f"Pcow at Sw=0.45: {capillary_pressure_scalar:.2f} psi")
-
-# Using __call__
-capillary_pressure_scalar = oil_water_capillary_pressure_table(wetting_phase_saturation=0.45)
 
 # Grid array query
 Sw_grid = np.random.uniform(0.2, 0.8, size=(20, 20, 5))

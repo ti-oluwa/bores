@@ -77,14 +77,14 @@ def setup_run():
     wells = bores.wells_(injectors=None, producers=[producer])
     timer = bores.Timer(
         initial_step_size=bores.Time(days=1),
-        max_step_size=bores.Time(days=15),
-        min_step_size=bores.Time(minutes=10.0),
+        maximum_step_size=bores.Time(days=15),
+        minimum_step_size=bores.Time(minutes=10.0),
         simulation_time=bores.Time(years=15),
-        max_cfl_number=0.9,
+        maximum_cfl_number=0.9,
         ramp_up_factor=1.2,
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,
-        max_rejections=20,
+        maximum_rejections=20,
     )
     run.config = run.config.with_updates(
         wells=wells,
