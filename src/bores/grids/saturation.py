@@ -880,27 +880,31 @@ def seed_phase_saturation(
 
     # Determine seed value
     if seed_saturation is not None:
-        seed = float(seed_saturation)
+        seed = seed_saturation
     else:
         assert relperm_table is not None  # guarded above
         # Build a representative initial saturation state to scan kr values.
         # Use minimum water saturation (connate) as the base Sw.
-        base_water_sat = (
-            float(np.min(water_saturation_grid))
-            if water_saturation_grid is not None
-            else 0.0
+        base_water_saturation = (
+            np.min(water_saturation_grid) if water_saturation_grid is not None else 0.0
         )
 
         if phase == FluidPhase.GAS:
             # Scan increasing Sg from 0 upward at connate Sw.
             # Step through candidate Sg values from the table by decrementing So.
-            # Use 100 evenly spaced Sg candidates from 0 to (1 - base_water_sat).
-            gas_sat_candidates = np.linspace(0.0, 1.0 - base_water_sat, 200)
-            oil_saturation_candidates = 1.0 - base_water_sat - gas_sat_candidates
+            # Use 100 evenly spaced Sg candidates from 0 to (1 - base_water_saturation).
+            gas_saturation_candidates = np.linspace(
+                0.0, 1.0 - base_water_saturation, 200
+            )
+            oil_saturation_candidates = (
+                1.0 - base_water_saturation - gas_saturation_candidates
+            )
             kr_values = relperm_table(
-                water_saturation=np.full_like(gas_sat_candidates, base_water_sat),
+                water_saturation=np.full_like(
+                    gas_saturation_candidates, base_water_saturation
+                ),
                 oil_saturation=oil_saturation_candidates,
-                gas_saturation=gas_sat_candidates,
+                gas_saturation=gas_saturation_candidates,
             )
             krg_values = np.asarray(kr_values["gas"])
             nonzero_mask = krg_values > 0.0
@@ -911,12 +915,12 @@ def seed_phase_saturation(
                 )
             first_nonzero_idx = int(np.argmax(nonzero_mask))
             # Step one candidate further into nonzero region for margin
-            target_idx = min(first_nonzero_idx + 1, len(gas_sat_candidates) - 1)
-            seed = float(gas_sat_candidates[target_idx])
+            target_idx = min(first_nonzero_idx + 1, len(gas_saturation_candidates) - 1)
+            seed = gas_saturation_candidates[target_idx]
 
         else:  # FluidPhase.WATER
-            # Scan increasing Sw from base_water_sat upward.
-            water_saturation_candidates = np.linspace(base_water_sat, 1.0, 200)
+            # Scan increasing Sw from base_water_saturation upward.
+            water_saturation_candidates = np.linspace(base_water_saturation, 1.0, 200)
             oil_saturation_candidates = 1.0 - water_saturation_candidates
             kr_values = relperm_table(
                 water_saturation=water_saturation_candidates,
@@ -934,7 +938,7 @@ def seed_phase_saturation(
             target_idx = min(
                 first_nonzero_idx + 1, len(water_saturation_candidates) - 1
             )
-            seed = float(water_saturation_candidates[target_idx])
+            seed = water_saturation_candidates[target_idx]
 
     # Apply seed at each cell
     target_phase_grid: NDimensionalGrid[NDimension] = (  # type: ignore[assignment]
@@ -943,19 +947,19 @@ def seed_phase_saturation(
 
     for cell in cells:
         i, j, k = cell
-        current = float(target_phase_grid[i, j, k])
+        current = target_phase_grid[i, j, k]
         if current >= seed:
             continue
 
         delta = seed - current
-        current_oil_sat = float(oil_saturation_grid[i, j, k])
-        if current_oil_sat - delta < 0.0:
+        current_oil_saturation = oil_saturation_grid[i, j, k]
+        if current_oil_saturation - delta < 0.0:
             raise ValidationError(
-                f"Cannot seed cell ({i}, {j}, {k}): oil saturation So={current_oil_sat:.6f} "
+                f"Cannot seed cell ({i}, {j}, {k}): oil saturation So={current_oil_saturation:.6f} "
                 f"is insufficient to absorb seed delta={delta:.6f}. "
                 "Reduce `seed_saturation` or check initial conditions."
             )
         target_phase_grid[i, j, k] = seed
-        oil_saturation_grid[i, j, k] = current_oil_sat - delta
+        oil_saturation_grid[i, j, k] = current_oil_saturation - delta
 
     return water_saturation_grid, oil_saturation_grid, gas_saturation_grid

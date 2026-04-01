@@ -51,7 +51,7 @@ timer = bores.Timer(
 
 The initial step size is the starting point for the adaptive algorithm. It should be conservative enough that the first few steps succeed without rejection. A good starting point is 0.5 to 2 days for most problems. If you start too large, the timer will reject the first few steps and reduce the size automatically, but each rejection wastes a solver call.
 
-The maximum step size caps how large the timer can grow. Even when conditions are very smooth, you generally do not want steps larger than 10 to 30 days because the linearization errors in PVT property updates accumulate. The minimum step size sets a floor below which the timer will not go. If the timer hits this floor repeatedly, it raises a `TimingError` after `max_rejects` consecutive rejections (default 10), indicating that the problem may be poorly configured.
+The maximum step size caps how large the timer can grow. Even when conditions are very smooth, you generally do not want steps larger than 10 to 30 days because the linearization errors in PVT property updates accumulate. The minimum step size sets a floor below which the timer will not go. If the timer hits this floor repeatedly, it raises a `TimingError` after `max_rejections` consecutive rejections (default 10), indicating that the problem may be poorly configured.
 
 ### Full Timer Parameters
 
@@ -66,7 +66,7 @@ The maximum step size caps how large the timer can grow. Even when conditions ar
 | `aggressive_backoff_factor` | 0.25 | Multiplier for severe rejections |
 | `ramp_up_factor` | `None` | Optional growth multiplier after cooldown |
 | `max_steps` | `None` | Optional hard limit on total step count |
-| `max_rejects` | 10 | Maximum consecutive rejections before error |
+| `max_rejections` | 10 | Maximum consecutive rejections before error |
 | `max_growth_per_step` | 1.3 | Maximum multiplicative growth per step (30%) |
 | `growth_cooldown_steps` | 5 | Successful steps required before ramp-up |
 | `cfl_safety_margin` | 0.85 | Safety factor applied to CFL targets |

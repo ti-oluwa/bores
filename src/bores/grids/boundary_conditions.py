@@ -185,7 +185,7 @@ def apply_boundary_conditions(
         time=time,
         pad_width=pad_width,
     )
-    # Since system is isothermal for now, no need for this
+    # Since black-oil system supported is isothermal for now, there's no need for this
     # apply_temperature_boundary_condition(
     #     padded_temperature_grid=padded_fluid_properties.temperature_grid,
     #     boundary_conditions=boundary_conditions,

@@ -13,9 +13,9 @@ from bores.correlations.arrays import compute_hydrocarbon_in_place
 from bores.errors import ValidationError
 from bores.grids.base import uniform_grid
 from bores.states import ModelState
-from bores.types import FluidPhase, NDimension, NDimensionalGrid
+from bores.types import NDimension
 from bores.utils import clip
-from bores.wells.base import Wells, _expand_intervals
+from bores.wells.base import _expand_intervals
 
 logger = logging.getLogger(__name__)
 
@@ -593,73 +593,6 @@ class InjectionFrontAnalysis:
     """
 
 
-def _build_injected_fvf_grids(
-    wells: Wells,
-    pressure_grid: NDimensionalGrid[NDimension],
-    temperature_grid: NDimensionalGrid[NDimension],
-    grid_shape: NDimension,
-) -> typing.Tuple[NDimensionalGrid[NDimension], NDimensionalGrid[NDimension]]:
-    """
-    Build per-cell grids of injected gas and water FVF using each
-    injector's actual InjectedFluid properties and vectorized PVT correlations.
-
-    Cells with no injection activity are NaN. Handles WAG and multi-fluid
-    scenarios correctly - each injector's fluid is used only for the cells
-    it perforates, using that fluid's specific gravity / salinity for FVF.
-
-    :param wells: Wells object containing injection wells.
-    :param pressure_grid: 3D pressure grid (psi).
-    :param temperature_grid: 3D temperature grid (°F).
-    :param grid_shape: Shape of the reservoir grid (nx, ny, nz).
-    :return: (injected_gas_fvf_grid, injected_water_fvf_grid)
-        all shaped `grid_shape`, NaN where no injection occurs.
-    """
-    injected_gas_fvf_grid = np.full(grid_shape, np.nan)
-    injected_water_fvf_grid = np.full(grid_shape, np.nan)
-
-    for well in wells.injection_wells:
-        if not well.is_open or well.injected_fluid is None:
-            continue
-
-        fluid = well.injected_fluid
-
-        # Collect all perforated cell indices for this well in one pass
-        i_coords, j_coords, k_coords = [], [], []
-        for start, end in well.perforating_intervals:
-            for i in range(start[0], end[0] + 1):
-                for j in range(start[1], end[1] + 1):
-                    for k in range(start[2], end[2] + 1):
-                        i_coords.append(i)
-                        j_coords.append(j)
-                        k_coords.append(k)
-
-        if not i_coords:
-            continue
-
-        idx = (
-            np.array(i_coords, dtype=np.intp),
-            np.array(j_coords, dtype=np.intp),
-            np.array(k_coords, dtype=np.intp),
-        )
-
-        # Extract pressure and temperature arrays for all perforated cells at once
-        cell_pressures = pressure_grid[idx].astype(np.float64)
-        cell_temperatures = temperature_grid[idx].astype(np.float64)
-
-        # Single vectorized FVF call for all perforated cells of this injector
-        fvf_values = fluid.get_formation_volume_factor(
-            pressure=cell_pressures,
-            temperature=cell_temperatures,
-        )
-
-        if fluid.phase == FluidPhase.GAS:
-            injected_gas_fvf_grid[idx] = fvf_values
-        elif fluid.phase == FluidPhase.WATER:
-            injected_water_fvf_grid[idx] = fvf_values
-
-    return injected_gas_fvf_grid, injected_water_fvf_grid  # type: ignore[return-value]
-
-
 class ModelAnalyst(typing.Generic[NDimension]):
     """
     Analysis tools for evaluating reservoir model performance over a series of states
@@ -980,12 +913,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
         :return: The total gas recovery factor as a fraction (0 to 1)
         """
         # Get initial gas in place
-        stgiip = self.stock_tank_gas_initially_in_place  # scf
+        stgiip = self.stock_tank_gas_initially_in_place
         if stgiip == 0:
             return 0.0
 
-        # Get cumulative free gas produced
-        free_gas_produced = self.cumulative_gas_produced  # scf (free gas only)
+        free_gas_produced = self.cumulative_gas_produced
 
         solution_gas_produced = 0.0
         dissolved_gas_produced = 0.0
@@ -997,16 +929,27 @@ class ModelAnalyst(typing.Generic[NDimension]):
             gas_solubility_in_water_grid = (
                 st.model.fluid_properties.gas_solubility_in_water_grid
             )
-            oil_production = st.production_rates.oil
-            water_production = st.production_rates.water
-
             step_in_days = st.step_size * days_per_second
-            oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
-            water_fvf_grid = (
-                st.model.fluid_properties.water_formation_volume_factor_grid
-            )
-            oil_production_stb = oil_production * ft3_to_bbl / oil_fvf_grid
-            water_production_stb = water_production * ft3_to_bbl / water_fvf_grid
+
+            oil_fvf_grid = st.production_formation_volume_factors.oil.array()
+            water_fvf_grid = st.production_formation_volume_factors.water.array()
+
+            oil_production = st.production_rates.oil.array()
+            water_production = st.production_rates.water.array()
+
+            # Avoid division by zero
+            with np.errstate(divide="ignore", invalid="ignore"):
+                oil_production_stb = np.where(
+                    oil_fvf_grid > 0,
+                    oil_production * ft3_to_bbl / oil_fvf_grid,
+                    0.0,
+                )
+                water_production_stb = np.where(
+                    water_fvf_grid > 0,
+                    water_production * ft3_to_bbl / water_fvf_grid,
+                    0.0,
+                )
+
             solution_gas_produced += float(
                 np.nansum(solution_gor_grid * oil_production_stb) * step_in_days
             )
@@ -1015,7 +958,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 * step_in_days
             )
 
-        # Total gas produced
         total_gas_produced = (
             free_gas_produced + solution_gas_produced + dissolved_gas_produced
         )
@@ -1149,7 +1091,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         if step in self._total_gas_in_place_cache:
             return self._total_gas_in_place_cache[step]
 
-        # STGIIP = GIIP_free + (STOIIP * Rs_initial)
         stgiip = self._stgiip
         if stgiip is None:
             if self._min_step in self._total_gas_in_place_cache:
@@ -1195,19 +1136,31 @@ class ModelAnalyst(typing.Generic[NDimension]):
                     acre_ft_to_bbl=acre_ft_to_bbl,
                     acre_ft_to_ft3=acre_ft_to_ft3,
                 )
-                stgiip_grid = giip_grid + (
-                    stoiip_grid * model.fluid_properties.solution_gas_to_oil_ratio_grid
+                stwiip_grid = compute_hydrocarbon_in_place(
+                    area=cell_area_grid,
+                    thickness=model.thickness_grid,
+                    porosity=model.rock_properties.porosity_grid,
+                    phase_saturation=model.fluid_properties.water_saturation_grid,
+                    formation_volume_factor=model.fluid_properties.water_formation_volume_factor_grid,
+                    net_to_gross_ratio=model.rock_properties.net_to_gross_ratio_grid,
+                    hydrocarbon_type="water",
+                    acre_ft_to_bbl=acre_ft_to_bbl,
+                    acre_ft_to_ft3=acre_ft_to_ft3,
+                )
+                stgiip_grid = (
+                    giip_grid
+                    + stoiip_grid
+                    * model.fluid_properties.solution_gas_to_oil_ratio_grid
+                    + stwiip_grid * model.fluid_properties.gas_solubility_in_water_grid
                 )
                 stgiip = float(np.nansum(stgiip_grid))
                 self._total_gas_in_place_cache[self._min_step] = stgiip
 
-        # Total gas change = free gas produced (net of injection) + solution gas produced with oil
-        # Solution gas produced = sum over steps of Rs * oil_production_stb * dt
-        # (Rs varies with pressure so we must integrate step by step, not use a single average)
         free_gas_produced = self.gas_produced(from_step=self._min_step, to_step=step)
         free_gas_injected = self.gas_injected(from_step=self._min_step, to_step=step)
 
         solution_gas_produced = 0.0
+        dissolved_gas_produced = 0.0
         days_per_second = c.DAYS_PER_SECOND
         ft3_to_bbl = c.CUBIC_FEET_TO_BARRELS
         for s in self._sorted_steps:
@@ -1215,17 +1168,44 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 break
 
             st = self._states[s]
-            oil_production = st.production_rates.oil
             step_in_days = st.step_size * days_per_second
-            oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
             solution_gor_grid = st.model.fluid_properties.solution_gas_to_oil_ratio_grid
-            oil_production_stb = oil_production * ft3_to_bbl / oil_fvf_grid
+            gas_solubility_in_water_grid = (
+                st.model.fluid_properties.gas_solubility_in_water_grid
+            )
+
+            oil_fvf_grid = st.production_formation_volume_factors.oil.array()
+            water_fvf_grid = st.production_formation_volume_factors.water.array()
+
+            oil_production = st.production_rates.oil.array()
+            water_production = st.production_rates.water.array()
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                oil_production_stb = np.where(
+                    oil_fvf_grid > 0,
+                    oil_production * ft3_to_bbl / oil_fvf_grid,
+                    0.0,
+                )
+                water_production_stb = np.where(
+                    water_fvf_grid > 0,
+                    water_production * ft3_to_bbl / water_fvf_grid,
+                    0.0,
+                )
+
             solution_gas_produced += float(
                 np.nansum(solution_gor_grid * oil_production_stb) * step_in_days
             )
+            dissolved_gas_produced += float(
+                np.nansum(gas_solubility_in_water_grid * water_production_stb)
+                * step_in_days
+            )
 
         self._total_gas_in_place_cache[step] = (
-            stgiip + free_gas_injected - free_gas_produced - solution_gas_produced
+            stgiip
+            + free_gas_injected
+            - free_gas_produced
+            - solution_gas_produced
+            - dissolved_gas_produced
         )
         return self._total_gas_in_place_cache[step]
 
@@ -1376,7 +1356,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         )
         total_production = 0.0
 
-        # Compute mask once before the loop; `grid_shape` is constant across steps
         mask = None
         if cells_obj is not None:
             first_state = next(
@@ -1399,13 +1378,17 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            # Production is in ft³/day, convert to STB using FVF
-            oil_production = state.production_rates.oil
+            oil_production = state.production_rates.oil.array()
             step_in_days = state.step_size * days_per_second
-            oil_fvf_grid = state.model.fluid_properties.oil_formation_volume_factor_grid
-            oil_production_stb = oil_production * ft3_to_bbl / oil_fvf_grid
+            oil_fvf_grid = state.production_formation_volume_factors.oil.array()
 
-            # Apply mask if filtering
+            with np.errstate(divide="ignore", invalid="ignore"):
+                oil_production_stb = np.where(
+                    oil_fvf_grid > 0,
+                    oil_production * ft3_to_bbl / oil_fvf_grid,
+                    0.0,
+                )
+
             if mask is not None:
                 oil_production_stb = oil_production_stb * mask
 
@@ -1475,13 +1458,17 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            # Production is in ft³/day, convert to SCF using FVF
-            gas_production = state.production_rates.gas
+            gas_production = state.production_rates.gas.array()
             step_in_days = state.step_size * days_per_second
-            gas_fvf_grid = state.model.fluid_properties.gas_formation_volume_factor_grid
-            gas_production_scf = gas_production / gas_fvf_grid
+            gas_fvf_grid = state.production_formation_volume_factors.gas.array()
 
-            # Apply mask if filtering
+            with np.errstate(divide="ignore", invalid="ignore"):
+                gas_production_scf = np.where(
+                    gas_fvf_grid > 0,
+                    gas_production / gas_fvf_grid,
+                    0.0,
+                )
+
             if mask is not None:
                 gas_production_scf = gas_production_scf * mask
 
@@ -1552,18 +1539,20 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            # Production is in ft³/day, convert to STB using FVF
-            water_production = state.production_rates.water
+            water_production = state.production_rates.water.array()
             if water_production is None:
                 continue
 
             step_in_days = state.step_size * days_per_second
-            water_fvf_grid = (
-                state.model.fluid_properties.water_formation_volume_factor_grid
-            )
-            water_production_stb = water_production * ft3_to_bbl / water_fvf_grid
+            water_fvf_grid = state.production_formation_volume_factors.water.array()
 
-            # Apply mask if filtering
+            with np.errstate(divide="ignore", invalid="ignore"):
+                water_production_stb = np.where(
+                    water_fvf_grid > 0,
+                    water_production * ft3_to_bbl / water_fvf_grid,
+                    0.0,
+                )
+
             if mask is not None:
                 water_production_stb = water_production_stb * mask
 
@@ -1685,7 +1674,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         cells_obj: typing.Optional[Cells],
     ) -> float:
         """Internal cached implementation of `gas_injected`."""
-        # Per-instance dict cache prevents memory leaks
         key = (from_step, to_step, cells_obj)
         if key in self._gas_injected_cache:
             return self._gas_injected_cache[key]
@@ -1712,19 +1700,17 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            # Injection is in ft³/day, convert to SCF using FVF
-            gas_injection = state.injection_rates.gas
+            gas_injection = state.injection_rates.gas.array()
             step_in_days = state.step_size * days_per_second
-            injected_gas_fvf_grid, _ = _build_injected_fvf_grids(
-                wells=state.wells,
-                pressure_grid=state.model.fluid_properties.pressure_grid,
-                temperature_grid=state.model.fluid_properties.temperature_grid,
-                grid_shape=state.model.grid_shape,
-            )
-            # NaN where no injector: `gas_injection` is also 0 there, nansum skips correctly
-            gas_injection_scf = gas_injection / injected_gas_fvf_grid
+            gas_fvf_grid = state.injection_formation_volume_factors.gas.array()
 
-            # Apply mask if filtering
+            with np.errstate(divide="ignore", invalid="ignore"):
+                gas_injection_scf = np.where(
+                    gas_fvf_grid > 0,
+                    gas_injection / gas_fvf_grid,
+                    0.0,
+                )
+
             if mask is not None:
                 gas_injection_scf = gas_injection_scf * mask
 
@@ -1795,18 +1781,17 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            # Injection is in ft³/day, convert to STB using FVF
-            water_injection = state.injection_rates.water
+            water_injection = state.injection_rates.water.array()
             step_in_days = state.step_size * days_per_second
-            _, injected_water_fvf_grid = _build_injected_fvf_grids(
-                wells=state.wells,
-                pressure_grid=state.model.fluid_properties.pressure_grid,
-                temperature_grid=state.model.fluid_properties.temperature_grid,
-                grid_shape=state.model.grid_shape,
-            )
-            water_injection_stb = water_injection * ft3_to_bbl / injected_water_fvf_grid
+            water_fvf_grid = state.injection_formation_volume_factors.water.array()
 
-            # Apply mask if filtering
+            with np.errstate(divide="ignore", invalid="ignore"):
+                water_injection_stb = np.where(
+                    water_fvf_grid > 0,
+                    water_injection * ft3_to_bbl / water_fvf_grid,
+                    0.0,
+                )
+
             if mask is not None:
                 water_injection_stb = water_injection_stb * mask
 
@@ -2365,24 +2350,47 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 st = self._states[s]
                 oil_production = st.production_rates.oil
                 step_in_days = st.step_size * days_per_second
-                oil_fvf_grid = (
-                    st.model.fluid_properties.oil_formation_volume_factor_grid
-                )
                 solution_gor_grid = (
                     st.model.fluid_properties.solution_gas_to_oil_ratio_grid
                 )
-                oil_production_stb = oil_production * ft3_to_bbl / oil_fvf_grid
-                if cells_obj is not None:
-                    mask = cells_obj.get_mask(st.model.grid_shape, st.wells)
+                gas_solubility_in_water_grid = (
+                    st.model.fluid_properties.gas_solubility_in_water_grid
+                )
+                oil_fvf_grid = st.production_formation_volume_factors.oil.array()
+                water_fvf_grid = st.production_formation_volume_factors.water.array()
+
+                oil_production = st.production_rates.oil.array()
+                water_production = st.production_rates.water.array()
+
+                with np.errstate(divide="ignore", invalid="ignore"):
                     oil_production_stb = np.where(
-                        mask,  # type: ignore[arg-type]
-                        oil_production_stb,
+                        oil_fvf_grid > 0,
+                        oil_production * ft3_to_bbl / oil_fvf_grid,
                         0.0,
                     )
+                    water_production_stb = np.where(
+                        water_fvf_grid > 0,
+                        water_production * ft3_to_bbl / water_fvf_grid,
+                        0.0,
+                    )
+
+                if cells_obj is not None:
+                    mask = cells_obj.get_mask(st.model.grid_shape, st.wells)
+                    oil_production_stb = np.where(mask, oil_production_stb, 0.0)  # type: ignore[arg-type]
                     solution_gor_grid = np.where(mask, solution_gor_grid, 0.0)  # type: ignore[arg-type]
+                    water_production_stb = np.where(mask, water_production_stb, 0.0)  # type: ignore[arg-type]
+                    gas_solubility_in_water_grid = np.where(  # type: ignore[arg-type]
+                        mask,  # type: ignore[arg-type]
+                        gas_solubility_in_water_grid,
+                        0.0,
+                    )
 
                 step_solution_gas[s] = float(
-                    np.nansum(solution_gor_grid * oil_production_stb) * step_in_days
+                    (
+                        np.nansum(solution_gor_grid * oil_production_stb)
+                        + np.nansum(gas_solubility_in_water_grid * water_production_stb)
+                    )
+                    * step_in_days
                 )
 
             cumulative_solution_gas = 0.0
@@ -2465,7 +2473,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
             - (slice, slice, slice): Region
         :return: `InstantaneousRates` containing detailed rate analysis.
         """
-        # Resolve step and convert cells before building cache key
         step = self._resolve_step(step)
         cells_obj = _ensure_cells(cells)
         cache_key = (step, cells_obj)
@@ -2486,7 +2493,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 water_cut=0.0,
             )
 
-        # Get cell mask for filtering
         mask = (
             cells_obj.get_mask(state.model.grid_shape, state.wells)
             if cells_obj
@@ -2499,42 +2505,49 @@ class ModelAnalyst(typing.Generic[NDimension]):
         water_rate = 0.0
         oil_production_stb = None
 
-        # Sum production rates from all grid cells
         if (oil_production := state.production_rates.oil) is not None:
-            # Convert from ft³/day to STB/day using oil FVF
-            oil_fvf_grid = state.model.fluid_properties.oil_formation_volume_factor_grid
-            oil_production_stb = oil_production * c.CUBIC_FEET_TO_BARRELS / oil_fvf_grid
+            oil_fvf_grid = state.production_formation_volume_factors.oil.array()
+            oil_prod_arr = oil_production.array()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                oil_production_stb = np.where(
+                    oil_fvf_grid > 0,
+                    oil_prod_arr * c.CUBIC_FEET_TO_BARRELS / oil_fvf_grid,
+                    0.0,
+                )
             if mask is not None:
                 oil_production_stb = np.where(mask, oil_production_stb, 0.0)
             oil_rate = np.nansum(oil_production_stb)
 
         if (gas_production := state.production_rates.gas) is not None:
-            # Convert from ft³/day to SCF/day using gas FVF (free gas phase only)
-            gas_fvf_grid = state.model.fluid_properties.gas_formation_volume_factor_grid
-            gas_production_scf = gas_production / gas_fvf_grid
+            gas_fvf_grid = state.production_formation_volume_factors.gas.array()
+            gas_prod_arr = gas_production.array()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                gas_production_scf = np.where(
+                    gas_fvf_grid > 0,
+                    gas_prod_arr / gas_fvf_grid,
+                    0.0,
+                )
             if mask is not None:
                 gas_production_scf = np.where(mask, gas_production_scf, 0.0)
             free_gas_rate = float(np.nansum(gas_production_scf))
 
-        # Solution gas: gas dissolved in produced oil that flashes out at surface conditions.
-        # Amount = Rs (SCF/STB) * oil production (STB/day)
         if oil_production_stb is not None:
             solution_gor_grid = (
                 state.model.fluid_properties.solution_gas_to_oil_ratio_grid
             )
             solution_gas_rate = float(np.nansum(solution_gor_grid * oil_production_stb))
 
-        # Total gas = free gas phase + solution gas from oil
         gas_rate = free_gas_rate + solution_gas_rate
 
         if (water_production := state.production_rates.water) is not None:
-            # Convert from ft³/day to STB/day using water FVF
-            water_fvf_grid = (
-                state.model.fluid_properties.water_formation_volume_factor_grid
-            )
-            water_production_stb = (
-                water_production * c.CUBIC_FEET_TO_BARRELS / water_fvf_grid
-            )
+            water_fvf_grid = state.production_formation_volume_factors.water.array()
+            water_prod_arr = water_production.array()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                water_production_stb = np.where(
+                    water_fvf_grid > 0,
+                    water_prod_arr * c.CUBIC_FEET_TO_BARRELS / water_fvf_grid,
+                    0.0,
+                )
             if mask is not None:
                 water_production_stb = np.where(mask, water_production_stb, 0.0)
             water_rate = np.nansum(water_production_stb)
@@ -2598,7 +2611,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 water_cut=0.0,
             )
 
-        # Get cell mask for filtering
         mask = (
             cells_obj.get_mask(state.model.grid_shape, state.wells)
             if cells_obj
@@ -2609,31 +2621,41 @@ class ModelAnalyst(typing.Generic[NDimension]):
         gas_rate = 0.0
         water_rate = 0.0
 
-        # Sum injection rates from all grid cells
         if (oil_injection := state.injection_rates.oil) is not None:
-            # Convert from ft³/day to STB/day using oil FVF
-            oil_fvf_grid = state.model.fluid_properties.oil_formation_volume_factor_grid
-            oil_injection_stb = oil_injection * c.CUBIC_FEET_TO_BARRELS / oil_fvf_grid
+            oil_fvf_grid = state.injection_formation_volume_factors.oil.array()
+            oil_inj_arr = oil_injection.array()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                oil_injection_stb = np.where(
+                    oil_fvf_grid > 0,
+                    oil_inj_arr * c.CUBIC_FEET_TO_BARRELS / oil_fvf_grid,
+                    0.0,
+                )
             if mask is not None:
                 oil_injection_stb = np.where(mask, oil_injection_stb, 0.0)
             oil_rate = np.nansum(oil_injection_stb)
 
-        injected_gas_fvf_grid, injected_water_fvf_grid = _build_injected_fvf_grids(
-            wells=state.wells,
-            pressure_grid=state.model.fluid_properties.pressure_grid,
-            temperature_grid=state.model.fluid_properties.temperature_grid,
-            grid_shape=state.model.grid_shape,
-        )
         if (gas_injection := state.injection_rates.gas) is not None:
-            gas_injection_scf = gas_injection / injected_gas_fvf_grid
+            gas_fvf_grid = state.injection_formation_volume_factors.gas.array()
+            gas_inj_arr = gas_injection.array()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                gas_injection_scf = np.where(
+                    gas_fvf_grid > 0,
+                    gas_inj_arr / gas_fvf_grid,
+                    0.0,
+                )
             if mask is not None:
                 gas_injection_scf = np.where(mask, gas_injection_scf, 0.0)
             gas_rate = np.nansum(gas_injection_scf)
 
         if (water_injection := state.injection_rates.water) is not None:
-            water_injection_stb = (
-                water_injection * c.CUBIC_FEET_TO_BARRELS / injected_water_fvf_grid
-            )
+            water_fvf_grid = state.injection_formation_volume_factors.water.array()
+            water_inj_arr = water_injection.array()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                water_injection_stb = np.where(
+                    water_fvf_grid > 0,
+                    water_inj_arr * c.CUBIC_FEET_TO_BARRELS / water_fvf_grid,
+                    0.0,
+                )
             if mask is not None:
                 water_injection_stb = np.where(mask, water_injection_stb, 0.0)
             water_rate = np.nansum(water_injection_stb)
@@ -2845,13 +2867,36 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 break
 
             st = self._states[s]
-            oil_production = st.production_rates.oil
             step_in_days = st.step_size * days_per_second
-            oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
             solution_gor_grid = st.model.fluid_properties.solution_gas_to_oil_ratio_grid
-            oil_production_stb = oil_production * ft3_to_bbl / oil_fvf_grid
+            gas_solubility_in_water_grid = (
+                st.model.fluid_properties.gas_solubility_in_water_grid
+            )
+
+            oil_fvf_grid = st.production_formation_volume_factors.oil.array()
+            water_fvf_grid = st.production_formation_volume_factors.water.array()
+
+            oil_production = st.production_rates.oil.array()
+            water_production = st.production_rates.water.array()
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                oil_production_stb = np.where(
+                    oil_fvf_grid > 0,
+                    oil_production * ft3_to_bbl / oil_fvf_grid,
+                    0.0,
+                )
+                water_production_stb = np.where(
+                    water_fvf_grid > 0,
+                    water_production * ft3_to_bbl / water_fvf_grid,
+                    0.0,
+                )
+
             cumulative_solution_gas_produced += float(
                 np.nansum(solution_gor_grid * oil_production_stb) * step_in_days
+            )
+            cumulative_solution_gas_produced += float(
+                np.nansum(gas_solubility_in_water_grid * water_production_stb)
+                * step_in_days
             )
 
         cumulative_total_gas_produced = (
@@ -2863,21 +2908,18 @@ class ModelAnalyst(typing.Generic[NDimension]):
             else initial_solution_gor
         )
 
-        injected_gas_fvf_grid, injected_water_fvf_grid = _build_injected_fvf_grids(
-            wells=state.wells,
-            pressure_grid=current_model.fluid_properties.pressure_grid,
-            temperature_grid=current_model.fluid_properties.temperature_grid,
-            grid_shape=current_model.grid_shape,
+        inj_gas_fvf_arr = state.injection_formation_volume_factors.gas.array()
+        inj_water_fvf_arr = state.injection_formation_volume_factors.water.array()
+
+        injected_gas_fvf = (
+            float(np.nanmean(inj_gas_fvf_arr[inj_gas_fvf_arr > 0]))
+            if np.any(inj_gas_fvf_arr > 0)
+            else current_gas_fvf
         )
         injected_water_fvf = (
-            float(np.nanmean(injected_water_fvf_grid))
-            if not np.all(np.isnan(injected_water_fvf_grid))
+            float(np.nanmean(inj_water_fvf_arr[inj_water_fvf_arr > 0]))
+            if np.any(inj_water_fvf_arr > 0)
             else current_water_fvf
-        )
-        injected_gas_fvf = (
-            float(np.nanmean(injected_gas_fvf_grid))
-            if not np.all(np.isnan(injected_gas_fvf_grid))
-            else current_gas_fvf
         )
 
         # Havlena-Odeh terms
@@ -3744,41 +3786,48 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 if phase == "oil":
                     if state.production_rates.oil is None:
                         continue
+
                     oil_fvf = float(
-                        state.model.fluid_properties.oil_formation_volume_factor_grid[
-                            i, j, k
-                        ]
+                        state.production_formation_volume_factors.oil[i, j, k]  # type: ignore
                     )
                     cell_flow_rate_ft3 = state.production_rates.oil[i, j, k]  # type: ignore  # ft³/day
-                    cell_flow_rate_stb = (
-                        cell_flow_rate_ft3 * ft3_to_bbl / oil_fvf
-                    )  # STB/day
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        cell_flow_rate_stb = np.where(  # STB/day
+                            oil_fvf > 0,
+                            cell_flow_rate_ft3 * ft3_to_bbl / oil_fvf,
+                            0.0,
+                        )
 
                 elif phase == "water":
                     if state.production_rates.water is None:
                         continue
                     water_fvf = float(
-                        state.model.fluid_properties.water_formation_volume_factor_grid[
-                            i, j, k
-                        ]
+                        state.production_formation_volume_factors.water[i, j, k]  # type: ignore
                     )
                     cell_flow_rate_ft3 = state.production_rates.water[  # type: ignore
                         i, j, k
                     ]  # ft³/day
-                    cell_flow_rate_stb = (
-                        cell_flow_rate_ft3 * ft3_to_bbl / water_fvf
-                    )  # STB/day
+
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        cell_flow_rate_stb = np.where(  # STB/day
+                            water_fvf > 0,
+                            cell_flow_rate_ft3 * ft3_to_bbl / water_fvf,
+                            0.0,
+                        )
 
                 else:  # gas
                     if state.production_rates.gas is None:
                         continue
                     gas_fvf = float(
-                        state.model.fluid_properties.gas_formation_volume_factor_grid[
-                            i, j, k
-                        ]
+                        state.production_formation_volume_factors.gas[i, j, k]  # type: ignore
                     )
                     cell_flow_rate_ft3 = state.production_rates.gas[i, j, k]  # type: ignore  # ft³/day
-                    cell_flow_rate_stb = cell_flow_rate_ft3 / gas_fvf  # SCF/day
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        cell_flow_rate_stb = np.where(  # STB/day
+                            gas_fvf > 0,
+                            cell_flow_rate_ft3 / gas_fvf,
+                            0.0,
+                        )
 
                 if cell_flow_rate_stb == 0:
                     continue
@@ -3930,13 +3979,6 @@ class ModelAnalyst(typing.Generic[NDimension]):
         )
         free_gas_produced = self.gas_produced(self._min_step, step, cells=cells_obj)
 
-        injected_gas_fvf_grid, injected_water_fvf_grid = _build_injected_fvf_grids(
-            wells=state.wells,
-            pressure_grid=state.model.fluid_properties.pressure_grid,
-            temperature_grid=state.model.fluid_properties.temperature_grid,
-            grid_shape=state.model.grid_shape,
-        )
-
         avg_oil_fvf = np.nanmean(
             state.model.fluid_properties.oil_formation_volume_factor_grid
         )
@@ -3947,15 +3989,18 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state.model.fluid_properties.water_formation_volume_factor_grid
         )
 
-        avg_injected_water_fvf = (
-            float(np.nanmean(injected_water_fvf_grid))
-            if not np.all(np.isnan(injected_water_fvf_grid))
-            else avg_water_fvf_produced
-        )
+        inj_gas_fvf_arr = state.injection_formation_volume_factors.gas.array()
+        inj_water_fvf_arr = state.injection_formation_volume_factors.water.array()
+
         avg_injected_gas_fvf = (
-            float(np.nanmean(injected_gas_fvf_grid))
-            if not np.all(np.isnan(injected_gas_fvf_grid))
+            float(np.nanmean(inj_gas_fvf_arr[inj_gas_fvf_arr > 0]))
+            if np.any(inj_gas_fvf_arr > 0)
             else avg_gas_fvf
+        )
+        avg_injected_water_fvf = (
+            float(np.nanmean(inj_water_fvf_arr[inj_water_fvf_arr > 0]))
+            if np.any(inj_water_fvf_arr > 0)
+            else avg_water_fvf_produced
         )
 
         # Calculate injected reservoir volumes (numerator)
@@ -3969,7 +4014,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         produced_water_bbl = cumulative_water_produced * avg_water_fvf_produced
 
         # Free gas produced (already free gas only from `gas_produced`)
-        # Plus solution gas that came out of the oil
+        # Plus solution gas that came out of the oil and water
         # Calculate solution gas step-by-step to account for pressure-dependent Rs
         solution_gas_produced = 0.0
         days_per_second = c.DAYS_PER_SECOND
@@ -3978,12 +4023,35 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 break
             st = self._states[s]
             solution_gor_grid = st.model.fluid_properties.solution_gas_to_oil_ratio_grid
-            oil_production = st.production_rates.oil
+            gas_solubility_in_water_grid = (
+                st.model.fluid_properties.gas_solubility_in_water_grid
+            )
             step_in_days = st.step_size * days_per_second
-            oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
-            oil_production_stb = oil_production * ft3_to_bbl / oil_fvf_grid
+
+            oil_fvf_grid = st.production_formation_volume_factors.oil.array()
+            water_fvf_grid = st.production_formation_volume_factors.water.array()
+
+            oil_production = st.production_rates.oil.array()
+            water_production = st.production_rates.water.array()
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                oil_production_stb = np.where(
+                    oil_fvf_grid > 0,
+                    oil_production * ft3_to_bbl / oil_fvf_grid,
+                    0.0,
+                )
+                water_production_stb = np.where(
+                    water_fvf_grid > 0,
+                    water_production * ft3_to_bbl / water_fvf_grid,
+                    0.0,
+                )
+
             solution_gas_produced += float(
                 np.nansum(solution_gor_grid * oil_production_stb) * step_in_days
+            )
+            solution_gas_produced += float(
+                np.nansum(gas_solubility_in_water_grid * water_production_stb)
+                * step_in_days
             )
 
         total_gas_produced = free_gas_produced + solution_gas_produced  # SCF

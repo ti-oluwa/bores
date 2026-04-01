@@ -36,7 +36,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
     Generic over `DType` (the numeric scalar type of stored values) and
     `ShapeT` (the shape tuple, encoding rank and dimension sizes at the
     type level). Because `shape` is required at construction, all valid
-    keys are exactly the set of N-tuples within the declared bounds —
+    keys are exactly the set of N-tuples within the declared bounds -
     there is no separate `Key` type alias needed.
 
     Example:
@@ -299,7 +299,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         if self._ndim == 0 or other._ndim == 0:
             raise ValueError("matmul does not support rank-0 tensors")
 
-        # 1D @ 1D — dot product → scalar
+        # 1D @ 1D - dot product → scalar
         if self._ndim == 1 and other._ndim == 1:
             if self._shape[0] != other._shape[0]:
                 raise ValueError(
@@ -312,7 +312,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
                     acc = self._dtype(acc + v1 * other._data[(i,)])  # type: ignore
             return acc
 
-        # 1D @ 2D — (n,) @ (n, m) → (m,)
+        # 1D @ 2D - (n,) @ (n, m) → (m,)
         if self._ndim == 1 and other._ndim == 2:
             n, m = other._shape
             if self._shape[0] != n:
@@ -328,7 +328,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
                         result[(j,)] = result[(j,)] + v1 * v2  # type: ignore
             return result
 
-        # 2D @ 1D — (n, m) @ (m,) → (n,)
+        # 2D @ 1D - (n, m) @ (m,) → (n,)
         if self._ndim == 2 and other._ndim == 1:
             n, m = self._shape
             if m != other._shape[0]:
@@ -343,7 +343,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
                     result[(i,)] = result[(i,)] + v1 * other._data[(k,)]  # type: ignore
             return result
 
-        # 2D @ 2D — standard matrix product
+        # 2D @ 2D - standard matrix product
         if self._ndim == 2 and other._ndim == 2:
             n, k = self._shape
             k2, m = other._shape
@@ -360,11 +360,11 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
                         result[(i, j)] = result[(i, j)] + v1 * v2  # type: ignore
             return result
 
-        # ND @ ND — batched contraction, delegate to NumPy
+        # ND @ ND - batched contraction, delegate to NumPy
         if self._shape[-1] != other._shape[-2]:
             raise ValueError(
                 f"Shape mismatch for batched matmul: "
-                f"{self._shape} @ {other._shape} — "
+                f"{self._shape} @ {other._shape} - "
                 f"last axis of left ({self._shape[-1]}) must match "
                 f"second-to-last of right ({other._shape[-2]})"
             )
@@ -639,7 +639,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         """
         Convert to a dense N-dimensional Python nested list.
 
-        Shape is always taken from the instance's declared `shape` — no
+        Shape is always taken from the instance's declared `shape` - no
         override is needed since `shape` is required at construction.
 
         :returns: Nested list of values, filling absent entries with `default`.
@@ -669,7 +669,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         """
         Convert to a dense NumPy N-dimensional array.
 
-        Shape is always taken from the instance's declared `shape` — no
+        Shape is always taken from the instance's declared `shape` - no
         override is needed since `shape` is required at construction.
 
         :param dtype: NumPy dtype override for the output array. Defaults to
@@ -873,7 +873,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         )
         return {
             "shape": list(self._shape),
-            "dtype": np.dtype(self._dtype).str,  # e.g. "<f8" — exact, portable
+            "dtype": np.dtype(self._dtype).str,  # e.g. "<f8" - exact, portable
             "default": self._default,  # Python scalar, JSON-safe
             "keys": keys_flat,  # List[List[int]]
             "values": serialize_ndarray(values_arr),  # compact base64 blob

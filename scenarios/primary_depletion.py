@@ -84,7 +84,7 @@ def setup_run():
         ramp_up_factor=1.2,
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,
-        max_rejects=20,
+        max_rejections=20,
     )
     run.config = run.config.with_updates(
         wells=wells,

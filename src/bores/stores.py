@@ -16,7 +16,6 @@ from pathlib import Path
 import h5py  # type: ignore[import-untyped]
 import numpy as np
 import numpy.typing as npt
-
 import orjson
 import yaml
 import zarr  # type: ignore[import-untyped]

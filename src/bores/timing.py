@@ -80,7 +80,7 @@ class TimerState(typing.TypedDict):
     backoff_factor: float
     aggressive_backoff_factor: float
     max_steps: typing.Optional[int]
-    max_rejects: int
+    max_rejections: int
     max_growth_per_step: float
     step_size_smoothing: float
     growth_cooldown_steps: int
@@ -162,7 +162,7 @@ class Timer(StoreSerializable):
     """Number of accepted time steps completed so far (0-indexed)."""
     last_step_failed: bool = attrs.field(init=False, default=False)
     """Whether the most recent step attempt was rejected."""
-    max_rejects: int = 10
+    max_rejections: int = 10
     """Maximum number of consecutive time step rejections allowed."""
     rejection_count: int = attrs.field(init=False, default=0)
     """Count of consecutive time step rejections."""
@@ -318,20 +318,20 @@ class Timer(StoreSerializable):
         :param maximum_allowed_pressure_change: The allowed pressure change threshold.
         :return: The new/adjusted time step size in seconds.
         """
-        if self.rejection_count >= self.max_rejects:
+        if self.rejection_count >= self.max_rejections:
             raise TimingError(
                 "Maximum number of consecutive time step rejections exceeded"
             )
 
         # Warn when approaching rejection limit
-        rejection_threshold = int(0.7 * self.max_rejects)
+        rejection_threshold = int(0.7 * self.max_rejections)
         if (
             self.rejection_count >= rejection_threshold
-            and self.rejection_count < self.max_rejects
+            and self.rejection_count < self.max_rejections
         ):
             logger.warning(
                 f"Time step rejection count ({self.rejection_count}) is approaching "
-                f"maximum allowed ({self.max_rejects}). Consider adjusting simulation "
+                f"maximum allowed ({self.max_rejections}). Consider adjusting simulation "
                 f"parameters or initial conditions."
             )
 
@@ -889,7 +889,7 @@ class Timer(StoreSerializable):
             "aggressive_backoff_factor": self.aggressive_backoff_factor,
             "max_steps": self.max_steps,
             "max_growth_per_step": self.max_growth_per_step,
-            "max_rejects": self.max_rejects,
+            "max_rejections": self.max_rejections,
             "step_size_smoothing": self.step_size_smoothing,
             "growth_cooldown_steps": self.growth_cooldown_steps,
             "failure_memory_window": self.failure_memory_window,
@@ -957,7 +957,7 @@ class Timer(StoreSerializable):
             "backoff_factor": state.get("backoff_factor", 0.5),
             "aggressive_backoff_factor": state.get("aggressive_backoff_factor", 0.25),
             "max_steps": state.get("max_steps"),
-            "max_rejects": state.get("max_rejects", 10),
+            "max_rejections": state.get("max_rejections", 10),
             "max_growth_per_step": state.get("max_growth_per_step", 1.5),
             "step_size_smoothing": state.get("step_size_smoothing", 0.7),
             "growth_cooldown_steps": state.get("growth_cooldown_steps", 5),

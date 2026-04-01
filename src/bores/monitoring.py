@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 from bores.config import Config
 from bores.constants import c
-from bores.datastructures import Rates, FormationVolumeFactors, SparseTensor
+from bores.datastructures import FormationVolumeFactors, Rates, SparseTensor
 from bores.models import ReservoirModel
 from bores.simulate import Run, StepCallback, StepResult, run
 from bores.states import ModelState
@@ -411,7 +411,7 @@ def _convert_to_total_surface_rate(
         if fvf > 0:
             if phase in ("oil", "water"):
                 reservoir_rate *= ft3_to_bbl
-            
+
             surface_rate = reservoir_rate / fvf
             total_surface_rate += surface_rate
 
@@ -776,8 +776,48 @@ def _build_rich_panel(
         border_style=hdr,
         padding=(1, 2),
         highlight=True,
-        expand=False
+        expand=False,
     )
+
+
+@typing.overload
+def monitor(
+    input: typing.Union[
+        ReservoirModel[ThreeDimensions],
+        Run,
+        typing.Iterable[ModelState[ThreeDimensions]],
+    ],
+    config: typing.Optional[Config] = ...,
+    *,
+    monitor: typing.Optional[MonitorConfig] = ...,
+    on_step_rejected: typing.Optional[StepCallback] = ...,
+    on_step_accepted: typing.Optional[StepCallback] = ...,
+    return_stats: typing.Literal[False] = ...,
+) -> typing.Generator[
+    ModelState[ThreeDimensions],
+    None,
+    None,
+]: ...
+
+
+@typing.overload
+def monitor(
+    input: typing.Union[
+        ReservoirModel[ThreeDimensions],
+        Run,
+        typing.Iterable[ModelState[ThreeDimensions]],
+    ],
+    config: typing.Optional[Config] = ...,
+    *,
+    monitor: typing.Optional[MonitorConfig] = ...,
+    on_step_rejected: typing.Optional[StepCallback] = ...,
+    on_step_accepted: typing.Optional[StepCallback] = ...,
+    return_stats: typing.Literal[True],
+) -> typing.Generator[
+    typing.Tuple[ModelState[ThreeDimensions], RunStats],
+    None,
+    None,
+]: ...
 
 
 def monitor(
@@ -791,7 +831,14 @@ def monitor(
     monitor: typing.Optional[MonitorConfig] = None,
     on_step_rejected: typing.Optional[StepCallback] = None,
     on_step_accepted: typing.Optional[StepCallback] = None,
-) -> typing.Generator[typing.Tuple[ModelState[ThreeDimensions], RunStats], None, None]:
+    return_stats: bool = False,
+) -> typing.Generator[
+    typing.Union[
+        ModelState[ThreeDimensions], typing.Tuple[ModelState[ThreeDimensions], RunStats]
+    ],
+    None,
+    None,
+]:
     """
     Wraps `bores.run(...)` with optional live monitoring and statistics collection.
 
@@ -817,11 +864,14 @@ def monitor(
         same arguments as the `on_step_rejected` callback of `bores.run`.
     :param on_step_accepted: Optional callback to be invoked whenever a time
         step is accepted by the timer. The callback receives the same arguments
-        as the `on_step_accepted` callback of `bores.run`.
-    :yields: Tuple of `(state, stats)` - the model state and the live `RunStats`
+        as the `on_step_accepted` callback of `bores.run(...)`.
+    :param return_stats: If `True`, yield a tuple of `(ModelState, RunStats)` at each output step.
+        If `False`, yield only the `ModelState` (default). Note that `RunStats` is updated in-place, 
+        so the same object is yielded at every step and can be inspected after the loop to access the full history of diagnostics and summaries.
+    :yields: Tuple of `(state, stats)` - the model state and the live `RunStats`, if `return_stats` is True.
+        Else, the model state only is returned.
         accumulator after each accepted output step.
-    :raises ValueError: If `input` is a `ReservoirModel` and `config`
-        is not provided.
+    :raises ValueError: If `input` is a `ReservoirModel` and `config` is not provided.
     """
     if monitor is None:
         monitor = MonitorConfig()
@@ -833,7 +883,7 @@ def monitor(
 
     is_generic_input = not isinstance(input, (ReservoirModel, Run))
     if isinstance(input, Run):
-        config = config or input.config
+        config = config if config is not None else input.config
     else:
         if config is None and not is_generic_input:
             raise ValueError(
@@ -886,16 +936,16 @@ def monitor(
     # writing lines that force Rich to re-render and print a new panel frame
     # on every log record emitted inside simulation.
     live: typing.Optional[Live] = None
-    _rich_console: typing.Optional[Console] = None
-    _bores_logger = logging.getLogger("bores")
-    _original_propagate = _bores_logger.propagate  # Save original propagate setting
-    _original_handlers: typing.List[logging.Handler] = []
-    _rich_log_handler: typing.Optional[RichHandler] = None
+    rich_console: typing.Optional[Console] = None
+    bores_logger = logging.getLogger("bores")
+    original_propagate = bores_logger.propagate  # Save original propagate setting
+    original_handlers: typing.List[logging.Handler] = []
+    rich_log_handler: typing.Optional[RichHandler] = None
 
     if monitor.use_rich:
-        _rich_console = Console()
+        rich_console = Console()
         live = Live(
-            console=_rich_console,
+            console=rich_console,
             refresh_per_second=4,
             transient=False,
         )
@@ -905,17 +955,17 @@ def monitor(
         # them with a single `RichHandler` that writes through the `Live` console.
         # Rich's `Live` context knows how to interleave log lines above the panel
         # without triggering a full re-render of the live display.
-        _original_handlers = _bores_logger.handlers[:]
-        _rich_log_handler = RichHandler(
-            console=_rich_console,
+        original_handlers = bores_logger.handlers[:]
+        rich_log_handler = RichHandler(
+            console=rich_console,
             show_time=False,
             show_path=False,
             markup=False,
             rich_tracebacks=False,
         )
-        _rich_log_handler.setLevel(logging.DEBUG)
-        _bores_logger.handlers = [_rich_log_handler]
-        _bores_logger.propagate = False  # Prevent bubbling to root
+        rich_log_handler.setLevel(logging.DEBUG)
+        bores_logger.handlers = [rich_log_handler]
+        bores_logger.propagate = False  # Prevent bubbling to root
 
     step_start = time.perf_counter()
     last_percentage = 0.0
@@ -925,7 +975,8 @@ def monitor(
         if is_generic_input:
             simulation = input
         elif isinstance(input, Run):
-            simulation = run(  # type: ignore
+            simulation = input(
+                config=config,
                 on_step_rejected=_on_step_rejected,
                 on_step_accepted=_on_step_accepted,
             )
@@ -968,7 +1019,7 @@ def monitor(
                 new_percentage = min(
                     diagnostics.elapsed_time / total_simulation_time * 100, 100.0
                 )
-                change = new_percentage - last_percentage
+                change = float(new_percentage - last_percentage)
                 if change > 0:
                     tqdm_bar.update(change)
                 last_percentage = new_percentage
@@ -979,7 +1030,10 @@ def monitor(
                     f"wall={wall_ms:.2f} ms"
                 )
 
-            yield state, stats
+            if return_stats:
+                yield state, stats
+            else:
+                yield state
 
     finally:
         if live is not None:
@@ -1000,16 +1054,16 @@ def monitor(
 
             # Restore the bores logger to whatever handlers it had before we
             # started, so logging behaves normally after the run completes.
-            _bores_logger.handlers = _original_handlers
-            _bores_logger.propagate = _original_propagate
+            bores_logger.handlers = original_handlers
+            bores_logger.propagate = original_propagate
 
         if tqdm_bar is not None:
             tqdm_bar.update(100.0 - last_percentage)  # Ensure that bar reaches 100 %
             tqdm_bar.close()
 
         # Print the summary table
-        if _rich_console is not None:
-            _rich_console.print()
-            _rich_console.print(stats.summary_table())
+        if rich_console is not None:
+            rich_console.print()
+            rich_console.print(stats.summary_table())
         else:
             logger.info(stats.summary())

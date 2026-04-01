@@ -15,7 +15,6 @@ author: ti-oluwa
   <img src="images/logo.svg" alt="BORES Logo" width="200">
 </p>
 
-
 # BORES - Black-Oil REservoir Simulation Framework
 
 BORES is a 3D three-phase black-oil reservoir modelling and simulation framework written in Python. It provides a Pythonic API for constructing reservoir models, defining wells and boundary conditions, running multiphase flow simulations, and analyzing results. BORES targets petroleum engineers, researchers, and students who need a transparent, scriptable alternative to closed-source commercial simulators.
@@ -60,7 +59,7 @@ connate_water_saturation = bores.build_uniform_grid(grid_shape, value=0.06)
 
 # Build depth grid and compute initial saturations from fluid contacts
 depth = bores.build_depth_grid(thickness, datum=5000.0)  # Top at 5000 ft
-Sw, So, Sg = bores.build_saturation_grids(
+water_saturation, oil_saturation, gas_saturation = bores.build_saturation_grids(
     depth_grid=depth,
     gas_oil_contact=5050.0,  # Above reservoir (no gas cap)
     oil_water_contact=5280.0,  # Below reservoir (all oil zone)
@@ -85,9 +84,9 @@ model = bores.reservoir_model(
     absolute_permeability=permeability,
     porosity_grid=porosity,
     temperature_grid=temperature,
-    water_saturation_grid=Sw,
-    gas_saturation_grid=Sg,
-    oil_saturation_grid=So,
+    water_saturation_grid=water_saturation,
+    gas_saturation_grid=gas_saturation,
+    oil_saturation_grid=oil_saturation,
     oil_viscosity_grid=oil_viscosity,
     oil_bubble_point_pressure_grid=bubble_point,
     residual_oil_saturation_water_grid=residual_oil_saturation_water,
@@ -165,7 +164,7 @@ timer = bores.Timer(
     max_step_size=bores.Time(months=3),
     min_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=10),
-    max_rejects=20,
+    max_rejections=20,
 )
 
 # Simulation configuration

@@ -15,7 +15,6 @@ def setup_grid():
     import bores
     from bores.correlations.core import compute_oil_specific_gravity
 
-    logging.basicConfig(level=logging.INFO)
     bores.use_32bit_precision()
 
     # -------------------------------------------------------------------------
@@ -720,11 +719,11 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         max_step_size=bores.Time(days=30.0),
         min_step_size=bores.Time(minutes=10.0),
         simulation_time=bores.Time(years=10.0),
-        max_cfl_number=0.5,
+        maximum_cfl_number=0.5,
         ramp_up_factor=1.3,
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,
-        max_rejects=20,
+        max_rejections=20,
     )
 
     # -------------------------------------------------------------------------
@@ -734,7 +733,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="implicit",
+        scheme="impes",
         output_frequency=1,
         pressure_solver="direct",
         pressure_preconditioner=None,
@@ -775,13 +774,21 @@ def run_simulation(Path, bores, store):
         pvt_tables_path=Path("./benchmarks/runs/spe1/setup/pvt.h5"),
     )
 
+
     def GOR_gte_20_000(state) -> bool:
-        analyst = bores.ModelAnalyst([state]) 
-        rates = analyst.instantaneous_production_rates(cells=[[(9, 9, 2), (9, 9, 2)]])
+        analyst = bores.ModelAnalyst([state])
+        rates = analyst.instantaneous_production_rates(
+            cells=[[(9, 9, 2), (9, 9, 2)]]
+        )
         return rates.gas_oil_ratio >= 20_000
 
+
     last_state = None
-    with bores.StateStream(run, store=store, background_io=True) as stream:
+    with bores.StateStream(
+        bores.monitor(run, monitor=bores.MonitorConfig(use_tqdm=True)),
+        store=store,
+        background_io=True,
+    ) as stream:
         for state in stream:
             last_state = state
 

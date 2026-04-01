@@ -37,7 +37,7 @@ from bores.grids.pvt import (
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.grids.updates import (
     apply_solution_gas_updates,
-    update_pvt_grids,
+    update_fluid_properties,
     update_residual_saturation_grids,
 )
 from bores.grids.utils import pad_grid
@@ -484,7 +484,7 @@ def _run_impes_step(
     old_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
     old_water_saturation_grid = padded_fluid_properties.water_saturation_grid.copy()
 
-    padded_fluid_properties = update_pvt_grids(
+    padded_fluid_properties = update_fluid_properties(
         fluid_properties=padded_fluid_properties,
         wells=wells,
         miscibility_model=miscibility_model,
@@ -556,7 +556,7 @@ def _run_impes_step(
 
     # Updated fluid properties again as solution gas-to-oil ratio may have changed
     # and some PVT properties depend on it
-    padded_fluid_properties = update_pvt_grids(
+    padded_fluid_properties = update_fluid_properties(
         fluid_properties=padded_fluid_properties,
         wells=wells,
         miscibility_model=miscibility_model,
@@ -983,7 +983,7 @@ def _run_sequential_implicit_step(
     padded_fluid_properties = attrs.evolve(
         padded_fluid_properties, pressure_grid=padded_pressure_grid
     )
-    padded_fluid_properties = update_pvt_grids(
+    padded_fluid_properties = update_fluid_properties(
         fluid_properties=padded_fluid_properties,
         wells=wells,
         miscibility_model=miscibility_model,
@@ -1056,7 +1056,7 @@ def _run_sequential_implicit_step(
 
     # Update fluid properties again as solution gas-to-oil ratio may have changed
     # and some PVT properties depend on it
-    padded_fluid_properties = update_pvt_grids(
+    padded_fluid_properties = update_fluid_properties(
         fluid_properties=padded_fluid_properties,
         wells=wells,
         miscibility_model=miscibility_model,
@@ -1420,7 +1420,7 @@ def _run_full_sequential_implicit_step(
         iter_fluid_properties = attrs.evolve(
             iter_fluid_properties, pressure_grid=padded_pressure_grid
         )
-        iter_fluid_properties = update_pvt_grids(
+        iter_fluid_properties = update_fluid_properties(
             fluid_properties=iter_fluid_properties,
             wells=wells,
             miscibility_model=miscibility_model,
@@ -1484,7 +1484,7 @@ def _run_full_sequential_implicit_step(
             )
 
         # Second PVT pass: re-evaluate properties that depend on the updated Rs
-        iter_fluid_properties = update_pvt_grids(
+        iter_fluid_properties = update_fluid_properties(
             fluid_properties=iter_fluid_properties,
             wells=wells,
             miscibility_model=miscibility_model,
@@ -1718,7 +1718,7 @@ def _run_full_sequential_implicit_step(
 
         # Rebuild rock-fluid properties at the updated saturation state before the
         # next outer iteration so the pressure solve sees consistent mobilities.
-        iter_fluid_properties = update_pvt_grids(
+        iter_fluid_properties = update_fluid_properties(
             fluid_properties=iter_fluid_properties,
             wells=wells,
             miscibility_model=miscibility_model,
@@ -2137,7 +2137,7 @@ def _run_explicit_step(
     old_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
     old_water_saturation_grid = padded_fluid_properties.water_saturation_grid.copy()
 
-    padded_fluid_properties = update_pvt_grids(
+    padded_fluid_properties = update_fluid_properties(
         fluid_properties=padded_fluid_properties,
         wells=wells,
         miscibility_model=miscibility_model,
@@ -2209,7 +2209,7 @@ def _run_explicit_step(
 
     # Updated fluid properties again as solution gas-to-oil ratio may have changed
     # and some PVT properties depend on it
-    padded_fluid_properties = update_pvt_grids(
+    padded_fluid_properties = update_fluid_properties(
         fluid_properties=padded_fluid_properties,
         wells=wells,
         miscibility_model=miscibility_model,
@@ -2336,6 +2336,7 @@ class Run(StoreSerializable):
 
     def __call__(
         self,
+        config: typing.Optional[Config] = None,
         *,
         on_step_rejected: typing.Optional[StepCallback] = None,
         on_step_accepted: typing.Optional[StepCallback] = None,
@@ -2343,7 +2344,7 @@ class Run(StoreSerializable):
         """Returns a genrator that executes this simulation run."""
         return run(
             self.model,
-            self.config,
+            config if config is not None else self.config,
             on_step_rejected=on_step_rejected,
             on_step_accepted=on_step_accepted,
         )
@@ -2555,7 +2556,7 @@ def run(
         # Initialize fluid properties before starting the simulation
         # To ensure all dependent properties are consistent with initial pressure and saturation conditions
         logger.debug("Initializing PVT fluid properties for simulation start")
-        padded_fluid_properties = update_pvt_grids(
+        padded_fluid_properties = update_fluid_properties(
             fluid_properties=padded_fluid_properties,
             wells=wells,
             miscibility_model=miscibility_model,
@@ -2688,7 +2689,7 @@ def run(
                         logger.debug(
                             "Updating PVT fluid properties due to boundary condition changes..."
                         )
-                        padded_fluid_properties = update_pvt_grids(
+                        padded_fluid_properties = update_fluid_properties(
                             fluid_properties=padded_fluid_properties,
                             wells=wells,
                             miscibility_model=miscibility_model,

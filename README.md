@@ -171,7 +171,7 @@ timer = bores.Timer(
     max_step_size=bores.Time(months=3),
     min_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=24),
-    max_rejects=20,
+    max_rejections=20,
 )
 
 # Simulation configuration

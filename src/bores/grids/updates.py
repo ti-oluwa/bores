@@ -41,7 +41,7 @@ from bores.wells import Wells
 logger = logging.getLogger(__name__)
 
 
-def update_pvt_grids(
+def update_fluid_properties(
     fluid_properties: FluidProperties[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     miscibility_model: MiscibilityModel,
@@ -440,8 +440,7 @@ def update_pvt_grids(
                     transition_width=injected_fluid.miscibility_transition_width,
                 )
 
-    # Finally, update the fluid properties with all the new grids
-    updated_fluid_properties = attrs.evolve(
+    return attrs.evolve(
         fluid_properties,
         solution_gas_to_oil_ratio_grid=new_solution_gas_to_oil_ratio_grid,
         gas_solubility_in_water_grid=gas_solubility_in_water_grid,
@@ -463,7 +462,6 @@ def update_pvt_grids(
         water_density_grid=new_water_density_grid,
         gas_density_grid=new_gas_density_grid,
     )
-    return updated_fluid_properties
 
 
 def apply_solution_gas_updates(
