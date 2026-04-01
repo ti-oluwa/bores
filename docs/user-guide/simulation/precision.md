@@ -96,7 +96,7 @@ The context manager is thread-safe because it uses Python's `ContextVar` mechani
 You can check and inspect the current precision setting at any time:
 
 ```python
-from bores._precision import get_dtype, get_floating_point_info
+from bores.precision import get_dtype, get_floating_point_info
 
 # Get the current dtype
 current = get_dtype()

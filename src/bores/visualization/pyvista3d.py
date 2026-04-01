@@ -23,10 +23,10 @@ from enum import Enum
 import attrs
 import numpy as np
 
-from bores._precision import get_dtype
 from bores.errors import ValidationError
 from bores.grids.utils import coarsen_grid
 from bores.models import ReservoirModel
+from bores.precision import get_dtype
 from bores.states import ModelState
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
 from bores.visualization.base import (

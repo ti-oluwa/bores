@@ -7,7 +7,7 @@ from contextvars import ContextVar
 import attrs
 from typing_extensions import Self
 
-from bores._precision import get_floating_point_info
+from bores.precision import get_floating_point_info
 from bores.serialization import Serializable
 from bores.stores import StoreSerializable
 
@@ -75,7 +75,7 @@ class ConstantFactory(Serializable):
 
     ```
     from bores.constants import ConstantFactory
-    from bores._precision import get_floating_point_info
+    from bores.precision import get_floating_point_info
 
     SATURATION_EPSILON = ConstantFactory(
         factory=lambda: get_floating_point_info().eps ** 0.5,

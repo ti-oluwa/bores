@@ -7,7 +7,7 @@ import numpy as np
 from CoolProp.CoolProp import PropsSI  # type: ignore[import, import-untyped]
 from scipy.optimize import brentq  # type: ignore[import-untyped]
 
-from bores._precision import get_dtype
+from bores.precision import get_dtype
 from bores.constants import c
 from bores.correlations import fahrenheit_to_rankine
 from bores.correlations.core import (

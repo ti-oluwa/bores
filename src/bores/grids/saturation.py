@@ -4,9 +4,9 @@ import warnings
 import numpy as np
 import numpy.typing as npt
 
-from bores._precision import get_dtype
 from bores.constants import c
 from bores.errors import ValidationError
+from bores.precision import get_dtype
 from bores.relperm import RelativePermeabilityTable
 from bores.types import FluidPhase, NDimension, NDimensionalGrid
 

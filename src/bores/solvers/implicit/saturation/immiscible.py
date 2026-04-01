@@ -5,19 +5,17 @@ import attrs
 import numba
 import numpy as np
 import numpy.typing as npt
-import scipy.sparse.linalg as spla
 from scipy.sparse import coo_matrix, csr_matrix
 
-from bores._precision import get_dtype
 from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
 from bores.datastructures import PhaseTensorsProxy
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
-from bores.grids.boundary_conditions import apply_saturation_boundary_conditions
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
+from bores.precision import get_dtype
 from bores.solvers.base import (
     EvolutionResult,
     compute_mobility_grids,
@@ -31,6 +29,7 @@ from bores.solvers.explicit.saturation.immiscible import (
 )
 from bores.tables.rock_fluid import RockFluidTables
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
+from bores.updates import apply_saturation_boundary_conditions
 from bores.wells.indices import WellIndicesCache
 
 logger = logging.getLogger(__name__)
@@ -2440,13 +2439,13 @@ def evolve_saturation(
             capillary_pressure_grids=capillary_pressure_grids,
             mobility_grids=mobility_grids,
         )
-        try:
-            condition_number = spla.norm(jacobian, ord=2) * spla.norm(jacobian.T, ord=2)
-            logger.debug(f"Jacobian condition number estimate: {condition_number:.3e}")
-        except Exception as exc:  # noqa
-            logger.debug(
-                f"Error occured when computing Jacobian condition number. {exc}"
-            )
+        # try:
+        #     condition_number = spla.norm(jacobian, ord=2) * spla.norm(jacobian.T, ord=2)
+        #     logger.debug(f"Jacobian condition number estimate: {condition_number:.3e}")
+        # except Exception as exc:  # noqa
+        #     logger.debug(
+        #         f"Error occured when computing Jacobian condition number. {exc}"
+        #     )
 
         # Solve the linear system: J * dS = -R
         saturation_change, _ = solve_linear_system(

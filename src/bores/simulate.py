@@ -11,7 +11,6 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores._precision import get_dtype
 from bores.boundary_conditions import BoundaryConditions, default_bc
 from bores.config import Config
 from bores.constants import c
@@ -25,21 +24,11 @@ from bores.datastructures import (
 )
 from bores.errors import SimulationError, StopSimulation, TimingError, ValidationError
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
-from bores.grids.boundary_conditions import (
-    apply_boundary_conditions,
-    apply_pressure_boundary_condition,
-    apply_saturation_boundary_conditions,
-)
 from bores.grids.pvt import (
     build_three_phase_relative_mobilities_grids,
     build_three_phase_relative_permeabilities_grids,
 )
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
-from bores.grids.updates import (
-    apply_solution_gas_updates,
-    update_fluid_properties,
-    update_residual_saturation_grids,
-)
 from bores.grids.utils import pad_grid
 from bores.models import (
     FluidProperties,
@@ -47,12 +36,21 @@ from bores.models import (
     RockProperties,
     SaturationHistory,
 )
+from bores.precision import get_dtype
 from bores.solvers import explicit, implicit
 from bores.solvers.base import normalize_saturations
 from bores.states import ModelState
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTDataSet, PVTTables
 from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDimensions
+from bores.updates import (
+    apply_boundary_conditions,
+    apply_pressure_boundary_condition,
+    apply_saturation_boundary_conditions,
+    apply_solution_gas_updates,
+    update_fluid_properties,
+    update_residual_saturation_grids,
+)
 from bores.wells.base import Wells
 from bores.wells.indices import WellIndicesCache, build_well_indices_cache
 
@@ -2497,8 +2495,12 @@ def run(
     log_interval = config.log_interval
 
     logger.info("Starting simulation workflow...")
-    logger.info(f"Grid dimensions: {grid_shape}")
-    logger.info(f"Cell dimensions: {cell_dimension}")
+    logger.info(
+        f"Grid dimensions: (nx={grid_shape[0]}, ny={grid_shape[1]}, nz={grid_shape[2]})"
+    )
+    logger.info(
+        f"Cell dimensions: (dx={cell_dimension[0]}ft, dy={cell_dimension[1]}ft)"
+    )
     logger.info(
         f"Evolution scheme: {_SCHEME_ALIASES.get(scheme, scheme.replace('-', ' ').title())}"
     )

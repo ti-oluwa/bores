@@ -5,7 +5,6 @@ import threading
 import typing
 
 import attrs
-import numba
 
 from bores.constants import c
 from bores.errors import ComputationError, ValidationError

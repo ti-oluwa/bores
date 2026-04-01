@@ -8,9 +8,9 @@ import numpy.typing as npt
 from cachetools import LFUCache
 from scipy.integrate import cumulative_trapezoid, quad  # type: ignore[import-untyped]
 
-from bores._precision import get_dtype
 from bores.constants import c
 from bores.errors import ValidationError
+from bores.precision import get_dtype
 from bores.stores import StoreSerializable
 from bores.types import FloatOrArray
 

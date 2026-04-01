@@ -16,10 +16,10 @@ import numpy.typing as npt
 import plotly.graph_objects as go
 from typing_extensions import TypedDict, Unpack
 
-from bores._precision import get_dtype
 from bores.errors import ValidationError
 from bores.grids.utils import coarsen_grid
 from bores.models import ReservoirModel
+from bores.precision import get_dtype
 from bores.states import ModelState
 from bores.types import (
     OneDimensionalGrid,

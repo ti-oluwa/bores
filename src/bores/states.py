@@ -7,7 +7,6 @@ import attrs
 import numpy as np
 import numpy.typing as npt
 
-from bores._precision import get_dtype
 from bores.constants import c
 from bores.datastructures import BottomHolePressures, FormationVolumeFactors, Rates
 from bores.errors import ValidationError
@@ -23,6 +22,7 @@ from bores.models import (
     RockProperties,
     SaturationHistory,
 )
+from bores.precision import get_dtype
 from bores.serialization import Serializable
 from bores.timing import TimerState
 from bores.types import NDimension

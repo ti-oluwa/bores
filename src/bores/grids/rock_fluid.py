@@ -4,7 +4,6 @@ import typing
 import numba
 import numpy as np
 
-from bores._precision import get_dtype
 from bores.datastructures import PhaseRange
 from bores.errors import ValidationError
 from bores.grids.base import (
@@ -18,6 +17,7 @@ from bores.grids.pvt import (
     build_three_phase_relative_mobilities_grids,
     build_three_phase_relative_permeabilities_grids,
 )
+from bores.precision import get_dtype
 from bores.tables.rock_fluid import CapillaryPressureTable, RelativePermeabilityTable
 from bores.types import NDimensionalGrid, ThreeDimensions
 

@@ -1,5 +1,4 @@
 import typing
-import warnings
 
 import attrs
 import numba  # type: ignore[import-untyped]
@@ -7,9 +6,9 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores._precision import get_dtype
 from bores.errors import ValidationError
 from bores.grids.utils import pad_grid, unpad_grid
+from bores.precision import get_dtype
 from bores.serialization import Serializable
 from bores.types import ArrayLike, NDimension, NDimensionalGrid, Orientation
 

@@ -451,7 +451,9 @@ class Timer(StoreSerializable):
             and maximum_allowed_saturation_change is not None
             and maximum_saturation_change > maximum_allowed_saturation_change
         ):
-            overshoot_ratio = maximum_saturation_change / maximum_allowed_saturation_change
+            overshoot_ratio = (
+                maximum_saturation_change / maximum_allowed_saturation_change
+            )
 
             if overshoot_ratio > 3.0:
                 # Very large saturation changes. Apply aggressive reduction
@@ -467,7 +469,9 @@ class Timer(StoreSerializable):
                 )
             else:
                 # Moderate overshoot. Apply proportional reduction
-                sat_factor = maximum_allowed_saturation_change / maximum_saturation_change
+                sat_factor = (
+                    maximum_allowed_saturation_change / maximum_saturation_change
+                )
                 sat_factor = max(sat_factor, 0.5)  # Don't reduce too much
                 logger.debug(
                     f"Moderate saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
@@ -496,7 +500,9 @@ class Timer(StoreSerializable):
                 )
             else:
                 # Moderate overshoot
-                pressure_factor = maximum_allowed_pressure_change / maximum_pressure_change
+                pressure_factor = (
+                    maximum_allowed_pressure_change / maximum_pressure_change
+                )
                 pressure_factor = max(pressure_factor, 0.5)
                 logger.debug(
                     f"Moderate pressure change: {maximum_pressure_change:.4e} > {maximum_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
@@ -561,7 +567,9 @@ class Timer(StoreSerializable):
         :param maximum_allowed_pressure_change: Maximum allowed pressure change threshold.
         :return: True if the timestep is acceptable. Else, Flase.
         """
-        cfl_limit = cfl_threshold if cfl_threshold is not None else self.maximum_cfl_number
+        cfl_limit = (
+            cfl_threshold if cfl_threshold is not None else self.maximum_cfl_number
+        )
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > cfl_limit:
             return False
 
@@ -637,7 +645,9 @@ class Timer(StoreSerializable):
         adjustment_factors = []
 
         # CFL-based adjustment with safety margin
-        maximum_cfl = cfl_threshold if cfl_threshold is not None else self.maximum_cfl_number
+        maximum_cfl = (
+            cfl_threshold if cfl_threshold is not None else self.maximum_cfl_number
+        )
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > 0.0:
             target_cfl = maximum_cfl * self.cfl_safety_margin
             cfl_ratio = target_cfl / maximum_cfl_encountered
@@ -673,7 +683,9 @@ class Timer(StoreSerializable):
             and maximum_allowed_saturation_change is not None
             and maximum_saturation_change > 0.0
         ):
-            sat_utilization = maximum_saturation_change / maximum_allowed_saturation_change
+            sat_utilization = (
+                maximum_saturation_change / maximum_allowed_saturation_change
+            )
 
             if sat_utilization > 0.95:
                 # Very close to limit. Reduce step size
@@ -696,7 +708,8 @@ class Timer(StoreSerializable):
             elif sat_utilization < 0.3:
                 # Very low usage, could grow more aggressively
                 sat_factor = min(
-                    1.3, maximum_allowed_saturation_change / maximum_saturation_change * 0.8
+                    1.3,
+                    maximum_allowed_saturation_change / maximum_saturation_change * 0.8,
                 )
                 logger.debug(
                     f"Saturation change low ({sat_utilization:.2%}), allowing growth"
@@ -749,7 +762,8 @@ class Timer(StoreSerializable):
             else:
                 # Normal range. Apply proportional adjustment
                 pressure_factor = min(
-                    1.15, maximum_allowed_pressure_change / maximum_pressure_change * 0.9
+                    1.15,
+                    maximum_allowed_pressure_change / maximum_pressure_change * 0.9,
                 )
                 logger.debug(
                     f"Pressure change normal ({pres_utilization:.2%}), proportional growth"
@@ -806,7 +820,9 @@ class Timer(StoreSerializable):
                 maximum_pressure_change is not None
                 and maximum_allowed_pressure_change is not None
             ):
-                limits_ok &= (maximum_pressure_change / maximum_allowed_pressure_change) < 0.7
+                limits_ok &= (
+                    maximum_pressure_change / maximum_allowed_pressure_change
+                ) < 0.7
 
             if limits_ok:
                 dt *= self.ramp_up_factor  # type: ignore

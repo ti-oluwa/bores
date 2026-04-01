@@ -1,5 +1,4 @@
 import typing
-from collections.abc import MutableMapping
 
 import attrs
 import numpy as np

@@ -950,7 +950,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
     ) -> zarr.Array:
         chunks = self._get_chunks(data.shape)
         if ZARR_VERSION_GTE_3:
-            return group.create_array( # type: ignore
+            return group.create_array(  # type: ignore
                 name=name,
                 data=data,
                 shape=data.shape,

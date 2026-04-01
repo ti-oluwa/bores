@@ -15,7 +15,6 @@ from scipy.interpolate import (  # type: ignore[import-untyped]
 )
 from typing_extensions import Self
 
-from bores._precision import get_dtype
 from bores.constants import c
 from bores.correlations.core import compute_gas_gravity, compute_oil_api_gravity
 from bores.errors import ValidationError
@@ -42,6 +41,7 @@ from bores.grids.pvt import (
     build_water_formation_volume_factor_grid,
     build_water_viscosity_grid,
 )
+from bores.precision import get_dtype
 from bores.stores import StoreSerializable
 from bores.types import (
     FluidPhase,

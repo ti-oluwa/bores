@@ -5,7 +5,6 @@ import numba
 import numpy as np
 import numpy.typing as npt
 
-from bores._precision import get_dtype
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
@@ -13,6 +12,7 @@ from bores.datastructures import PhaseTensorsProxy
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
+from bores.precision import get_dtype
 from bores.solvers.base import (
     EvolutionResult,
     _warn_injection_rate,
