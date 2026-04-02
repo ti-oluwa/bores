@@ -16,7 +16,7 @@ BORES is a Python framework for 3D black-oil reservoir simulation of three-phase
 
 > **Disclaimer**: BORES is designed for **educational, research, and prototyping purposes**. It is not production-grade software and should not be used for critical business decisions or regulatory compliance. Results should be validated against established commercial simulators before any real-world application.
 
-**Full documentation @** [https://ti-oluwa.github.io/bores](https://ti-oluwa.github.io/bores)
+**Full documentation @** [https://ti-oluwa.github.io/BORES](https://ti-oluwa.github.io/BORES)
 
 > **NOTE**: The latest release does not match the current docs. The release for the current docs is still in development and is almost ready.
 
