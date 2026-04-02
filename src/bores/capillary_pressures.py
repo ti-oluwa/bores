@@ -6,7 +6,7 @@ import typing
 import attrs
 import numpy as np
 import numpy.typing as npt
-import plotly.graph_objects as go # type: ignore[import-untyped]
+import plotly.graph_objects as go  # type: ignore[import-untyped]
 
 from bores.constants import c
 from bores.errors import ValidationError
@@ -21,7 +21,6 @@ from bores.types import (
     Wettability,
 )
 from bores.utils import piecewise_linear_slope
-from bores.visualization.plotly1d import make_series_plot
 
 __all__ = [
     "BrooksCoreyCapillaryPressureModel",
@@ -153,6 +152,8 @@ class CapillaryPressureTable(StoreSerializable):
         :param kwargs: Additional keyword arguments to pass to `get_capillary_pressures`, if needed by specific table implementations.
         :return: Plotly `graph_objects.Figure` object.
         """
+        from bores.visualization.plotly1d import make_series_plot
+
         pressures = self.get_capillary_pressures(
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
@@ -1399,7 +1400,7 @@ class VanGenuchtenCapillaryPressureModel(
     supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
-    def get_capillary_pressures(  
+    def get_capillary_pressures(
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -1481,7 +1482,7 @@ class VanGenuchtenCapillaryPressureModel(
         )
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
-    def get_capillary_pressure_derivatives(  **kwargs: typing.Any,
+    def get_capillary_pressure_derivatives(
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -1665,7 +1666,7 @@ class VanGenuchtenCapillaryPressureModel(
             dPcgo_dSo=zero,
         )
 
-    
+
 def compute_leverett_j_capillary_pressures(
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
@@ -1912,7 +1913,7 @@ class LeverettJCapillaryPressureModel(
     supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
-    def get_capillary_pressures(  
+    def get_capillary_pressures(
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,

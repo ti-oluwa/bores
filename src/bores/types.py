@@ -201,6 +201,64 @@ class MixingRuleFunc(typing.Protocol):
         ...
 
 
+class MixingRulePartialDerivatives(TypedDict):
+    """
+    The five partial derivatives of a three-phase oil relative permeability
+    mixing rule with respect to each of its five arguments.
+ 
+    The mixing rule signature is:
+ 
+        kro = rule(kro_w, kro_g, water_saturation, oil_saturation, gas_saturation)
+ 
+    Fields:
+
+    d_kro_d_kro_w :
+        ∂kro / ∂kro_w  - sensitivity to the oil-water two-phase oil kr.
+    d_kro_d_kro_g :
+        ∂kro / ∂kro_g  - sensitivity to the gas-oil two-phase oil kr.
+    d_kro_d_sw_explicit :
+        ∂kro / ∂Sw  through the explicit water-saturation argument of the
+        mixing rule (e.g. saturation weighting in ``eclipse_rule``).
+        Zero for rules that do not depend directly on saturation.
+    d_kro_d_so_explicit :
+        ∂kro / ∂So  through the explicit oil-saturation argument.
+    d_kro_d_sg_explicit :
+        ∂kro / ∂Sg  through the explicit gas-saturation argument.
+    """
+ 
+    d_kro_d_kro_w: FloatOrArray
+    d_kro_d_kro_g: FloatOrArray
+    d_kro_d_sw_explicit: FloatOrArray
+    d_kro_d_so_explicit: FloatOrArray
+    d_kro_d_sg_explicit: FloatOrArray
+
+
+class MixingRuleDFunc(typing.Protocol):
+    """
+    Protocol for a mixing rule partial derivatives function.
+    """
+
+    def __call__(
+        self,
+        *,
+        kro_w: FloatOrArray,
+        kro_g: FloatOrArray,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
+    ) -> MixingRulePartialDerivatives:
+        """
+
+        :param kro_w: Property value for water phase.
+        :param kro_g: Property value for gas phase.
+        :param water_saturation: Saturation of the water phase.
+        :param oil_saturation: Saturation of the oil phase.
+        :param gas_saturation: Saturation of the gas phase.
+        :return: The partial derivatives.
+        """
+        ...
+
+
 class RelativePermeabilities(TypedDict):
     """Dictionary holding relative permeabilities for different phases."""
 

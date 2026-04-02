@@ -17,14 +17,15 @@ from bores.stores import StoreSerializable
 from bores.types import (
     FloatOrArray,
     FluidPhase,
+    MixingRuleDFunc,
     MixingRuleFunc,
+    MixingRulePartialDerivatives,
     RelativePermeabilities,
     RelativePermeabilityDerivatives,
     T,
     Wettability,
 )
 from bores.utils import piecewise_linear_slope
-from bores.visualization.plotly1d import make_series_plot
 
 __all__ = [
     "BrooksCoreyThreePhaseRelPermModel",
@@ -43,14 +44,12 @@ __all__ = [
     "get_relperm_table",
     "harmonic_mean_rule",
     "hustad_hansen_rule",
-    "linear_interpolation_rule",
     "list_relperm_tables",
     "max_rule",
     "max_rule",
     "mixing_rule",
     "product_saturation_weighted_rule",
     "relperm_table",
-    "saturation_weighted_interpolation_rule",
     "stone_II_rule",
     "stone_I_rule",
 ]
@@ -68,7 +67,6 @@ Comparison of common three-phase relative permeability mixing rules:
 | Stone II            | Moderate             | Moderate    | Standard industry practice                  |
 | Arithmetic Mean     | Optimistic           | Simple      | Upper bound estimate                        |
 | Max                 | Very optimistic      | Simple      | Upper bound, sensitivity                    |
-| Saturation Weighted | Moderate             | Moderate    | Varying wettability                         |
 | Blunt               | Conservative         | Moderate    | Strong water-wet                            |
 | Eclipse             | Moderate             | Moderate    | Commercial simulator standard               |
 | Aziz-Settari        | Variable             | Moderate    | Empirical tuning                            |
@@ -78,26 +76,66 @@ Comparison of common three-phase relative permeability mixing rules:
 @typing.final
 @attrs.define
 class MixingRule:
+    """
+    Wraps a mixing-rule callable together with an optional analytical
+    partial-derivative function.
+
+    **Construction**:
+
+    Normally produced by the ``@mixing_rule`` decorator, which registers the
+    rule and returns a ``MixingRule`` instance.  You can also build one
+    directly:
+
+    ```python
+    my_rule = MixingRule(func=my_func)
+    ```
+
+    **Attaching an analytical derivative later**:
+
+    Use `MixingRule.dfunc` as a decorator:
+
+    ```python
+    @my_rule.dfunc
+    def _(kro_w, kro_g, water_saturation, oil_saturation, gas_saturation):
+        ...
+        return MixingRulePartialDerivatives(...)
+    ```
+
+    **Protocol-compatible objects**:
+
+    If the wrapped callable also has a `partial_derivatives` method (i.e. it
+    is a class instance that matches `MixingRuleFunc` and exposes its own
+    derivative logic), that method is automatically promoted to `_dfunc`
+    during `__attrs_post_init__`.
+    """
+
     func: typing.Union[MixingRuleFunc, "MixingRule"]
-    _dfunc: typing.Optional[typing.Callable[..., typing.Any]] = None
+    _dfunc: typing.Optional[MixingRuleDFunc] = attrs.field(default=None, alias="_dfunc")
 
-    def __post_init__(self) -> None:
+    def __attrs_post_init__(self) -> None:
+        # If the wrapped callable advertises its own partial_derivatives,
+        # promote it automatically (protocol-compatible class pattern).
         if self._dfunc is None:
-            dfunc = getattr(self.func, "derivatives", None)
+            dfunc = getattr(self.func, "partial_derivatives", None)
             if callable(dfunc):
-                self._dfunc = typing.cast(
-                    typing.Callable[..., typing.Any],
-                    dfunc,
-                )
+                self._dfunc = typing.cast(MixingRuleDFunc, dfunc)
 
-    def dfunc(
-        self, dfunc: typing.Callable[..., typing.Any], /
-    ) -> typing.Callable[..., typing.Any]:
+    def dfunc(self, fn: MixingRuleDFunc, /) -> MixingRuleDFunc:
         """
-        Decorator to set the partial derivative function for this mixing rule.
+        Decorator that registers an analytical partial-derivative function for
+        this mixing rule.
+
+        Usage:
+
+        ```python
+        @stone_I_rule.dfunc
+        def _(kro_w, kro_g, water_saturation, oil_saturation, gas_saturation):
+            ...
+            return MixingRulePartialDerivatives(...)
+        ```
         """
-        self._dfunc = dfunc
-        return dfunc
+        self._dfunc = fn
+        return fn
 
     def __call__(
         self,
@@ -123,7 +161,28 @@ class MixingRule:
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
         epsilon: float = 1e-7,
-    ):
+    ) -> MixingRulePartialDerivatives:
+        """
+        Return the five partial derivatives of this mixing rule.
+
+        If an analytical derivative function has been registered (via
+        `@rule.dfunc` or auto-detected from `func.partial_derivatives`),
+        it is called directly. Otherwise the derivatives are estimated with
+        central finite differences (ten mixing-rule evaluations).
+
+        :param kro_w: Two-phase oil relative permeability with respect to water
+            at the current iterate.
+        :param kro_g: Two-phase oil relative permeability with respect to gas
+            at the current iterate.
+        :param water_saturation: Current water saturation.
+        :param oil_saturation: Current oil saturation.
+        :param gas_saturation: Current gas saturation.
+        :param epsilon: Step size for central differences (used only in the
+            fallback path). Defaults to 1e-7.
+        :return: A dictionary containing the five partial derivatives:
+            `"d_kro_d_kro_w"`, `"d_kro_d_kro_g"`, `"d_kro_d_water_saturation"`,
+            `"d_kro_d_oil_saturation"`, `"d_kro_d_gas_saturation"`.
+        """
         if self._dfunc is not None:
             return self._dfunc(
                 kro_w=kro_w,
@@ -132,7 +191,155 @@ class MixingRule:
                 oil_saturation=oil_saturation,
                 gas_saturation=gas_saturation,
             )
-        # Do central difference approach here
+        return _central_difference_partial_derivatives(
+            rule=self,
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            epsilon=epsilon,
+        )
+
+    def __str__(self) -> str:
+        return self.func.__name__ if hasattr(self.func, "__name__") else repr(self.func)  # type: ignore[union-attr]
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(func={self.func!r}, dfunc={self._dfunc!r})"
+
+
+def _central_difference_partial_derivatives(
+    rule: MixingRuleFunc,
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    epsilon: float = 1e-7,
+) -> MixingRulePartialDerivatives:
+    """
+    Compute all five partial derivatives of a mixing rule via central finite differences.
+
+    This function approximates the partial derivatives numerically when an analytical
+    derivative function is not available. It computes central differences for each of
+    the five arguments to the mixing rule.
+
+    **Formula**:
+
+    For each argument `arg`, the partial derivative is computed as:
+
+    ```python
+    ∂kro/∂arg ≈ (kro(arg + ε) - kro(arg - ε)) / (2ε)
+    ```
+
+    where `ε` is the finite difference step size.
+
+    **Cost**: Ten mixing rule evaluations (five central difference pairs),
+    each O(1), regardless of grid size.
+
+    :param rule: The mixing rule callable to differentiate.
+    :param kro_w: Oil relative permeability from the oil-water two-phase table.
+    :param kro_g: Oil relative permeability from the gas-oil two-phase table.
+    :param water_saturation: Current water saturation.
+    :param oil_saturation: Current oil saturation.
+    :param gas_saturation: Current gas saturation.
+    :param epsilon: Finite difference step size (default: 1e-7).
+    :return: `MixingRulePartialDerivatives` dictionary containing all five partial derivatives.
+    """
+    two_eps = 2.0 * epsilon
+
+    d_kro_d_kro_w = (
+        rule(
+            kro_w=kro_w + epsilon,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+        )
+        - rule(
+            kro_w=kro_w - epsilon,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+        )
+    ) / two_eps
+
+    d_kro_d_kro_g = (
+        rule(
+            kro_w=kro_w,
+            kro_g=kro_g + epsilon,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+        )
+        - rule(
+            kro_w=kro_w,
+            kro_g=kro_g - epsilon,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+        )
+    ) / two_eps
+
+    d_kro_d_sw_explicit = (
+        rule(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation + epsilon,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+        )
+        - rule(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation - epsilon,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+        )
+    ) / two_eps
+
+    d_kro_d_so_explicit = (
+        rule(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation + epsilon,
+            gas_saturation=gas_saturation,
+        )
+        - rule(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation - epsilon,
+            gas_saturation=gas_saturation,
+        )
+    ) / two_eps
+
+    d_kro_d_sg_explicit = (
+        rule(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation + epsilon,
+        )
+        - rule(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation - epsilon,
+        )
+    ) / two_eps
+
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=d_kro_d_sw_explicit,
+        d_kro_d_so_explicit=d_kro_d_so_explicit,
+        d_kro_d_sg_explicit=d_kro_d_sg_explicit,
+    )
 
 
 _MIXING_RULES: typing.Dict[str, MixingRule] = {}
@@ -159,7 +366,7 @@ def mixing_rule(
     override: bool = False,
     serializer: typing.Optional[typing.Callable[[MixingRule, bool], T]] = None,
     deserializer: typing.Optional[typing.Callable[[T], MixingRule]] = None,
-) -> typing.Callable[[MixingRule], MixingRule]: ...
+) -> typing.Callable[[typing.Union[MixingRuleFunc, MixingRule]], MixingRule]: ...
 
 
 @typing.overload
@@ -167,12 +374,8 @@ def mixing_rule(
     func: typing.Union[MixingRuleFunc, MixingRule],
     name: typing.Optional[str] = None,
     override: bool = False,
-    serializer: typing.Optional[
-        typing.Callable[[typing.Union[MixingRuleFunc, MixingRule], bool], T]
-    ] = None,
-    deserializer: typing.Optional[
-        typing.Callable[[T], typing.Union[MixingRuleFunc, MixingRule]]
-    ] = None,
+    serializer: typing.Optional[typing.Callable[[MixingRule, bool], T]] = None,
+    deserializer: typing.Optional[typing.Callable[[T], MixingRule]] = None,
 ) -> MixingRule: ...
 
 
@@ -180,71 +383,90 @@ def mixing_rule(
     func: typing.Optional[typing.Union[MixingRuleFunc, MixingRule]] = None,
     name: typing.Optional[str] = None,
     override: bool = False,
-    serializer: typing.Optional[
-        typing.Callable[[typing.Union[MixingRuleFunc, MixingRule], bool], T]
-    ] = None,
-    deserializer: typing.Optional[
-        typing.Callable[[T], typing.Union[MixingRuleFunc, MixingRule]]
-    ] = None,
-) -> typing.Union[MixingRule, typing.Callable[[MixingRule], MixingRule]]:
+    serializer: typing.Optional[typing.Callable[[MixingRule, bool], T]] = None,
+    deserializer: typing.Optional[typing.Callable[[T], MixingRule]] = None,
+) -> typing.Union[
+    MixingRule, typing.Callable[[typing.Union[MixingRuleFunc, MixingRule]], MixingRule]
+]:
     """
-    Decorator to register a mixing rule function.
+    Decorator that registers a mixing rule function or `MixingRule` instance.
 
-    A mixing rule function combines two-phase relative permeabilities
-    into a three-phase relative permeability based on saturations.
+    **Behaviour**:
 
-    :param func: Mixing rule function to register.
-    :param name: Optional name to register the function under.
-    :param override: Whether to override an existing registration with the same name.
-        If `False` (default), raises an error on name conflicts.
-    :param serializer: Optional function to serialize the mixing rule.
-        This is especially useful for parameterized mixing rules.
-    :param deserializer: Optional function to deserialize the mixing rule.
-        This is especially useful for parameterized mixing rules.
-    :return: The original function.
+    - If `func` is a plain callable (matching `MixingRuleFunc`), it is wrapped
+      in a new `MixingRule` and the wrapper is registered.
+    - If `func` is already a `MixingRule`, it is registered as-is.
+    - The registered (and possibly newly wrapped) `MixingRule` is returned, so
+      the decorated name in the module namespace holds a `MixingRule`, not a
+      bare function.
 
-    Example:
+    **Plain function**:
+
     ```python
-    @mixing_rule(name="custom_rule")
-    def custom_rule(
-        kro_w: FloatOrArray,
-        kro_g: FloatOrArray,
-        water_saturation: FloatOrArray,
-        oil_saturation: FloatOrArray,
-        gas_saturation: FloatOrArray,
-    ) -> FloatOrArray:
-        # Custom mixing logic here
+    @mixing_rule
+    def my_rule(kro_w, kro_g, water_saturation, oil_saturation, gas_saturation):
         return (kro_w + kro_g) / 2.0
-
-    # Usage
-    rule = get_mixing_rule("custom_rule")
-    result = rule(kro_w, kro_g, Sw, So, Sg)
     ```
+
+    **Protocol-compatible class**:
+
+    ```python
+    class MyRule:
+        def __call__(self, *, kro_w, kro_g, ...): ...
+        def partial_derivatives(self, *, kro_w, kro_g, ...): ...
+
+    my_rule = mixing_rule(MyRule())
+    ```
+
+    **With keyword arguments**:
+
+    ```python
+    @mixing_rule(name="custom", override=True)
+    def my_rule(...): ...
+    ```
+
+    :param func: The function or `MixingRule` to register. When omitted, the
+        decorator is called with keyword arguments and returns a one-argument decorator.
+    :param name: Registry key. Defaults to `func.__name__`.
+    :param override: If `False` (default), raises on duplicate names.
+    :param serializer: Optional serializer for parameterised rules (e.g. `aziz_settari_rule`).
+    :param deserializer: Optional deserializer for parameterised rules.
+    :return: The registered `MixingRule` instance.
     """
 
-    def decorator(func: typing.Union[MixingRuleFunc, MixingRule]) -> MixingRule:
-        rule_name = name or getattr(func, "__name__", None)
+    def _register(
+        f: typing.Union[MixingRuleFunc, MixingRule],
+    ) -> MixingRule:
+        # Determine the registry key
+        rule_name = name or getattr(f, "__name__", None)
         if rule_name is None:
             raise ValueError(
-                "Mixing rule function  must have a `__name__` attribute or a name must be provided."
+                "Mixing rule must have a `__name__` attribute or `name` must be provided."
             )
+
+        # Wrap plain callables; pass `MixingRule` instances through
+        if isinstance(f, MixingRule):
+            rule = f
+        else:
+            rule = MixingRule(func=f)
 
         with _lock:
             if rule_name in _MIXING_RULES and not override:
                 raise ValidationError(
-                    f"Mixing rule '{rule_name}' is already registered. Use `override=True` or provide a different name."
+                    f"Mixing rule '{rule_name}' is already registered. "
+                    "Use `override=True` or provide a different name."
                 )
-
-            _MIXING_RULES[rule_name] = func
+            _MIXING_RULES[rule_name] = rule
             if serializer is not None:
-                _MIXING_RULE_SERIALIZERS[func] = serializer
+                _MIXING_RULE_SERIALIZERS[rule] = serializer
             if deserializer is not None:
                 _MIXING_RULE_DESERIALIZERS[rule_name] = deserializer
-        return func
+
+        return rule
 
     if func is None:
-        return decorator
-    return decorator(func)
+        return _register
+    return _register(func)
 
 
 def serialize_mixing_rule(rule: MixingRule, recurse: bool = True) -> typing.Any:
@@ -309,6 +531,11 @@ def get_mixing_rule(name: str) -> MixingRule:
     )
 
 
+def _zeros_like_kro(kro_w: FloatOrArray) -> FloatOrArray:
+    """Return an array (or scalar) of zeros with the same shape as kro_w."""
+    return np.zeros_like(kro_w) if not np.isscalar(kro_w) else 0.0
+
+
 @mixing_rule
 @numba.njit(cache=True)
 def min_rule(
@@ -323,6 +550,38 @@ def min_rule(
     kro = min(kro_w, kro_g)
     """
     return np.minimum(kro_w, kro_g)
+
+
+@min_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """
+    Analytical derivatives for min_rule.
+
+    kro = min(kro_w, kro_g)
+
+    Where kro_w < kro_g  →  ∂kro/∂kro_w = 1, ∂kro/∂kro_g = 0
+    Where kro_g ≤ kro_w  →  ∂kro/∂kro_w = 0, ∂kro/∂kro_g = 1
+    Tie: split evenly (0.5 each) — subgradient convention.
+    No explicit saturation dependence.
+    """
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    d_kro_d_kro_w = np.where(kw < kg, 1.0, np.where(kw > kg, 0.0, 0.5))
+    d_kro_d_kro_g = 1.0 - d_kro_d_kro_w
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=z,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=z,
+    )
 
 
 @mixing_rule
@@ -342,6 +601,41 @@ def stone_I_rule(
     result = (kro_w * kro_g) / denom
     # Return 0 if both kro_w and kro_g are zero
     return np.where((kro_w <= 0.0) & (kro_g <= 0.0), 0.0, result)
+
+
+@stone_I_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """
+    Analytical derivatives for Stone I.
+
+    Let D = kro_w + kro_g - kro_w * kro_g  (clamped ≥ ε)
+        N = kro_w * kro_g
+
+    ∂kro/∂kro_w = (kro_g * D - N * (1 - kro_g)) / D²
+                = kro_g² / D²           (after simplification)
+    ∂kro/∂kro_g = kro_w² / D²          (by symmetry)
+    """
+    eps = 1e-12
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    D = np.maximum(kw + kg - kw * kg, eps)
+    both_zero = (kw <= 0.0) & (kg <= 0.0)
+    d_kro_d_kro_w = np.where(both_zero, 0.0, kg**2 / D**2)
+    d_kro_d_kro_g = np.where(both_zero, 0.0, kw**2 / D**2)
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=z,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=z,
+    )
 
 
 @mixing_rule
@@ -410,6 +704,40 @@ def stone_II_rule(
     return np.where((kro_w <= 0.0) | (kro_g <= 0.0), 0.0, result)
 
 
+@stone_II_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """
+    Analytical derivatives for Stone II (unit-endpoint).
+
+    kro = max(kro_w + kro_g - 1, 0)  when both > 0, else 0.
+
+    Active region (kro > 0 and both inputs > 0):
+        ∂kro/∂kro_w = 1,  ∂kro/∂kro_g = 1
+    Inactive region (clamped to 0):
+        both derivatives = 0
+    """
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    active = (kw > 0.0) & (kg > 0.0) & (kw + kg - 1.0 > 0.0)
+    ones = np.ones_like(kw)
+    d_kro_d_kro_w = np.where(active, ones, 0.0)
+    d_kro_d_kro_g = np.where(active, ones, 0.0)
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=z,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=z,
+    )
+
+
 @mixing_rule
 @numba.njit(cache=True)
 def arithmetic_mean_rule(
@@ -432,6 +760,26 @@ def arithmetic_mean_rule(
     return (kro_w + kro_g) / 2.0
 
 
+@arithmetic_mean_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """∂kro/∂kro_w = 0.5, ∂kro/∂kro_g = 0.5, no saturation dependence."""
+    half = np.full_like(np.asarray(kro_w, dtype=np.float64), 0.5)
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=half,
+        d_kro_d_kro_g=half,
+        d_kro_d_sw_explicit=z,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=z,
+    )
+
+
 @mixing_rule
 @numba.njit(cache=True)
 def geometric_mean_rule(
@@ -452,6 +800,37 @@ def geometric_mean_rule(
         - Smooth transition between two-phase limits
     """
     return np.sqrt(kro_w * kro_g)
+
+
+@geometric_mean_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """
+    kro = sqrt(kw * kg)
+
+    ∂kro/∂kro_w = 0.5 * sqrt(kro_g / kro_w)   (= kro_g / (2 * kro))
+    ∂kro/∂kro_g = 0.5 * sqrt(kro_w / kro_g)
+    Zero when either input is zero.
+    """
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    kro = np.sqrt(kw * kg)
+    safe_kro = np.maximum(kro, 1e-30)
+    d_kro_d_kro_w = np.where(kro > 0.0, 0.5 * kg / safe_kro, 0.0)
+    d_kro_d_kro_g = np.where(kro > 0.0, 0.5 * kw / safe_kro, 0.0)
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=z,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=z,
+    )
 
 
 @mixing_rule
@@ -485,38 +864,35 @@ def harmonic_mean_rule(
     return np.where((kro_w <= 0.0) | (kro_g <= 0.0), 0.0, result)
 
 
-@mixing_rule
-@numba.njit(cache=True)
-def saturation_weighted_interpolation_rule(
+@harmonic_mean_rule.dfunc
+def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> FloatOrArray:
+) -> MixingRulePartialDerivatives:
     """
-    Saturation-weighted interpolation between oil-water and oil-gas systems.
+    kro = 2 kw kg / (kw + kg)
 
-    kro = kro_w * (Sw / (Sw + Sg)) + kro_g * (Sg / (Sw + Sg))
-
-    Notes:
-        - Interpolates based on ratio of water to gas saturation
-        - Reduces to kro_w when Sg=0 (oil-water system)
-        - Reduces to kro_g when Sw=0 (oil-gas system)
-        - Similar to Stone II but uses different saturation ratios
+    ∂kro/∂kw = 2 kg² / (kw + kg)²
+    ∂kro/∂kg = 2 kw² / (kw + kg)²
+    Zero when either input is zero.
     """
-    total_displacing_phase = water_saturation + gas_saturation
-
-    water_weight = np.where(
-        total_displacing_phase > 0.0, water_saturation / total_displacing_phase, 0.0
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    both_positive = (kw > 0.0) & (kg > 0.0)
+    safe_sum = np.where(both_positive, kw + kg, 1.0)
+    d_kro_d_kro_w = np.where(both_positive, 2.0 * kg**2 / safe_sum**2, 0.0)
+    d_kro_d_kro_g = np.where(both_positive, 2.0 * kw**2 / safe_sum**2, 0.0)
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=z,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=z,
     )
-    gas_weight = np.where(
-        total_displacing_phase > 0.0, gas_saturation / total_displacing_phase, 0.0
-    )
-
-    result = (kro_w * water_weight) + (kro_g * gas_weight)
-    # Return maximum of kro_w and kro_g if total_displacing_phase is zero (pure oil)
-    return np.where(total_displacing_phase > 0.0, result, np.maximum(kro_w, kro_g))
 
 
 @mixing_rule
@@ -534,19 +910,19 @@ def baker_linear_rule(
     Interpolates three-phase kro as a saturation-weighted combination
     of the two-phase endpoint values:
 
-        kro = (Sw * kro_w + So * kro_oil_water_contact_angleendpoint + Sg * kro_g) / (Sw + So + Sg)
+        kro = (Sw * kro_w + So * kro_ow_endpoint + Sg * kro_g) / (Sw + So + Sg)
 
-    where kro_oil_water_contact_angleendpoint is approximated as max(kro_w, kro_g) (the oil kr
+    where kro_ow_endpoint is approximated as max(kro_w, kro_g) (the oil kr
     at the oil-water endpoint, i.e. in absence of gas), and kro_g is the
     oil kr from the gas-oil table.
 
     Simplification used here (standard Baker linear, no separate endpoint table):
+
         kro = (Sw * kro_w + Sg * kro_g) / (Sw + Sg)   when Sw+Sg > 0
-        kro = max(kro_w, kro_g)                         when Sw+Sg = 0 (pure oil)
+        kro = max(kro_w, kro_g)                       when Sw+Sg = 0 (pure oil)
 
     This reduces exactly to kro_w at Sg=0 and kro_g at Sw=0.
 
-    Note: This is similar to `saturation_weighted_interpolation_rule`
     """
     total_displacing = water_saturation + gas_saturation
 
@@ -556,6 +932,46 @@ def baker_linear_rule(
         np.maximum(kro_w, kro_g),
     )
     return result
+
+
+@baker_linear_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """
+    Identical structure to saturation_weighted_interpolation_rule — same formula.
+
+    ∂kro/∂kw  = Sw / T
+    ∂kro/∂kg  = Sg / T
+    ∂kro/∂Sw  = Sg * (kw - kg) / T²
+    ∂kro/∂Sg  = Sw * (kg - kw) / T²
+    ∂kro/∂So  = 0
+    """
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    sw = np.asarray(water_saturation, dtype=np.float64)
+    sg = np.asarray(gas_saturation, dtype=np.float64)
+
+    T = sw + sg
+    active = T > 0.0
+    T_safe = np.where(active, T, 1.0)
+
+    d_kro_d_kro_w = np.where(active, sw / T_safe, 0.0)
+    d_kro_d_kro_g = np.where(active, sg / T_safe, 0.0)
+    d_sw = np.where(active, sg * (kw - kg) / T_safe**2, 0.0)
+    d_sg = np.where(active, sw * (kg - kw) / T_safe**2, 0.0)
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=d_sw,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=d_sg,
+    )
 
 
 @mixing_rule
@@ -587,6 +1003,38 @@ def blunt_rule(
     return np.where((kro_w <= 0.0) | (kro_g <= 0.0), 0.0, result)
 
 
+@blunt_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """
+    kro = kw * kg * (2 - kw - kg)
+
+    ∂kro/∂kw = kg * (2 - kw - kg) + kw * kg * (-1)
+             = kg * (2 - 2*kw - kg)
+    ∂kro/∂kg = kw * (2 - kw - 2*kg)
+
+    Clamped region (kro ≤ 0) or either input zero → derivative = 0.
+    """
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    active = (kw > 0.0) & (kg > 0.0) & (kw * kg * (2.0 - kw - kg) > 0.0)
+    d_kro_d_kro_w = np.where(active, kg * (2.0 - 2.0 * kw - kg), 0.0)
+    d_kro_d_kro_g = np.where(active, kw * (2.0 - kw - 2.0 * kg), 0.0)
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=z,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=z,
+    )
+
+
 @mixing_rule
 @numba.njit(cache=True)
 def hustad_hansen_rule(
@@ -602,14 +1050,54 @@ def hustad_hansen_rule(
     kro = (kro_w * kro_g) / max(kro_w, kro_g)
 
     Notes:
-        - Conservative estimate
-        - Ensures kro ≤ min(kro_w, kro_g)
-        - Good for intermediate wettability systems
+    - Conservative estimate
+    - Ensures kro ≤ min(kro_w, kro_g)
+    - Good for intermediate wettability systems
     """
     max_kr = np.maximum(np.maximum(kro_w, kro_g), 1e-12)
     result = (kro_w * kro_g) / max_kr
     # Return 0 if both kro_w and kro_g are zero
     return np.where((kro_w <= 0.0) & (kro_g <= 0.0), 0.0, result)
+
+
+@hustad_hansen_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """
+    kro = (kw * kg) / max(kw, kg)
+
+    Case kw > kg:  kro = kw * kg / kw = kg
+        ∂kro/∂kw = 0,  ∂kro/∂kg = 1
+
+    Case kg > kw:  kro = kw * kg / kg = kw
+        ∂kro/∂kw = 1,  ∂kro/∂kg = 0
+
+    Case kw == kg (tie):  kro = kw = kg,  use subgradient 0.5 each.
+
+    Both zero → 0.
+    """
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    both_zero = (kw <= 0.0) & (kg <= 0.0)
+    d_kro_d_kro_w = np.where(
+        both_zero, 0.0, np.where(kw > kg, 0.0, np.where(kg > kw, 1.0, 0.5))
+    )
+    d_kro_d_kro_g = np.where(
+        both_zero, 0.0, np.where(kg > kw, 0.0, np.where(kw > kg, 1.0, 0.5))
+    )
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=z,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=z,
+    )
 
 
 def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
@@ -630,35 +1118,67 @@ def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
     :return: A mixing rule function implementing the Aziz-Settari correlation.
     """
 
-    def aziz_settari_serializer(
+    def _aziz_settari_serializer(
         rule: MixingRule, recurse: bool = True
     ) -> typing.Dict[str, float]:
         return {"a": a, "b": b}
 
-    def aziz_settari_deserializer(data: typing.Dict[str, float]) -> MixingRule:
+    def _aziz_settari_deserializer(data: typing.Any) -> MixingRule:
         if not isinstance(data, dict) or "a" not in data or "b" not in data:
             raise ValidationError("Invalid data for Aziz-Settari deserialization.")
         return aziz_settari_rule(a=data["a"], b=data["b"])
 
-    @mixing_rule(
-        name=f"aziz_settari(a={a},b={b})",
-        serializer=aziz_settari_serializer,
-        deserializer=aziz_settari_deserializer,
-    )
     @numba.njit(cache=True)
-    def _rule(
+    def _func(
         kro_w: FloatOrArray,
         kro_g: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
     ) -> FloatOrArray:
-        result = (kro_w**a) * (kro_g**b)
-        # Return 0 if either kro_w or kro_g is zero
+        result = kro_w**a * kro_g**b
         return np.where((kro_w <= 0.0) | (kro_g <= 0.0), 0.0, result)
 
-    _rule.__name__ = f"aziz_settari_rule(a={a},b={b})"  # type: ignore[attr-defined]
-    return _rule
+    rule: MixingRule = mixing_rule(
+        _func,
+        name=f"aziz_settari(a={a},b={b})",
+        serializer=_aziz_settari_serializer,
+        deserializer=_aziz_settari_deserializer,
+    )
+
+    @rule.dfunc
+    def _dfunc(
+        kro_w: FloatOrArray,
+        kro_g: FloatOrArray,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
+    ) -> MixingRulePartialDerivatives:
+        """
+        kro = kw^a * kg^b
+
+        ∂kro/∂kw = a * kw^(a-1) * kg^b
+        ∂kro/∂kg = b * kw^a    * kg^(b-1)
+
+        Zero when either input is zero or non-positive.
+        """
+        kw = np.asarray(kro_w, dtype=np.float64)
+        kg = np.asarray(kro_g, dtype=np.float64)
+        active = (kw > 0.0) & (kg > 0.0)
+        safe_kw = np.where(active, kw, 1.0)
+        safe_kg = np.where(active, kg, 1.0)
+        d_kro_d_kro_w = np.where(active, a * safe_kw ** (a - 1.0) * safe_kg**b, 0.0)
+        d_kro_d_kro_g = np.where(active, b * safe_kw**a * safe_kg ** (b - 1.0), 0.0)
+        z = _zeros_like_kro(kro_w)
+        return MixingRulePartialDerivatives(
+            d_kro_d_kro_w=d_kro_d_kro_w,
+            d_kro_d_kro_g=d_kro_d_kro_g,
+            d_kro_d_sw_explicit=z,
+            d_kro_d_so_explicit=z,
+            d_kro_d_sg_explicit=z,
+        )
+
+    return rule
 
 
 @mixing_rule
@@ -698,6 +1218,68 @@ def eclipse_rule(
     return np.where(total_mobile > 0.0, result, 0.0)
 
 
+@eclipse_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """
+    kro = kw * So/(So+Sg) + kg * So/(So+Sw)
+
+    Let  Dw = So + Sg,   Dg = So + Sw.
+
+    ∂kro/∂kw  = So / Dw
+    ∂kro/∂kg  = So / Dg
+
+    ∂kro/∂Sw (explicit):
+        Only Dg depends on Sw:  ∂(kg * So/Dg)/∂Sw = -kg * So / Dg²
+
+    ∂kro/∂So (explicit):
+        ∂(kw*So/Dw)/∂So = kw * Sg / Dw²
+        ∂(kg*So/Dg)/∂So = kg * Sw / Dg²
+        → kw * Sg / Dw² + kg * Sw / Dg²
+
+    ∂kro/∂Sg (explicit):
+        Only Dw depends on Sg:  ∂(kw*So/Dw)/∂Sg = -kw * So / Dw²
+    """
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    sw = np.asarray(water_saturation, dtype=np.float64)
+    so = np.asarray(oil_saturation, dtype=np.float64)
+    sg = np.asarray(gas_saturation, dtype=np.float64)
+
+    total_mobile = so + sw + sg
+    active = total_mobile > 0.0
+
+    Dw = so + sg
+    Dg = so + sw
+    Dw_safe = np.where(Dw > 0.0, Dw, 1.0)
+    Dg_safe = np.where(Dg > 0.0, Dg, 1.0)
+
+    d_kro_d_kro_w = np.where(active & (Dw > 0.0), so / Dw_safe, 0.0)
+    d_kro_d_kro_g = np.where(active & (Dg > 0.0), so / Dg_safe, 0.0)
+
+    d_sw = np.where(active & (Dg > 0.0), -kg * so / Dg_safe**2, 0.0)
+    d_so = np.where(
+        active,
+        np.where(Dw > 0.0, kw * sg / Dw_safe**2, 0.0)
+        + np.where(Dg > 0.0, kg * sw / Dg_safe**2, 0.0),
+        0.0,
+    )
+    d_sg = np.where(active & (Dw > 0.0), -kw * so / Dw_safe**2, 0.0)
+
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=d_sw,
+        d_kro_d_so_explicit=d_so,
+        d_kro_d_sg_explicit=d_sg,
+    )
+
+
 @mixing_rule
 @numba.njit(cache=True)
 def max_rule(
@@ -718,6 +1300,35 @@ def max_rule(
         - Useful for sensitivity analysis
     """
     return np.maximum(kro_w, kro_g)
+
+
+@max_rule.dfunc
+def _(
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+) -> MixingRulePartialDerivatives:
+    """
+    kro = max(kw, kg)
+
+    kw > kg → ∂/∂kw = 1, ∂/∂kg = 0
+    kg > kw → ∂/∂kw = 0, ∂/∂kg = 1
+    Tie      → 0.5 each (subgradient).
+    """
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    d_kro_d_kro_w = np.where(kw > kg, 1.0, np.where(kg > kw, 0.0, 0.5))
+    d_kro_d_kro_g = 1.0 - d_kro_d_kro_w
+    z = _zeros_like_kro(kro_w)
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=z,
+        d_kro_d_so_explicit=z,
+        d_kro_d_sg_explicit=z,
+    )
 
 
 @mixing_rule
@@ -754,59 +1365,65 @@ def product_saturation_weighted_rule(
     return np.where((oil_saturation > 0.0) & (total_sat > 0.0), result, 0.0)
 
 
-@mixing_rule
-@numba.njit(cache=True)
-def linear_interpolation_rule(
+@product_saturation_weighted_rule.dfunc
+def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> FloatOrArray:
+) -> MixingRulePartialDerivatives:
     """
-    Simple linear interpolation based on gas-to-water ratio.
+    kro = kw * kg * (So / S_total)  with n = 1.
 
-    kro = kro_g * R + kro_w * (1 - R)
+    Let  R = So / S_total.
 
-    where R = Sg / (Sw + Sg)
+    ∂kro/∂kw  = kg * R
+    ∂kro/∂kg  = kw * R
 
-    Notes:
-        - Simple and intuitive
-        - Smooth transition between two-phase systems
-        - Does not account for three-phase interference effects
+    ∂kro/∂So  (explicit) = kw * kg * (S_total - So) / S_total²
+                         = kw * kg * (Sw + Sg) / S_total²
+    ∂kro/∂Sw  (explicit) = kw * kg * (-So) / S_total²  =  -kw * kg * So / S_total²
+    ∂kro/∂Sg  (explicit) = same as ∂/∂Sw
     """
-    total_displacing = water_saturation + gas_saturation
+    kw = np.asarray(kro_w, dtype=np.float64)
+    kg = np.asarray(kro_g, dtype=np.float64)
+    sw = np.asarray(water_saturation, dtype=np.float64)
+    so = np.asarray(oil_saturation, dtype=np.float64)
+    sg = np.asarray(gas_saturation, dtype=np.float64)
 
-    gas_fraction = np.where(
-        total_displacing > 0.0, gas_saturation / total_displacing, 0.0
+    S = sw + so + sg
+    active = (so > 0.0) & (S > 0.0)
+    S_safe = np.where(active, S, 1.0)
+    R = np.where(active, so / S_safe, 0.0)
+
+    d_kro_d_kro_w = np.where(active, kg * R, 0.0)
+    d_kro_d_kro_g = np.where(active, kw * R, 0.0)
+    d_so = np.where(active, kw * kg * (sw + sg) / S_safe**2, 0.0)
+    d_sw = np.where(active, -kw * kg * so / S_safe**2, 0.0)
+    d_sg = d_sw.copy()
+
+    return MixingRulePartialDerivatives(
+        d_kro_d_kro_w=d_kro_d_kro_w,
+        d_kro_d_kro_g=d_kro_d_kro_g,
+        d_kro_d_sw_explicit=d_sw,
+        d_kro_d_so_explicit=d_so,
+        d_kro_d_sg_explicit=d_sg,
     )
-    water_fraction = np.where(
-        total_displacing > 0.0, water_saturation / total_displacing, 0.0
-    )
-
-    result = (kro_g * gas_fraction) + (kro_w * water_fraction)
-    # Pure oil - return maximum
-    return np.where(total_displacing > 0.0, result, np.maximum(kro_w, kro_g))
 
 
-def _mixing_rule_partial_derivatives(
-    mixing_rule: MixingRule,
-    kro_water_two_phase: FloatOrArray,
-    kro_gas_two_phase: FloatOrArray,
+def get_mixing_rule_partial_derivatives(
+    rule: typing.Union[MixingRule, MixingRuleFunc],
+    kro_w: FloatOrArray,
+    kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
     epsilon: float = 1e-7,
-) -> typing.Tuple[
-    FloatOrArray,  # d_kro_d_kro_w
-    FloatOrArray,  # d_kro_d_kro_g
-    FloatOrArray,  # d_kro_d_sw_explicit
-    FloatOrArray,  # d_kro_d_so_explicit
-    FloatOrArray,  # d_kro_d_sg_explicit
-]:
+) -> MixingRulePartialDerivatives:
     """
     Compute partial derivatives of the three-phase mixing rule with respect
-    to each of its five arguments using central finite differences.
+    to each of its five arguments.
 
     The mixing rule signature is:
 
@@ -814,7 +1431,7 @@ def _mixing_rule_partial_derivatives(
     kro = mixing_rule(kro_w, kro_g, water_saturation, oil_saturation, gas_saturation)
     ```
 
-    This function returns five partial derivatives:
+    This function returns a dictionary containing five partial derivatives:
 
     - `d_kro_d_kro_w`: how the mixed oil relative permeability changes when
       the oil-water two-phase oil relative permeability changes.
@@ -829,108 +1446,34 @@ def _mixing_rule_partial_derivatives(
     The cost is ten mixing rule evaluations (five central difference pairs),
     each O(1), regardless of grid size.
 
-    :param mixing_rule: The mixing rule callable.
-    :param kro_water_two_phase: Oil relative permeability from the oil-water
+    :param rule: The mixing rule callable.
+    :param kro_w: Oil relative permeability from the oil-water
         two-phase table at the current saturation iterate.
-    :param kro_gas_two_phase: Oil relative permeability from the gas-oil
+    :param kro_g: Oil relative permeability from the gas-oil
         two-phase table at the current saturation iterate.
     :param water_saturation: Current water saturation.
     :param oil_saturation: Current oil saturation.
     :param gas_saturation: Current gas saturation.
     :param epsilon: Finite difference step size.
-    :return: 5-tuple of partial derivatives described above.
+    :return: A `MixingRulePartialDerivatives` dictionary of 5 partial derivatives described above.
     """
-    d_kro_d_kro_w = (
-        mixing_rule(
-            kro_w=kro_water_two_phase + epsilon,
-            kro_g=kro_gas_two_phase,
+    if isinstance(rule, MixingRule):
+        return rule.partial_derivatives(
+            kro_w=kro_w,
+            kro_g=kro_g,
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
+            epsilon=epsilon,
         )
-        - mixing_rule(
-            kro_w=kro_water_two_phase - epsilon,
-            kro_g=kro_gas_two_phase,
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-        )
-    ) / (2.0 * epsilon)
-
-    d_kro_d_kro_g = (
-        mixing_rule(
-            kro_w=kro_water_two_phase,
-            kro_g=kro_gas_two_phase + epsilon,
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-        )
-        - mixing_rule(
-            kro_w=kro_water_two_phase,
-            kro_g=kro_gas_two_phase - epsilon,
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-        )
-    ) / (2.0 * epsilon)
-
-    d_kro_d_sw_explicit = (
-        mixing_rule(
-            kro_w=kro_water_two_phase,
-            kro_g=kro_gas_two_phase,
-            water_saturation=water_saturation + epsilon,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-        )
-        - mixing_rule(
-            kro_w=kro_water_two_phase,
-            kro_g=kro_gas_two_phase,
-            water_saturation=water_saturation - epsilon,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-        )
-    ) / (2.0 * epsilon)
-
-    d_kro_d_so_explicit = (
-        mixing_rule(
-            kro_w=kro_water_two_phase,
-            kro_g=kro_gas_two_phase,
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation + epsilon,
-            gas_saturation=gas_saturation,
-        )
-        - mixing_rule(
-            kro_w=kro_water_two_phase,
-            kro_g=kro_gas_two_phase,
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation - epsilon,
-            gas_saturation=gas_saturation,
-        )
-    ) / (2.0 * epsilon)
-
-    d_kro_d_sg_explicit = (
-        mixing_rule(
-            kro_w=kro_water_two_phase,
-            kro_g=kro_gas_two_phase,
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation + epsilon,
-        )
-        - mixing_rule(
-            kro_w=kro_water_two_phase,
-            kro_g=kro_gas_two_phase,
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation - epsilon,
-        )
-    ) / (2.0 * epsilon)
-
-    return (
-        d_kro_d_kro_w,
-        d_kro_d_kro_g,
-        d_kro_d_sw_explicit,
-        d_kro_d_so_explicit,
-        d_kro_d_sg_explicit,
+    return _central_difference_partial_derivatives(
+        rule=rule,
+        kro_w=kro_w,
+        kro_g=kro_g,
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        epsilon=epsilon,
     )
 
 
@@ -1053,16 +1596,18 @@ class RelativePermeabilityTable(StoreSerializable):
             if needed by specific table implementations.
         :return: Plotly `graph_objects.Figure` object.
         """
-        rel_perms = self.get_relative_permeabilities(
+        from bores.visualization.plotly1d import make_series_plot
+
+        relperms = self.get_relative_permeabilities(
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
             **kwargs,
         )
         data = {
-            "Water Relative Permeability (krw)": rel_perms["water"],
-            "Oil Relative Permeability (kro)": rel_perms["oil"],
-            "Gas Relative Permeability (krg)": rel_perms["gas"],
+            "Water Relative Permeability (krw)": relperms["water"],
+            "Oil Relative Permeability (kro)": relperms["oil"],
+            "Gas Relative Permeability (krg)": relperms["gas"],
         }
         if title is None:
             title = "Relative Permeabilities"
@@ -1813,21 +2358,20 @@ class ThreePhaseRelPermTable(
             d_kro_d_so_explicit = zeros.copy()
             d_kro_d_sg_explicit = zeros.copy()
         else:
-            (
-                d_kro_d_kro_w,
-                d_kro_d_kro_g,
-                d_kro_d_sw_explicit,
-                d_kro_d_so_explicit,
-                d_kro_d_sg_explicit,
-            ) = _mixing_rule_partial_derivatives(
-                mixing_rule=mixing_rule,  # type: ignore[arg-type]
-                kro_water_two_phase=kro_w,
-                kro_gas_two_phase=kro_g,
+            derivatives = get_mixing_rule_partial_derivatives(
+                rule=mixing_rule,  # type: ignore[arg-type]
+                kro_w=kro_w,
+                kro_g=kro_g,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
                 epsilon=c.FINITE_DIFFERENCE_EPSILON,
             )
+            d_kro_d_kro_w = derivatives["d_kro_d_kro_w"]
+            d_kro_d_kro_g = derivatives["d_kro_d_kro_g"]
+            d_kro_d_sw_explicit = derivatives["d_kro_d_sw_explicit"]
+            d_kro_d_so_explicit = derivatives["d_kro_d_so_explicit"]
+            d_kro_d_sg_explicit = derivatives["d_kro_d_sg_explicit"]
 
         # Chain rule: dkro/dSalpha = (d_kro/d_kro_w) * (d_kro_w/d_Salpha)
         #                           + (d_kro/d_kro_g) * (d_kro_g/d_Salpha)
@@ -2370,21 +2914,20 @@ class BrooksCoreyThreePhaseRelPermModel(
             d_krg_proxy_d_so = zeros.copy()
 
             # Mixing rule partial derivatives (FD on mixing rule only, 10 evals)
-            (
-                d_krw_d_kro_proxy,
-                d_krw_d_krg_proxy,
-                d_krw_d_sw_explicit,
-                d_krw_d_so_explicit,
-                d_krw_d_sg_explicit,
-            ) = _mixing_rule_partial_derivatives(
-                mixing_rule=mixing_rule,
-                kro_water_two_phase=kro_proxy,
-                kro_gas_two_phase=krg_proxy,  # type: ignore[arg-type]
+            derivatives = get_mixing_rule_partial_derivatives(
+                rule=mixing_rule,
+                kro_w=kro_proxy,
+                kro_g=krg_proxy,  # type: ignore[arg-type]
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
                 epsilon=c.FINITE_DIFFERENCE_EPSILON,
             )
+            d_krw_d_kro_proxy = derivatives["d_kro_d_kro_w"]
+            d_krw_d_krg_proxy = derivatives["d_kro_d_kro_g"]
+            d_krw_d_sw_explicit = derivatives["d_kro_d_sw_explicit"]
+            d_krw_d_so_explicit = derivatives["d_kro_d_so_explicit"]
+            d_krw_d_sg_explicit = derivatives["d_kro_d_sg_explicit"]
 
             # Chain rule for krw
             d_krw_d_sw = (
@@ -2491,21 +3034,20 @@ class BrooksCoreyThreePhaseRelPermModel(
         d_kro_g_d_sw = zeros.copy()
         d_kro_g_d_so = zeros.copy()
 
-        (
-            d_kro_d_kro_w,
-            d_kro_d_kro_g,
-            d_kro_d_water_saturation_explicit,
-            d_kro_d_oil_saturation_explicit,
-            d_kro_d_gas_saturation_explicit,
-        ) = _mixing_rule_partial_derivatives(
-            mixing_rule=mixing_rule,
-            kro_water_two_phase=kro_w_shaped,  # type: ignore[arg-type]
-            kro_gas_two_phase=kro_g_shaped,  # type: ignore[arg-type]
+        derivatives = get_mixing_rule_partial_derivatives(
+            rule=mixing_rule,
+            kro_w=kro_w_shaped,  # type: ignore[arg-type]
+            kro_g=kro_g_shaped,  # type: ignore[arg-type]
             water_saturation=sw,
             oil_saturation=so,
             gas_saturation=sg,
             epsilon=c.FINITE_DIFFERENCE_EPSILON,
         )
+        d_kro_d_kro_w = derivatives["d_kro_d_kro_w"]
+        d_kro_d_kro_g = derivatives["d_kro_d_kro_g"]
+        d_kro_d_water_saturation_explicit = derivatives["d_kro_d_sw_explicit"]
+        d_kro_d_oil_saturation_explicit = derivatives["d_kro_d_so_explicit"]
+        d_kro_d_gas_saturation_explicit = derivatives["d_kro_d_sg_explicit"]
 
         d_kro_d_sw = (
             d_kro_d_kro_w * d_kro_w_d_sw
@@ -3279,21 +3821,20 @@ class LETThreePhaseRelPermModel(
             d_krw_gw_d_so = zeros.copy()
             d_krw_gw_d_sg = zeros.copy()
 
-            (
-                d_krw_d_krw_ow,
-                d_krw_d_krw_gw,
-                d_krw_d_sw_explicit,
-                d_krw_d_so_explicit,
-                d_krw_d_sg_explicit,
-            ) = _mixing_rule_partial_derivatives(
-                mixing_rule=mixing_rule,
-                kro_water_two_phase=krw_ow,
-                kro_gas_two_phase=krw_gw,
+            derivatives = get_mixing_rule_partial_derivatives(
+                rule=mixing_rule,
+                kro_w=krw_ow,
+                kro_g=krw_gw,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
                 epsilon=c.FINITE_DIFFERENCE_EPSILON,
             )
+            d_krw_d_krw_ow = derivatives["d_kro_d_kro_w"]
+            d_krw_d_krw_gw = derivatives["d_kro_d_kro_g"]
+            d_krw_d_sw_explicit = derivatives["d_kro_d_sw_explicit"]
+            d_krw_d_so_explicit = derivatives["d_kro_d_so_explicit"]
+            d_krw_d_sg_explicit = derivatives["d_kro_d_sg_explicit"]
 
             d_krw_d_sw = krw_max * (
                 d_krw_d_krw_ow * d_krw_ow_d_sw
@@ -3446,21 +3987,20 @@ class LETThreePhaseRelPermModel(
         d_kro_g_d_sw = zeros.copy()
         d_kro_g_d_sg = zeros.copy()
 
-        (
-            d_kro_d_kro_w,
-            d_kro_d_kro_g,
-            d_kro_d_water_saturation_explicit,
-            d_kro_d_oil_saturation_explicit,
-            d_kro_d_gas_saturation_explicit,
-        ) = _mixing_rule_partial_derivatives(
-            mixing_rule=mixing_rule,
-            kro_water_two_phase=kro_w_vals,
-            kro_gas_two_phase=kro_g_vals,
+        derivatives = get_mixing_rule_partial_derivatives(
+            rule=mixing_rule,
+            kro_w=kro_w_vals,
+            kro_g=kro_g_vals,
             water_saturation=sw,
             oil_saturation=so,
             gas_saturation=sg,
             epsilon=c.FINITE_DIFFERENCE_EPSILON,
         )
+        d_kro_d_kro_w = derivatives["d_kro_d_kro_w"]
+        d_kro_d_kro_g = derivatives["d_kro_d_kro_g"]
+        d_kro_d_water_saturation_explicit = derivatives["d_kro_d_sw_explicit"]
+        d_kro_d_oil_saturation_explicit = derivatives["d_kro_d_so_explicit"]
+        d_kro_d_gas_saturation_explicit = derivatives["d_kro_d_sg_explicit"]
 
         d_kro_d_sw = kro_max * (
             d_kro_d_kro_w * d_kro_w_d_sw

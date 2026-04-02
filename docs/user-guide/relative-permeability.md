@@ -296,7 +296,6 @@ BORES provides several mixing rules, selectable by name or by passing the functi
 | Stone I | `"stone_I_rule"` | Stone's first model. Good for water-wet systems. |
 | Stone II | `"stone_II_rule"` | Stone's second model. More conservative than Stone I. |
 | Baker linear | `"baker_linear_rule"` | Linear saturation-weighted interpolation. Simple and stable. |
-| Saturation weighted | `"saturation_weighted_interpolation_rule"` | Weighted by normalized saturations. |
 | Blunt rule | `"blunt_rule"` | Conservative, designed for strongly water-wet rocks. |
 | Harmonic mean | `"harmonic_mean_rule"` | Very conservative. Good for tight rocks, series flow. |
 | Geometric mean | `"geometric_mean_rule"` | Moderately conservative. General purpose. |
