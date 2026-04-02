@@ -137,15 +137,21 @@ if const is not None:
 |---|---|---|
 | `BARRELS_TO_CUBIC_FEET` | 5.6146 | BBL to ft³ |
 | `CUBIC_FEET_TO_BARRELS` | 0.1781 | ft³ to BBL |
+| `BARRELS_TO_CUBIC_METER` | 0.158987 | BBL to m³ |
+| `CUBIC_METER_TO_BARRELS` | 6.2898 | m³ to BBL |
 | `STB_TO_CUBIC_FEET` | 5.6146 | STB to ft³ |
+| `CUBIC_FEET_TO_STB` | 0.1781 | ft³ to STB |
 | `STB_TO_CUBIC_METER` | 0.1590 | STB to m³ |
 | `CUBIC_METER_TO_STB` | 6.2898 | m³ to STB |
 | `SCF_TO_BARRELS` | 0.1781 | SCF to BBL |
 | `CUBIC_METER_TO_SCF` | 35.315 | m³ to SCF |
 | `SCF_TO_SCM` | 0.02832 | SCF to m³ |
 | `ACRE_FOOT_TO_CUBIC_FEET` | 43560 | acre-ft to ft³ |
+| `CUBIC_FEET_TO_ACRE_FOOT` | 2.296e-5 | ft³ to acre-ft |
 | `ACRE_FOOT_TO_BARRELS` | 7758 | acre-ft to BBL |
+| `BARRELS_TO_ACRE_FOOT` | 0.000129 | BBL to acre-ft |
 | `ACRES_TO_SQUARE_FEET` | 43560 | acres to ft² |
+| `SQUARE_FEET_TO_ACRES` | 2.296e-5 | ft² to acres |
 
 ### Gas-Oil Ratio (GOR) Conversions
 
@@ -235,13 +241,16 @@ if const is not None:
 |---|---|---|---|
 | `ACCELERATION_DUE_TO_GRAVITY_METER_PER_SECONDS_SQUARE` | 9.807 | m/s² | Standard gravity (SI) |
 | `ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE` | 32.174 | ft/s² | Standard gravity (Imperial) |
+| `ACCELERATION_DUE_TO_GRAVITY_FEET_PER_DAY_SQUARE` | 2.388e10 | ft/day² | Standard gravity (Imperial, daily basis) |
 | `GRAVITATIONAL_CONSTANT_LBM_FT_PER_LBF_S2` | 32.174 | lbm ft/(lbf s²) | gc conversion factor |
 
 ### Numerical Thresholds
 
 | Constant | Value | Description |
 |---|---|---|
-| `SATURATION_EPSILON` | 1e-12 | Prevents numerical issues at S=0 or S=1 |
+| `SATURATION_EPSILON` | Dtype-dependent | Prevents numerical issues at S=0 or S=1 (dtype-aware via `get_floating_point_info()`) |
+| `MINIMUM_MOBILE_PORE_SPACE` | Dtype-dependent | Minimum mobile pore-space fraction, matched to `SATURATION_EPSILON` (dtype-aware) |
+| `FINITE_DIFFERENCE_EPSILON` | Dtype-dependent | Central finite-difference step, evaluated as max(cbrt(eps), 1e-5) where eps is machine epsilon (dtype-aware) |
 | `MINIMUM_TRANSMISSIBILITY_FACTOR` | 1e-12 | Floor for transmissibility values |
 | `GAS_SOLUBILITY_TOLERANCE` | 1e-6 | Tolerance for gas solubility calculations |
 | `GAS_PSEUDO_PRESSURE_THRESHOLD` | 0.0 | Pressure above which pseudo-pressure is used |

@@ -3,6 +3,7 @@
 import logging
 import typing
 import warnings
+from collections.abc import Mapping
 from os import PathLike
 
 import attrs
@@ -327,7 +328,7 @@ class PVTTable(StoreSerializable):
         warn_on_extrapolation: bool = False,
         clamps: typing.Union[
             typing.Literal[False],
-            typing.Optional[typing.Dict[str, typing.Tuple[float, float]]],
+            typing.Optional[typing.Mapping[str, typing.Tuple[float, float]]],
         ] = None,
     ) -> None:
         """
@@ -358,7 +359,7 @@ class PVTTable(StoreSerializable):
         self.validate = validate
         self.warn_on_extrapolation = warn_on_extrapolation
 
-        if clamps is False or clamps == {}:
+        if not clamps and clamps is not None:
             self.clamps = {}
         else:
             # Merge clamps
@@ -1430,7 +1431,8 @@ class PVTTables(StoreSerializable):
         warn_on_extrapolation: bool = False,
         clamps: typing.Union[
             typing.Literal[False],
-            typing.Optional[typing.Dict[str, typing.Tuple[float, float]]],
+            typing.Mapping[FluidPhase, typing.Mapping[str, typing.Tuple[float, float]]],
+            None,
         ] = None,
     ) -> Self:
         """
@@ -1444,9 +1446,8 @@ class PVTTables(StoreSerializable):
             Cubic requires ≥ 4 points along each axis.
         :param validate: Run physical-consistency checks on each phase's data.
         :param warn_on_extrapolation: Log warnings when queries exceed table bounds.
-        :param clamps: Property clamp overrides applied to all phases.
-            Keys use generic names (e.g. `"viscosity"`). Merged on top of
-            per-phase defaults.
+        :param clamps: Property clamp overrides, a mapping of `FluidPhase` to per-phase clamp dicts.
+            Set to `False` to disable all clamping.
         :return: `PVTTables` with interpolators ready for simulation.
 
         Example:
@@ -1460,15 +1461,39 @@ class PVTTables(StoreSerializable):
             interpolation_method=interpolation_method,
             validate=validate,
             warn_on_extrapolation=warn_on_extrapolation,
-            clamps=clamps,
         )
-        return cls(
-            oil=PVTTable(dataset.oil, **kwargs) if dataset.oil is not None else None,  # type: ignore
-            gas=PVTTable(dataset.gas, **kwargs) if dataset.gas is not None else None,  # type: ignore
-            water=PVTTable(dataset.water, **kwargs)  # type: ignore
-            if dataset.water is not None
-            else None,
-        )
+
+        oil_table = None
+        water_table = None
+        gas_table = None
+        if dataset.oil is not None:
+            oil_clamps = (
+                clamps.get(FluidPhase.OIL, None)
+                if isinstance(clamps, Mapping)
+                else clamps
+            )
+            oil_table = PVTTable(dataset.oil, **kwargs, clamps=oil_clamps)  # type: ignore
+
+        if dataset.water is not None:
+            water_clamps = (
+                clamps.get(FluidPhase.WATER, None)
+                if isinstance(clamps, Mapping)
+                else clamps
+            )
+            water_table = PVTTable(
+                dataset.water,
+                **kwargs,  # type: ignore
+                clamps=water_clamps,
+            )
+
+        if dataset.gas is not None:
+            gas_clamps = (
+                clamps.get(FluidPhase.GAS, None)
+                if isinstance(clamps, Mapping)
+                else clamps
+            )
+            gas_table = PVTTable(dataset.gas, **kwargs, clamps=gas_clamps)  # type: ignore
+        return cls(oil=oil_table, gas=gas_table, water=water_table)
 
     @classmethod
     def from_files(
@@ -1479,7 +1504,11 @@ class PVTTables(StoreSerializable):
         interpolation_method: InterpolationMethod = "linear",
         validate: bool = True,
         warn_on_extrapolation: bool = False,
-        clamps: typing.Optional[typing.Dict[str, typing.Tuple[float, float]]] = None,
+        clamps: typing.Union[
+            typing.Literal[False],
+            typing.Mapping[FluidPhase, typing.Mapping[str, typing.Tuple[float, float]]],
+            None,
+        ] = None,
     ) -> Self:
         """
         Build a `PVTTables` bundle directly from per-phase data files.
@@ -1494,7 +1523,8 @@ class PVTTables(StoreSerializable):
         :param interpolation_method: `"linear"` (default) or `"cubic"`.
         :param validate: Run physical-consistency checks on each phase's data.
         :param warn_on_extrapolation: Log warnings when queries exceed table bounds.
-        :param clamps: Property clamp overrides applied to all phases.
+        :param clamps: Property clamp overrides, a mapping of `FluidPhase` to per-phase clamp dicts.
+            Set to `False` to disable all clamping.
         :return: `PVTTables` with interpolators ready for simulation.
 
         Example:

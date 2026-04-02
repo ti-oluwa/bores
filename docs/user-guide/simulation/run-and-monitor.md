@@ -1,25 +1,29 @@
 # Running and Monitoring Simulations
 
-BORES executes 3D reservoir simulations through two primary interfaces: `bores.run()` for core simulation execution and `bores.monitor()` for live monitoring with comprehensive diagnostics. This guide covers both APIs and common usage patterns.
+After building your reservoir model and assembling your configuration, you are ready to run a simulation. BORES provides two closely related entry points for this: `bores.run()` executes the simulation and yields results, while `bores.monitor()` wraps that same execution with a live progress display and diagnostic statistics. Both functions produce the same `ModelState` output at the same cadence - the choice between them is purely about how much visibility you want during the run.
+
+This separation is intentional. In batch or headless environments (HPC clusters, automated workflows, overnight runs), you want `bores.run()` with no terminal output overhead. During development and debugging, you want `bores.monitor()` with its live dashboard showing solver convergence, per-well rates, and pressure evolution. You can switch between them by changing a single function name - everything else stays the same.
+
+Both functions are generator-based. They yield `ModelState` objects rather than returning a list of results. This means memory usage is bounded even for long simulations: BORES yields one state, you process it, and then the next step begins. If you want to retain history, you collect states into a list yourself. If you are running a 10,000-step simulation and only care about the final result, you iterate and discard intermediate states.
+
+---
 
 ## Quick Start
 
-The simplest way to run a simulation is to pass a `ReservoirModel` and `Config`:
+The minimum viable simulation run looks like this:
 
 ```python
 import bores
 
-# Load model and configuration
 model = bores.ReservoirModel.from_file("reservoir.h5")
 config = bores.Config.from_file("simulation.yaml")
 
-# Execute simulation and collect states
 for state in bores.run(model, config):
-    print(f"Step {state.step}: time={state.time}s")
-    # Process pressure, saturation, rates, etc.
+    print(f"Step {state.step}: time = {state.time:.1f} s, "
+          f"avg pressure = {state.average_pressure:.1f} psi")
 ```
 
-For more insight into simulation progress with live diagnostics, use `bores.monitor()`:
+For interactive work where you want a live display in your terminal:
 
 ```python
 import bores
@@ -27,16 +31,16 @@ import bores
 model = bores.ReservoirModel.from_file("reservoir.h5")
 config = bores.Config.from_file("simulation.yaml")
 
-# Monitor execution with live dashboard
 for state in bores.monitor(model, config):
-    print(f"Step {state.step}: average pressure = {state.average_pressure:.2f} psi")
+    # Your per-step analysis here
+    pass
 ```
+
+Both loops behave identically in terms of what `state` contains and when it is yielded. The only difference is the terminal output.
 
 ---
 
 ## `bores.run()`: Core Simulation Execution
-
-The `bores.run()` function executes a 3D reservoir simulation using the specified evolution scheme and configuration. It yields `ModelState` objects at intervals determined by `output_frequency`.
 
 ### Function Signature
 
@@ -48,118 +52,86 @@ def run(
     on_step_rejected: Optional[StepCallback] = None,
     on_step_accepted: Optional[StepCallback] = None,
 ) -> Generator[ModelState[ThreeDimensions], None, None]:
-    """Run a simulation on a 3D reservoir model."""
 ```
 
 ### Parameters
 
-**`input`** - The simulation input. Accepts either:
+**`input`** accepts either:
 
-- **`ReservoirModel[ThreeDimensions]`** - A 3D static reservoir model. Requires `config` parameter.
-- **`Run`** - A pre-configured run specification containing both model and config. See [Run Specification](#run-specification) section.
+- A `ReservoirModel[ThreeDimensions]` - the static model you built. When you pass a `ReservoirModel`, you must also supply `config`.
+- A `Run` - a pre-packaged specification that bundles model and config together. See the [Run Specification](#run-specification) section below.
 
-**`config`** - Optional `Config` instance with simulation parameters, schemes, wells, and PVT properties.
+**`config`** is the `Config` object containing your simulation parameters, scheme choice, wells, PVT tables, and output frequency.
 
-- **Required** if `input` is a `ReservoirModel`.
-- **Optional** if `input` is a `Run`; the Run's config is used by default.
-- When provided with a `Run` input, overrides the Run's config.
+- Required when `input` is a `ReservoirModel`.
+- Optional when `input` is a `Run` - the `Run`'s own config is used by default, but you can override it by passing a new `config` here.
 
-**`on_step_rejected`** - Optional callback invoked when a proposed time step is rejected due to convergence or stability issues. Receives:
-
-- `step_result: StepResult` - Contains residuals, error messages, solver diagnostics.
-- `step_size: float` - The rejected step size (seconds).
-- `elapsed_time: float` - Total simulation time elapsed (seconds).
-
-Useful for logging, metrics collection, or adaptive strategies:
+**`on_step_rejected`** is an optional callback invoked whenever a proposed time step fails due to convergence problems or saturation change violations. BORES will automatically retry the step with a smaller time step size, but this callback gives you visibility into rejection events. It receives three arguments: the `StepResult` (containing residuals and failure messages), the rejected step size in seconds, and the total elapsed simulation time in seconds.
 
 ```python
-def on_rejected(result, step_size, elapsed_time):
-    print(f"Step rejected at {elapsed_time}s with size {step_size}s: {result.message}")
+def handle_rejection(result, step_size, elapsed_time):
+    print(f"Step rejected at t={elapsed_time:.1f}s, "
+          f"step size {step_size:.3f}s: {result.message}")
 
-for state in bores.run(model, config, on_step_rejected=on_rejected):
+for state in bores.run(model, config, on_step_rejected=handle_rejection):
     pass
 ```
 
-**`on_step_accepted`** - Optional callback invoked when a time step is successfully accepted. Receives the same arguments as `on_step_rejected`.
+**`on_step_accepted`** is the mirror callback, invoked after each successfully completed step. It receives the same three arguments. Useful for collecting lightweight per-step metrics without storing full `ModelState` objects.
 
 ```python
+newton_counts = []
+
 def on_accepted(result, step_size, elapsed_time):
-    print(f"Step accepted: size={step_size:.3f}s, Newton iterations={result.newton_iterations}")
+    newton_counts.append(result.timer_kwargs.get("newton_iterations", -1))
 
 for state in bores.run(model, config, on_step_accepted=on_accepted):
     pass
 ```
 
-### Return Value
+### What `ModelState` Contains
 
-Yields `ModelState[ThreeDimensions]` objects at intervals specified by `config.output_frequency`. Each state contains:
+Each yielded `ModelState` is a complete snapshot of the simulation at that point in time. The key fields you will use most often are:
 
-- **Current simulation step and time** - `step`, `step_size`, `time`
-- **Pressure and saturation grids** - Via `state.model.fluid_properties`
-- **Rock properties** - Porosity, absolute permeability
-- **Well configuration** - `state.wells` with locations and current schedule
-- **Flow properties** - Via SparseTensor fields:
-  - `injection_rates` / `production_rates` (STB/day for oil/water, SCF/day for gas)
-  - `injection_formation_volume_factors` / `production_formation_volume_factors`
-  - `injection_bhps` / `production_bhps` (bottom-hole pressures in psi)
-- **Relative permeabilities, mobilities, capillary pressures** - Grids for all phases
-- **Timers state** - For resume capability
+- **`state.step`** - The accepted step index (1-based).
+- **`state.time`** - Total elapsed simulation time in seconds.
+- **`state.step_size`** - The time step size used for this step in seconds.
+- **`state.average_pressure`**, **`state.min_pressure`**, **`state.max_pressure`** - Grid-level pressure statistics in psi.
+- **`state.average_water_saturation`** - Mean water saturation across all cells.
+- **`state.model.fluid_properties`** - Full grid arrays for pressure, water saturation, oil saturation, and gas saturation.
+- **`state.model.rock_properties`** - Porosity, absolute permeability, and residual saturations.
+- **`state.wells`** - Well configuration with current schedule applied.
+- **`state.production_rates`** and **`state.injection_rates`** - `SparseTensor` objects holding surface-condition rates by well location (STB/day for oil and water, SCF/day for gas).
+- **`state.production_bhps`** and **`state.injection_bhps`** - Bottom-hole pressures for each well in psi.
+- **`state.timer_state`** - Serializable timer state for checkpointing and resumption.
 
-See [ModelState Documentation](../advanced/states-streams.md) for detailed field access patterns.
+See the [ModelState Documentation](../advanced/states-streams.md) for complete field access patterns.
 
 ### Output Frequency
 
-The number of accepted steps between yielded states is determined by `config.output_frequency`. Default is 1 (yield every step):
+By default, `bores.run()` yields a `ModelState` after every accepted step (`output_frequency=1`). For long simulations, this produces a lot of data. You can reduce output by setting `output_frequency` in your `Config`:
 
 ```python
-# Yield every accepted step
-config = bores.Config(output_frequency=1)
-
-# Yield every 10 accepted steps (saves memory/I/O)
-config = bores.Config(output_frequency=10)
-
-for state in bores.run(model, config):
-    # state is yielded every 10 accepted steps
-    pass
+# Yield every 100 accepted steps - good for 10,000+ step simulations
+config = bores.Config(
+    ...,
+    output_frequency=100,
+)
 ```
+
+BORES always yields the initial state (step 0) and the final state, regardless of `output_frequency`, so you never miss the start or end of the simulation.
 
 ### Step Rejection and Retry
 
-When a step fails (e.g., saturation becomes unphysical, convergence stalls), BORES:
+When a time step fails - because pressures became unphysical, saturation changes exceeded their limits, or Newton iteration did not converge - BORES does not abort. Instead, it:
 
-1. Invokes `on_step_rejected` callback (if provided)
-2. Reduces the step size adaptively
-3. Retries the same time interval with the smaller size
+1. Calls `on_step_rejected` if you provided one.
+2. Reduces the step size adaptively (the reduction strategy depends on how badly the step failed).
+3. Retries the same time interval with the smaller step.
 
-This continues until either:
+This continues until the step succeeds, or until the step size cannot be reduced any further (at which point `SimulationError` is raised). The adaptive step control is transparent to you as the caller - from the outside, you simply see fewer states per unit time during difficult periods.
 
-- The step succeeds (invokes `on_step_accepted` and continues)
-- Step size cannot be reduced further (raises `SimulationError`)
-
-### Example: Basic Usage
-
-```python
-import bores
-
-# Load simulation components
-model = bores.ReservoirModel.from_file("spe1.h5")
-config = bores.Config.from_file("config.yaml")
-
-# Execute and collect final states
-states = []
-for state in bores.run(model, config):
-    states.append(state)
-    print(f"Step {state.step}: time={state.time:.1f}s, "
-          f"avg_pressure={state.average_pressure:.1f}psi, "
-          f"avg_Sw={state.average_water_saturation:.4f}")
-
-# Analyze final state
-final = states[-1]
-print(f"Simulation completed at {final.time}s ({final.step} steps)")
-print(f"Final pressure range: {final.min_pressure:.1f} - {final.max_pressure:.1f} psi")
-```
-
-### Example: Extracting Well Performance
+### Example: Collecting Production History
 
 ```python
 import bores
@@ -167,40 +139,37 @@ import bores
 model = bores.ReservoirModel.from_file("model.h5")
 config = bores.Config.from_file("config.yaml")
 
-# Collect production history
 production_history = {}
 
 for state in bores.run(model, config):
     for well_name, well in state.wells.items():
         if well_name not in production_history:
-            production_history[well_name] = []
-        
-        # Access SparseTensor rates
-        oil_rate = state.production_rates.oil.get(well.location, 0.0)
-        water_rate = state.production_rates.water.get(well.location, 0.0)
-        gas_rate = state.production_rates.gas.get(well.location, 0.0)
-        
-        production_history[well_name].append({
-            'time': state.time,
-            'oil': oil_rate,
-            'water': water_rate,
-            'gas': gas_rate
-        })
+            production_history[well_name] = {"time": [], "oil": [], "water": [], "gas": []}
 
-# Plot results
+        loc = well.location
+        production_history[well_name]["time"].append(state.time)
+        production_history[well_name]["oil"].append(
+            state.production_rates.oil.get(loc, 0.0)
+        )
+        production_history[well_name]["water"].append(
+            state.production_rates.water.get(loc, 0.0)
+        )
+        production_history[well_name]["gas"].append(
+            state.production_rates.gas.get(loc, 0.0)
+        )
+
 for well_name, history in production_history.items():
-    times = [h['time'] for h in history]
-    oil_rates = [h['oil'] for h in history]
-    print(f"{well_name}: {oil_rates[-1]:.1f} STB/day at end")
+    final_oil = history["oil"][-1] if history["oil"] else 0.0
+    print(f"{well_name}: {final_oil:.1f} STB/day at end")
 ```
 
 ---
 
-## `Run` Specification
+## Run Specification
 
-The `Run` class packages a reservoir model and configuration for organized execution. Useful for storing and executing pre-defined scenarios.
+The `Run` class bundles a reservoir model and configuration into a single named object. This is useful for organizing multiple scenarios, serializing run definitions to disk, or packaging simulation inputs for distribution.
 
-### Creating a `Run`
+### Creating a Run
 
 ```python
 from bores import ReservoirModel, Config, Run
@@ -208,50 +177,36 @@ from bores import ReservoirModel, Config, Run
 model = ReservoirModel.from_file("path/to/3d_model.h5")
 config = Config.from_file("path/to/simulation_config.yaml")
 
-run = Run(
+run_spec = Run(
     model=model,
     config=config,
-    name="Primary Depletion Scenario",
-    description="30-year primary depletion with no intervention",
-    tags=("baseline", "primary-only")
+    name="Primary Depletion - Base Case",
+    description="30-year primary depletion from 3,000 psi with no injection support",
+    tags=("baseline", "primary-depletion"),
 )
 ```
 
-### Fields
-
-**`model: ReservoirModel[ThreeDimensions]`** - The 3D static reservoir model to simulate.
-
-**`config: Config`** - Simulation configuration and parameters.
-
-**`name: Optional[str]`** - Human-readable identifier for the run.
-
-**`description: Optional[str]`** - Detailed description of the simulation scenario.
-
-**`tags: Tuple[str, ...]`** - Tuple of tags for organizing runs (e.g., `("co2-injection", "extreme-pressure")`).
-
-**`created_at: Optional[str]`** - ISO-formatted timestamp (auto-populated on creation).
-
 ### Executing a Run
 
-The `Run` class is callable and iterable:
+The `Run` class is callable and iterable - you can execute it in several equivalent ways:
 
 ```python
-# Calling directly
-for state in run():
-    print(f"Step {state.step}")
+# Direct iteration
+for state in run_spec:
+    process(state)
 
-# Iterating
-for state in run:
-    print(f"Step {state.step}")
+# Calling it as a function
+for state in run_spec():
+    process(state)
 
-# Passing to run() function
-for state in bores.run(run):
-    print(f"Step {state.step}")
+# Passing to bores.run() - equivalent, and allows config override
+for state in bores.run(run_spec):
+    process(state)
 
-# With config override
-new_config = bores.Config(scheme="full-sequential-implicit", ...)
-for state in bores.run(run, config=new_config):
-    print(f"Using new scheme: {new_config.scheme}")
+# Override the config for a sensitivity case
+sensitivity_config = bores.Config(scheme="full-sequential-implicit", ...)
+for state in bores.run(run_spec, config=sensitivity_config):
+    process(state)
 ```
 
 ### Loading from Files
@@ -259,217 +214,166 @@ for state in bores.run(run, config=new_config):
 ```python
 from bores import Run
 
-run = Run.from_files(
+run_spec = Run.from_files(
     model_path="path/to/model.h5",
     config_path="path/to/config.yaml",
-    pvt_tables_path="path/to/pvt_tables.h5",  # Optional
-    pvt_data_path="path/to/pvt_data.h5",      # Optional
+    pvt_tables_path="path/to/pvt_tables.h5",   # Optional
 )
 
-# Execute the loaded run
-for state in run:
+for state in run_spec:
     process(state)
 ```
+
+The `Run.from_files()` method handles loading the PVT tables and attaching them to the config automatically, which simplifies the setup code when all your simulation inputs are stored as files.
 
 ---
 
 ## `bores.monitor()`: Live Monitoring and Diagnostics
 
-The `bores.monitor()` function wraps `bores.run()` with live progress displays and comprehensive statistics collection. It yields the same `ModelState` objects as `run()`, optionally paired with `RunStats` for post-simulation analysis.
+`bores.monitor()` wraps the simulation execution with a live terminal display and a `RunStats` accumulator. It yields the exact same `ModelState` objects as `bores.run()`, so you can switch to monitoring without changing any of your downstream processing code.
 
 ### Function Signature
 
 ```python
-@overload
 def monitor(
-    input: Union[ReservoirModel[ThreeDimensions], Run, Iterable[ModelState[ThreeDimensions]]],
+    input: Union[ReservoirModel, Run, Iterable[ModelState]],
     config: Optional[Config] = None,
     *,
     monitor: Optional[MonitorConfig] = None,
     on_step_rejected: Optional[StepCallback] = None,
     on_step_accepted: Optional[StepCallback] = None,
-    return_stats: Literal[False] = False,
-) -> Generator[ModelState[ThreeDimensions], None, None]: ...
-
-@overload
-def monitor(
-    input: Union[ReservoirModel[ThreeDimensions], Run, Iterable[ModelState[ThreeDimensions]]],
-    config: Optional[Config] = None,
-    *,
-    monitor: Optional[MonitorConfig] = None,
-    on_step_rejected: Optional[StepCallback] = None,
-    on_step_accepted: Optional[StepCallback] = None,
-    return_stats: Literal[True],
-) -> Generator[Tuple[ModelState[ThreeDimensions], RunStats], None, None]: ...
+    return_stats: bool = False,
+) -> Generator[ModelState | Tuple[ModelState, RunStats], None, None]:
 ```
 
-### Parameters
+The `input` parameter accepts one additional type compared to `bores.run()`: an `Iterable[ModelState]`. This allows you to run the monitor over a stream of pre-loaded states from a saved run, getting diagnostics without re-running the simulation. See the [Post-Processing Example](#example-post-processing-saved-runs) below.
 
-**`input`** - Simulation source. Accepts:
+### Enabling Diagnostic Statistics
 
-- **`ReservoirModel[ThreeDimensions]`** - Requires `config` parameter.
-- **`Run`** - Uses embedded config unless overridden.
-- **`Iterable[ModelState[ThreeDimensions]]`** - Generator/stream of states from external simulation. Useful for post-processing saved runs.
-
-**`config`** - Optional `Config` instance.
-
-- **Required** if `input` is a `ReservoirModel`.
-- **Optional** if `input` is a `Run` (Run's config used unless overridden).
-- **Not used** if `input` is an iterable of states.
-
-**`monitor`** - Optional `MonitorConfig` controlling display behavior. Defaults to `MonitorConfig()` (Rich panel enabled, tqdm disabled).
-
-**`on_step_rejected`** / **`on_step_accepted`** - Same callbacks as `bores.run()`.
-
-**`return_stats`** - Boolean flag determining return value:
-
-- **`False` (default)** - Yields only `ModelState` objects.
-- **`True`** - Yields `(ModelState, RunStats)` tuples. The `RunStats` object is the same instance throughout the run and accumulates in-place, making it valid for inspection after the loop.
-
-### Return Value
-
-Depending on `return_stats`:
-
-**`return_stats=False`** - Yields `ModelState[ThreeDimensions]` at output intervals:
+Set `return_stats=True` to receive a `(ModelState, RunStats)` tuple at each yield. The `RunStats` object accumulates in-place throughout the loop and remains valid after the loop completes:
 
 ```python
-for state in bores.monitor(model, config):
-    print(f"Step {state.step}")
-```
+import bores
 
-**`return_stats=True`** - Yields `(ModelState, RunStats)` tuples:
+model = bores.ReservoirModel.from_file("reservoir.h5")
+config = bores.Config.from_file("config.yaml")
 
-```python
 for state, stats in bores.monitor(model, config, return_stats=True):
-    print(f"Step {state.step}")
-    print(f"  Wall time: {stats.wall_time_ms:.1f} ms")
-    print(f"  Rejections so far: {stats.total_rejections}")
+    # stats is updated in-place at every step
+    pass
+
+# Inspect after the loop
+print(f"Accepted steps:      {stats.accepted_steps}")
+print(f"Rejected steps:      {stats.rejected_steps}")
+print(f"Total wall time:     {stats.total_wall_time:.2f} s")
+print(f"Avg step time:       {stats.average_step_wall_ms:.2f} ms")
+print(f"p95 step time:       {stats.get_percentile_wall_time_ms(95):.2f} ms")
+print(f"Avg Newton iters:    {stats.average_newton_iterations:.2f}")
+
+# Print the full summary table
+print(stats.summary_table())
 ```
 
-The returned `RunStats` object remains valid and updated after the loop completes, enabling post-simulation analysis.
+### `MonitorConfig`: Controlling the Display
 
-### `MonitorConfig`: Display Control
-
-Controls which display backends are active and refresh frequency.
+`MonitorConfig` controls which display backends are active and how they behave:
 
 ```python
 from bores import MonitorConfig
 
 monitor_cfg = MonitorConfig(
-    use_rich=True,              # Rich live panel (default)
-    use_tqdm=False,             # tqdm progress bar (optional)
-    refresh_interval=1,         # Update every N accepted steps
-    extended_every=10,          # Show detailed stats every N steps
-    show_wells=True,            # Per-well performance table
-    color_theme="dark"          # "dark" or "light"
+    use_rich=True,              # Live Rich panel (default: True)
+    use_tqdm=True,              # tqdm progress bar (default: False)
+    refresh_interval=1,         # Update display every N accepted steps
+    extended_every=10,          # Show p95 wall time and avg Newton every N steps
+    show_wells=True,            # Include per-well rates table in display
+    color_theme="dark",         # "dark" or "light"
 )
 
 for state in bores.monitor(model, config, monitor=monitor_cfg):
     pass
 ```
 
-**`use_rich: bool = True`** - Show a live Rich panel with solver diagnostics (pressure/saturation statistics, Newton iterations, wall time). The panel updates in-place every `refresh_interval` steps and persists in terminal history when the run ends.
+**`use_rich`** enables the live Rich panel. This is a compact two-column display that shows reservoir physics on the left (pressure statistics, saturations) and solver diagnostics on the right (step size, wall time, Newton iterations, CFL number, rejected/accepted step counts). The panel updates in-place and is preserved in your terminal scroll-back history when the run ends.
 
-**`use_tqdm: bool = False`** - Show a tqdm progress bar tracking simulation-time completion (0–100%). Displays per-step postfix with current step, average pressure, average water saturation, and wall time.
+**`use_tqdm`** adds a standard tqdm progress bar below the Rich panel. The bar tracks simulation-time progress from 0 to 100% and shows per-step timing in the postfix. This is useful when you want a clean progress summary in logs or CI output.
 
-**`refresh_interval: int = 1`** - How often (in accepted steps) to refresh the Rich display. Increase for very fast simulations to avoid terminal flicker.
+**`extended_every`** controls how often the Rich panel includes extended performance diagnostics (p95 step wall time and average Newton iterations). Setting it to 0 disables extended stats entirely, which gives a slightly cleaner display during fast-running simulations.
 
-**`extended_every: int = 10`** - Every this many accepted steps, the Rich panel includes extended performance stats: p95 wall time and average Newton iterations. Set to 0 to disable.
+**`color_theme`** applies to the Rich panel. The `"dark"` theme uses charcoal background with amber accents. The `"light"` theme uses off-white with navy accents. Choose based on your terminal background.
 
-**`show_wells: bool = True`** - Include a per-well section in the Rich panel showing injection and production rates by well name (in surface conditions: STB/day for oil/water, SCF/day for gas).
+### `RunStats`: Diagnostic Accumulator
 
-**`color_theme: str = "dark"`** - Color scheme for the Rich panel:
+`RunStats` is the statistics object returned alongside states when `return_stats=True`. It accumulates data after every accepted output step and provides both live-readable properties and a post-run summary.
 
-- `"dark"` - Charcoal background with amber accents
-- `"light"` - Off-white with navy accents
+Key properties and methods:
 
-### `RunStats`: Post-Simulation Diagnostics
+- **`stats.accepted_steps`** - Number of steps that succeeded.
+- **`stats.rejected_steps`** - Number of step rejections (reduces when step size is reduced and retried).
+- **`stats.total_wall_time`** - Cumulative wall clock time in seconds.
+- **`stats.average_step_wall_ms`** - Mean time per accepted step in milliseconds.
+- **`stats.get_percentile_wall_time_ms(95)`** - 95th percentile step wall time - useful for identifying slow outlier steps.
+- **`stats.average_newton_iterations`** - Mean Newton iterations per step (only counts steps that used Newton iteration).
+- **`stats.steps`** - A list of `StepDiagnostics` objects, one per output step, containing the full scalar snapshot for each step.
+- **`stats.summary_table()`** - Returns a formatted Rich `Table` with the complete run summary.
+- **`stats.summary()`** - Returns a plain-text summary string suitable for logging.
 
-The `RunStats` object accumulates diagnostics at each output step and is updated in-place throughout the simulation. Inspect it after the loop for comprehensive run summary:
+The `stats` object is the same instance throughout the loop. If you want to inspect intermediate statistics (say, after the first 1000 steps), you can read from it inside the loop without any special handling.
 
-```python
-for state, stats in bores.monitor(model, config, return_stats=True):
-    pass
-
-# After loop completes
-print(f"Total steps: {stats.total_steps}")
-print(f"Accepted steps: {stats.accepted_steps}")
-print(f"Rejections: {stats.total_rejections}")
-print(f"Total wall time: {stats.wall_time_ms:.1f} ms")
-print(f"Average step time: {stats.average_step_time_ms:.2f} ms")
-print(f"p95 step time: {stats.p95_step_time_ms:.2f} ms")
-print(f"Average Newton iterations: {stats.average_newton_iterations:.2f}")
-
-# Summary table (automatically printed at end)
-print(stats.summary_table())
-```
-
----
-
-## Example: Full Monitoring Workflow
+### Example: Full Monitoring Workflow
 
 ```python
 import bores
 
-# Setup
 model = bores.ReservoirModel.from_file("reservoir.h5")
 config = bores.Config.from_file("config.yaml")
 
-# Create monitor config with both displays
 monitor_cfg = bores.MonitorConfig(
     use_rich=True,
     use_tqdm=True,
     show_wells=True,
-    refresh_interval=1
+    refresh_interval=1,
 )
 
-# Track results
-states = []
 pressure_history = []
 saturation_history = []
 
-# Execute with full monitoring
 for state, stats in bores.monitor(
-    model, 
+    model,
     config,
     monitor=monitor_cfg,
-    return_stats=True
+    return_stats=True,
 ):
-    states.append(state)
     pressure_history.append(state.average_pressure)
     saturation_history.append(state.average_water_saturation)
 
 # Post-simulation analysis
 print("\n" + "="*60)
-print("SIMULATION SUMMARY")
-print("="*60)
-print(stats.summary_table())
-print(f"\nFinal state at {states[-1].time:.1f} seconds:")
-print(f"  Pressure: {states[-1].average_pressure:.2f} psi")
-print(f"  Water saturation: {states[-1].average_water_saturation:.4f}")
+print(stats.summary())
+
+final = pressure_history[-1]
+print(f"Final average pressure: {final:.2f} psi")
+print(f"Rejection rate: {stats.rejected_steps}/{stats.accepted_steps + stats.rejected_steps}")
 ```
 
----
+### Example: Post-Processing Saved Runs
 
-## Example: Post-Processing Saved Runs
-
-Monitor can also accept an iterable of externally-loaded states for diagnostics on previously-saved runs:
+`bores.monitor()` also accepts an iterable of `ModelState` objects, which lets you run the diagnostic display over previously saved simulation states without re-running the simulation:
 
 ```python
 import bores
 
-# Load states from disk (e.g., via HDF5)
+# Load states from disk - your loading function here
 states = load_states_from_disk("simulation_states.h5")
 
 # Collect diagnostics without re-running
 for state, stats in bores.monitor(
     states,
     monitor=bores.MonitorConfig(use_rich=True),
-    return_stats=True
+    return_stats=True,
 ):
     pass
 
-# Inspect results
 print(stats.summary_table())
 ```
 
@@ -477,91 +381,98 @@ print(stats.summary_table())
 
 ## Best Practices
 
-### 1. **Choose Output Frequency Appropriately**
+### Output Frequency vs. Memory Usage
 
-Yielding every step generates large amounts of data. For long simulations, increase `output_frequency`:
+Yielding every step generates large amounts of state data. For long simulations, increase `output_frequency` to match your actual analysis needs:
 
 ```python
-# Memory-efficient for 10,000+ step simulations
+# For a 10,000-step simulation where you only need daily snapshots,
+# set output_frequency to match your timestep-to-time ratio
 config = bores.Config(
     ...,
-    output_frequency=100  # Yield every 100 accepted steps
+    output_frequency=100,
 )
 ```
 
-### 2. **Use Callbacks for Real-Time Metrics**
+Alternatively, if you only need specific aggregates and not full grid snapshots, use the `on_step_accepted` callback to collect them without storing `ModelState` objects at all.
 
-Collect diagnostics without storing full states:
+### Use Callbacks for Lightweight Metrics
+
+If your analysis requires per-step data (not just output-frequency data), callbacks are more efficient than storing states:
 
 ```python
-metrics = {'rejections': 0, 'max_newton': 0}
+metrics = {"rejections": 0, "max_newton": 0, "step_times": []}
 
 def on_rejected(result, step_size, elapsed):
-    metrics['rejections'] += 1
+    metrics["rejections"] += 1
 
 def on_accepted(result, step_size, elapsed):
-    metrics['max_newton'] = max(metrics['max_newton'], result.newton_iterations)
+    ni = result.timer_kwargs.get("newton_iterations", 0)
+    metrics["max_newton"] = max(metrics["max_newton"], ni)
 
-for state in bores.run(model, config, 
-                       on_step_rejected=on_rejected,
-                       on_step_accepted=on_accepted):
+for state in bores.run(
+    model, 
+    config,
+    on_step_rejected=on_rejected,
+    on_step_accepted=on_accepted
+):
     pass
 ```
 
-### 3. **Monitor vs. Run Trade-off**
+### Accessing Well Rates via SparseTensor
 
-- Use **`bores.run()`** for headless/batch execution or when you don't need live feedback.
-- Use **`bores.monitor()`** for interactive work or when debugging convergence issues.
+Production and injection rates are stored as `SparseTensor` objects. A `SparseTensor` is a dictionary-like container keyed by cell index tuples. Access it like this:
 
 ```python
-# Headless (no output)
-config = config.with_updates(log_interval=0)
+import numpy as np
+
 for state in bores.run(model, config):
-    pass
-
-# Interactive monitoring
-for state in bores.monitor(model, config):
-    pass
+    # Compute total production rates across all wells (sum all surface rates)
+    total_oil_production_ft3_day = state.production_rates.oil.sum()
+    total_water_production_ft3_day = state.production_rates.water.sum()
+    
+    # Convert to surface conditions using formation volume factors
+    # Production rates are negative by convention, so take absolute value
+    total_oil_production_stb = (
+        abs(total_oil_production_ft3_day) * 5.615 /
+        state.production_formation_volume_factors.oil.mean()
+    )
+    
+    # Compute statistics on production across all active cells
+    oil_prod_grid = state.production_rates.oil.array()
+    producing_cells = np.abs(oil_prod_grid[oil_prod_grid != 0])
+    if producing_cells.size > 0:
+        mean_rate_ft3_day = producing_cells.mean()
+        max_rate_ft3_day = producing_cells.max()
+        
+    print(
+        f"Step {state.step} ({state.time_in_days:.1f} days): "
+        f"Oil production = {total_oil_production_stb:.1f} STB/day, "
+        f"Water production = {abs(total_water_production_ft3_day):.1f} ft³/day"
+    )
 ```
 
-### 4. **Extract Well Data via SparseTensor**
+### Resuming from a Checkpoint
 
-Well-based data (rates, FVF, BHP) are stored efficiently as SparseTensor. Access using well locations:
-
-```python
-for state in bores.run(model, config):
-    for well_name, well in state.wells.items():
-        loc = well.location
-        
-        # Dictionary-like access
-        oil_injection = state.injection_rates.oil[loc]
-        gas_production = state.production_rates.gas[loc]
-        
-        # Convert to dense for numpy operations
-        all_oil_injection = state.injection_rates.oil.array()
-        mean_injection = all_oil_injection[all_oil_injection > 0].mean()
-```
-
-See [SparseTensor Documentation](../advanced/states-streams.md#understanding-sparsetensor) for more patterns.
-
-### 5. **Resume from Checkpoint**
-
-Use `state.timer_state` to resume from a saved state:
+BORES supports resuming a simulation from a previously yielded state. The `timer_state` field on each `ModelState` contains a serializable snapshot of the timer that you can use to create a new timer starting from that point:
 
 ```python
-# First simulation (stopped early)
+import bores
+
+# First run - stop after reaching a target time
 states = []
 for state in bores.run(model, config):
     states.append(state)
-    if state.time > 1e6:  # Stop after 1M seconds
+    if state.time > 1e6:
         break
 
-# Resume from last state
+# Resume from the last yielded state
 last_state = states[-1]
+new_model = last_state.model
 new_timer = bores.Timer.from_state(last_state.timer_state)
-new_config = config.with_updates(timer=new_timer)
+resumed_config = config.with_updates(timer=new_timer)
 
-for state in bores.run(model, new_config):
+for state in bores.run(new_model, resumed_config):
     process(state)
 ```
 
@@ -569,49 +480,51 @@ for state in bores.run(model, new_config):
 
 ## Troubleshooting
 
-### Simulation runs very slowly
+### Simulation Runs Slowly
 
-Check if step rejection rate is high:
+High step rejection rates are the most common cause of slow simulations. Check with a callback:
 
 ```python
 rejection_count = 0
 
-def track_rejections(result, step_size, elapsed):
+def track(result, step_size, elapsed):
     global rejection_count
     rejection_count += 1
 
-for state in bores.run(model, config, on_step_rejected=track_rejections):
+for state in bores.run(model, config, on_step_rejected=track):
     pass
 
-print(f"Rejection rate: {rejection_count} rejections")
+print(f"Total rejections: {rejection_count}")
 ```
 
-High rejection rates suggest:
+If the rejection count is high relative to accepted steps, consider:
 
-- Configuration too aggressive (e.g., `cfl_safety_margin` too high)
-- Grid refinement needed near wells
-- Evolution scheme mismatch (consider SI/Full-SI for stiff systems)
+- Reducing `cfl_safety_margin` if the scheme is too aggressive with step sizes.
+- Switching to a more stable scheme (Sequential Implicit or Full Sequential Implicit) for stiff problems with large mobility contrasts.
+- Adding local grid refinement near wells if rejections are triggered by near-well pressure spikes.
 
-### Out of memory during long simulations
+### Out of Memory During Long Simulations
 
-Increase `output_frequency` to reduce number of yielded states:
+Increase `output_frequency` to reduce the number of yielded states. For the most memory-efficient runs, process states in streaming fashion and do not store them:
 
 ```python
 config = bores.Config(..., output_frequency=1000)
+
+# Stream without storing
+for state in bores.run(model, config):
+    write_to_disk(state)   # Write and discard
 ```
 
-Or process states in streaming fashion without storing them.
+### Convergence Failures
 
-### Convergence failures
-
-Monitor provides diagnostics via `RunStats`:
+Use `RunStats` to diagnose:
 
 ```python
 for state, stats in bores.monitor(model, config, return_stats=True):
     pass
 
-print(f"Newton iterations per step: avg={stats.average_newton_iterations:.1f}")
-print(f"Wall time per step: avg={stats.average_step_time_ms:.1f} ms")
+print(f"Avg Newton iterations: {stats.average_newton_iterations:.2f}")
+print(f"p95 step time:         {stats.get_percentile_wall_time_ms(95):.1f} ms")
 ```
 
-High Newton iterations suggest the scheme or timestep size may need adjustment. See [Solver Selection](../best-practices/solver-selection.md) guide.
+High average Newton iterations (above 8-10 per step) indicate that pressure-saturation coupling is tight and the solver is struggling. In this case, try switching from `sequential-implicit` to `full-sequential-implicit`, which adds outer iteration to enforce coupling consistency and typically converges in fewer total Newton iterations even though each step does more work.

@@ -689,6 +689,10 @@ class _WellsProxy(typing.Generic[Coordinates, WellT]):
         """Set a well at a specific location."""
         self.wells_map[location] = well
 
+    def __iter__(self) -> typing.Iterator[typing.Tuple[Coordinates, WellT]]:
+        """Iterate over well locations and their corresponding well objects."""
+        return iter(self.wells_map.items())
+
 
 # Serialize/deserialize list of wells as dictionaries of well name to well object
 def _serialize_wells(
@@ -842,6 +846,14 @@ class Wells(
         if isinstance(key, str):
             return self.get_by_name(key)
         return self.get_by_location(key)
+
+    def __iter__(
+        self,
+    ) -> typing.Iterator[
+        typing.Union[InjectionWell[Coordinates], ProductionWell[Coordinates]]
+    ]:
+        """Iterate over all wells in the collection (both injection and production wells)."""
+        return iter(itertools.chain(self.injection_wells, self.production_wells))
 
     @property
     def locations(

@@ -16,36 +16,64 @@ The implicit pressure step means that pressure changes of any magnitude can be h
 
 Here is the sequence of operations that BORES executes at each IMPES timestep:
 
-1. **Solve pressure implicitly** - Assemble the pressure coefficient matrix and right-hand side from current fluid properties, transmissibilities, compressibilities, and well terms. Solve the resulting sparse linear system using an iterative solver (BiCGSTAB by default) with a preconditioner (ILU by default).
+1. **Solve pressure implicitly** - Assemble the pressure coefficient matrix and right-hand side from current fluid properties, transmissibilities, compressibilities, and well terms. Solve the resulting sparse linear system using an iterative solver (BiCGSTAB by default) with a preconditioner (ILU by default). Validate that the pressure solution is physical (within acceptable range).
 
-2. **Update PVT properties** - Recompute all pressure-dependent fluid properties (formation volume factors, viscosities, solution GOR, compressibilities, densities) at the new pressure. This is critical because the saturation update that follows needs accurate fluid properties at the new pressure.
+2. **Update PVT properties** - Recompute all pressure-dependent fluid properties (formation volume factors, viscosities, solution GOR, compressibilities, densities) at the new pressure.
 
-3. **Recompute relative mobilities** - Rebuild phase mobilities ($\lambda_\alpha = k_{r\alpha} / \mu_\alpha$) using the updated viscosities from step 2 and the current relative permeabilities.
+3. **Perform solution gas liberation/re-dissolution flash** - When pressure changes, the dissolved gas-to-oil ratio ($R_s$) changes. BORES performs a thermodynamic flash that liberates gas if pressure drops below the bubble point (or re-dissolves gas if pressure rises above it), updating oil and gas saturations accordingly. Verify that flash-induced saturation changes are acceptable; if not, reject the step.
 
-4. **Update saturations explicitly** - Compute inter-cell fluxes using Darcy's law with the new pressure gradient and current mobilities. Update oil, water, and gas saturations in each cell based on the net flux balance and well source/sink terms. Enforce the saturation constraint $S_o + S_w + S_g = 1$.
+4. **Update saturations explicitly** - Rebuild relative permeabilities and mobilities using updated viscosities and current saturations. Compute inter-cell Darcy fluxes using the new pressure gradient and current mobilities. Update oil, water, and gas saturations based on the net flux balance and well source/sink terms.
 
-5. **Check convergence and adjust timestep** - Verify that saturation changes and pressure changes are within configured limits. If they are, accept the step and advance time. If not, reject the step, reduce the timestep, and retry.
+5. **Check convergence and adjust timestep** - Verify that saturation changes from transport and pressure changes are within configured limits. If they are, normalize saturations (if enabled), update residual saturation grids, accept the step, and advance time. If not, reject the step, reduce the timestep, and retry.
 
-The following diagram illustrates this loop:
+The following diagram illustrates this loop in detail, including all convergence checks and intermediate updates:
 
 ```mermaid
 flowchart TD
     A["Initialize Model"] --> B["Start Timestep"]
     B --> C["Solve Pressure Implicitly"]
-    C --> D["Update PVT Properties"]
-    D --> E["Recompute Relative Mobilities"]
-    E --> F["Update Saturations Explicitly"]
-    F --> G{"Convergence Check"}
-    G -- Pass --> H["Accept Step & Advance Time"]
-    G -- Fail --> I["Reduce Timestep"]
+    C --> C1{"Pressure<br/>Valid?"}
+    C1 -- No --> I["Reduce Timestep"]
     I --> B
+    C1 -- Yes --> D["Apply Pressure<br/>Boundary Conditions"]
+    D --> D1["Update PVT Properties<br/>at New Pressure"]
+    D1 --> D2["Rebuild Relative<br/>Permeabilities & Mobilities"]
+    D2 --> E["Solution Gas<br/>Liberation/Re-dissolution<br/>Flash"]
+    E --> E1{"Flash-Induced<br/>Saturation Change<br/>Acceptable?"}
+    E1 -- No --> I
+    E1 -- Yes --> E2["Update PVT Again<br/>after Flash"]
+    E2 --> E3["Apply Saturation<br/>Boundary Conditions"]
+    E3 --> E4["Rebuild Relative<br/>Permeabilities & Mobilities<br/>from Post-Flash Saturations"]
+    E4 --> F["Update Saturations<br/>Explicitly"]
+    F --> G{"Saturation Change<br/>Acceptable?"}
+    G -- No --> I
+    G -- Yes --> G1["Apply Saturation<br/>Boundary Conditions"]
+    G1 --> G2{"Normalize<br/>Saturations?"}
+    G2 -- Yes --> G3["Normalize: So + Sw + Sg = 1"]
+    G2 -- No --> G4["Update Residual<br/>Saturation Grids"]
+    G3 --> G4
+    G4 --> H["Accept Step<br/>& Advance Time"]
     H --> J{"End Time?"}
     J -- No --> B
     J -- Yes --> K["End Simulation"]
 ```
 
-!!! info "Why PVT Updates Happen Between Pressure and Saturation"
-    In the IMPES scheme, PVT properties are updated *after* the implicit pressure solve but *before* the explicit saturation update. This is intentional: pressure changes affect viscosity, density, and compressibility, which in turn affect phase mobility and transport. By updating PVT between the two steps, the saturation transport uses fluid properties that are consistent with the new pressure field. In contrast, the explicit scheme updates PVT *after* both pressure and saturation have been evolved, using old-time values for transport coefficients. This difference is one reason IMPES is generally more accurate at larger timesteps.
+!!! info "Why PVT Updates Happen Multiple Times"
+    In the IMPES scheme, PVT properties are updated at multiple stages:
+
+    1. **After pressure solve** - Pressure changes affect viscosity, density, and compressibility, which in turn affect phase mobility and transport
+    2. **After solution gas flash** - The solution gas liberation step can change saturations, so PVT properties need to be recalculated to reflect the new composition
+    
+    By updating PVT at these key points, the saturation transport uses fluid properties that are consistent with the current state. This staged approach ensures accuracy while minimizing recomputation overhead.
+
+!!! warning "Solution Gas Liberation & Flash"
+    When reservoir pressure drops below the bubble point, dissolved gas comes out of solution. BORES automatically performs a "flash" calculation at each step that:
+    - Recalculates the solution gas-to-oil ratio (Rs) at the new pressure
+    - Liberates the difference as free gas
+    - Updates oil and gas saturations accordingly
+    - Checks if the saturation changes from flash alone exceed configured limits (if so, rejects the step)
+
+    This flash is independent of the explicit saturation evolution that follows—it is a thermodynamic equilibrium adjustment, not a transport step.
 
 ## The Explicit Scheme
 
@@ -125,17 +153,34 @@ Let us walk through a single IMPES timestep in more detail to give you a concret
 
 **5. Validate the pressure solution.** BORES checks that no cell has an unphysical pressure (negative or extremely high). If unphysical pressures are detected, the step is rejected with a diagnostic message.
 
-**6. Update PVT properties.** All pressure-dependent fluid properties are recomputed at the new pressure: formation volume factors ($B_o$, $B_g$, $B_w$), viscosities ($\mu_o$, $\mu_g$, $\mu_w$), solution GOR ($R_s$), gas solubility in water ($R_{sw}$), compressibilities, and densities. If you provided PVT tables, they are used for interpolation; otherwise, correlations are evaluated.
+**6. Update PVT properties (first update).** All pressure-dependent fluid properties are recomputed at the new pressure: formation volume factors ($B_o$, $B_g$, $B_w$), viscosities ($\mu_o$, $\mu_g$, $\mu_w$), solution GOR ($R_s$), gas solubility in water ($R_{sw}$), compressibilities, and densities. If you provided PVT tables, they are used for interpolation; otherwise, correlations are evaluated.
 
-**7. Update saturations.** Inter-cell Darcy fluxes are computed from the new pressure gradient and current mobilities. Each cell's saturation is updated based on the net flux balance:
+**7. Rebuild relative permeabilities and mobilities.** Relative permeabilities are recalculated from the current saturations with updated correlations. Relative mobilities are then recomputed using the new viscosities from step 6 and the recalculated relative permeabilities.
+
+**8. Solution gas liberation and re-dissolution flash.** When pressure changes, dissolved gas-to-oil ratio ($R_s$) changes. If pressure drops below the bubble point, gas is liberated from the oil phase and becomes free gas. BORES performs a thermodynamic flash calculation that:
+
+- Computes the new $R_s$ at the new pressure
+- Calculates the difference in dissolved gas
+- Updates oil and gas saturations to account for gas liberation (or re-dissolution if pressure increased)
+- Renormalizes saturations to ensure $S_o + S_w + S_g = 1$
+
+**8a. Check flash-induced saturation changes.** The saturation changes caused by the solution gas flash alone are compared against the configured limits (`maximum_oil_saturation_change`, `maximum_gas_saturation_change`, etc.). If the flash violates these limits by itself, the timestep is immediately rejected and retried with a smaller step size. This prevents cases where flash dominates saturation transport.
+
+**9. Update PVT properties (second update).** After the flash has altered saturations and composition, PVT properties are updated again to account for changes in solution GOR and phase saturations.
+
+**10. Update saturations explicitly.** Inter-cell Darcy fluxes are computed from the new pressure gradient and current mobilities. Each cell's saturation is updated based on the net flux balance:
 
 $$S_\alpha^{n+1} = S_\alpha^n + \frac{\Delta t}{\phi V_b} \left( \sum_{\text{faces}} q_\alpha + Q_\alpha^{\text{well}} \right)$$
 
 where $V_b$ is the bulk cell volume, $q_\alpha$ is the flux of phase $\alpha$ through a cell face, and $Q_\alpha^{\text{well}}$ is the well source/sink term.
 
-**8. Check changes.** The maximum pressure change and maximum saturation change across all cells are compared against the configured limits. If either exceeds its limit, the step is rejected, the timestep is reduced, and the simulator returns to step 1 with the smaller timestep. The old pressure and saturation fields are restored.
+**11. Check saturation changes from transport.** The maximum saturation change from the explicit transport step is compared against the configured limits. If any phase saturation change exceeds its limit, the step is rejected, the timestep is reduced, and the simulator returns with the smaller timestep. The old pressure and saturation fields are restored.
 
-**9. Record state.** If the step is accepted and it falls on an output interval (controlled by `output_frequency` in `Config`), a `ModelState` snapshot is captured and yielded to the caller. This snapshot contains the full reservoir model state, well data, relative permeabilities, rate grids, and timer state.
+**12. Normalize saturations (if enabled).** If you have set `normalize_saturations=True` in the `Config`, BORES performs a final normalization to enforce $S_o + S_w + S_g = 1$ exactly. This corrects any numerical rounding errors that accumulated during the saturation update. If normalization is disabled, saturations are left as-is after the transport update (typically they will be very close to 1 but not exact).
+
+**13. Update residual saturation grids.** Residual saturations (the oil and gas saturations that cannot be mobilized by flow) are updated based on the history of saturation changes. Depending on your rock-fluid model, residual oil and gas may change as the oil becomes water-wet or gas-wet.
+
+**14. Record state.** If the step is accepted and it falls on an output interval (controlled by `output_frequency` in `Config`), a `ModelState` snapshot is captured and yielded to the caller. This snapshot contains the full reservoir model state, well data, relative permeabilities, rate grids, and timer state.
 
 ## Running a Simulation in BORES
 

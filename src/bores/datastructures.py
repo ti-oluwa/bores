@@ -747,39 +747,39 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
             acc = self._dtype(acc + missing * self._default)  # type: ignore
         return acc
 
-    def mean(self) -> float:
+    def mean(self) -> DType:
         """
         Mean of all elements.
         """
         total_size = int(np.prod(self._shape))
         if total_size == 0:
             raise ZeroDivisionError("Mean of empty tensor")
-        return float(self.sum()) / total_size
+        return self._dtype(self.sum() / total_size)
 
-    def nanmean(self) -> float:
+    def nanmean(self) -> DType:
         """
         Mean ignoring NaNs.
         """
         total_size = int(np.prod(self._shape))
 
         count = 0
-        acc: float = 0.0
+        acc: DType = self._dtype(0)  # type: ignore
 
         for v in self._data.values():
             if not np.isnan(v):
-                acc += float(v)
+                acc = self._dtype(acc + v)  # type: ignore
                 count += 1
 
         missing = total_size - len(self._data)
 
         if not np.isnan(self._default):
-            acc += missing * float(self._default)
+            acc = self._dtype(acc + missing * self._default)  # type: ignore
             count += missing
 
         if count == 0:
-            return float("nan")
+            return self._dtype(np.nan)  # type: ignore
 
-        return acc / count
+        return acc / count  # type: ignore
 
     def min(self) -> DType:
         """
