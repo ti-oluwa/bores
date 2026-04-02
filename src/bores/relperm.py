@@ -79,27 +79,25 @@ Comparison of common three-phase relative permeability mixing rules:
 @attrs.define
 class MixingRule:
     func: typing.Union[MixingRuleFunc, "MixingRule"]
-    derivative_func: typing.Optional[
-        typing.Callable[..., typing.Any]
-    ] = None
+    _dfunc: typing.Optional[typing.Callable[..., typing.Any]] = None
 
     def __post_init__(self) -> None:
-        if self.derivative_func is None:
-            derivative_func = getattr(self.func, "derivatives", None)
-            if callable(derivative_func):
-                self.derivative_func = typing.cast(
+        if self._dfunc is None:
+            dfunc = getattr(self.func, "derivatives", None)
+            if callable(dfunc):
+                self._dfunc = typing.cast(
                     typing.Callable[..., typing.Any],
-                    derivative_func,
+                    dfunc,
                 )
 
     def dfunc(
-        self, derivative_func: typing.Callable[..., typing.Any], /
+        self, dfunc: typing.Callable[..., typing.Any], /
     ) -> typing.Callable[..., typing.Any]:
         """
         Decorator to set the partial derivative function for this mixing rule.
         """
-        self.derivative_func = derivative_func
-        return derivative_func
+        self._dfunc = dfunc
+        return dfunc
 
     def __call__(
         self,
@@ -126,8 +124,8 @@ class MixingRule:
         gas_saturation: FloatOrArray,
         epsilon: float = 1e-7,
     ):
-        if self.derivative_func is not None:
-            return self.derivative_func(
+        if self._dfunc is not None:
+            return self._dfunc(
                 kro_w=kro_w,
                 kro_g=kro_g,
                 water_saturation=water_saturation,
