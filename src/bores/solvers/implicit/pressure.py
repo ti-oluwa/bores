@@ -311,7 +311,7 @@ def evolve_pressure(
             time=time,
             config=config,
             well_indices_cache=well_indices_cache,
-            md_per_cp_to_ft2_per_psi_per_day=c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY,
+            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             dtype=dtype,
             injection_rates=injection_rates,
             production_rates=production_rates,

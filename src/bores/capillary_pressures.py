@@ -1,5 +1,7 @@
 """Capillary pressure models and tables for multi-phase flow simulations."""
 
+import numba
+
 import threading
 import typing
 
@@ -581,6 +583,7 @@ class ThreePhaseCapillaryPressureTable(
         )
 
 
+@numba.njit(cache=True)
 def compute_brooks_corey_capillary_pressures(
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
@@ -756,7 +759,8 @@ def compute_brooks_corey_capillary_pressures(
     # Return scalars if inputs were scalars
     if is_scalar:
         return oil_water_capillary_pressure.item(), gas_oil_capillary_pressure.item()
-    return oil_water_capillary_pressure, gas_oil_capillary_pressure
+    dtype = water_saturation.dtype  # type: ignore[union-attr]
+    return oil_water_capillary_pressure.astype(dtype), gas_oil_capillary_pressure.astype(dtype)
 
 
 @capillary_pressure_table
@@ -1090,6 +1094,7 @@ class BrooksCoreyCapillaryPressureModel(
         )
 
 
+@numba.njit(cache=True)
 def compute_van_genuchten_capillary_pressures(
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
@@ -1265,6 +1270,7 @@ def compute_van_genuchten_capillary_pressures(
     return oil_water_capillary_pressure, gas_oil_capillary_pressure
 
 
+@numba.njit(cache=True)
 def _van_genuchten_pc_slope_wrt_effective_saturation(
     effective_saturation: npt.NDArray,
     alpha: float,
@@ -1616,6 +1622,7 @@ class VanGenuchtenCapillaryPressureModel(
         )
 
 
+@numba.njit(cache=True)
 def compute_leverett_j_capillary_pressures(
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,

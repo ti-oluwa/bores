@@ -682,10 +682,8 @@ def _run_impes_step(
         "cfl_threshold": saturation_solution.cfl_threshold,
         "maximum_pressure_change": maximum_pressure_change,
         "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
-        "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
-        or None,
-        "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
-        or None,
+        "maximum_saturation_change": saturation_change_result.max_phase_saturation_change,
+        "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change,
     }
 
     if not saturation_result.success:
@@ -1096,10 +1094,8 @@ def _run_sequential_implicit_step(
     timer_kwargs = {
         "maximum_pressure_change": maximum_pressure_change,
         "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
-        "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
-        or None,
-        "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
-        or None,
+        "maximum_saturation_change": saturation_change_result.max_phase_saturation_change,
+        "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change,
         "newton_iterations": saturation_solution.newton_iterations,
     }
 
@@ -1605,10 +1601,8 @@ def _run_full_sequential_implicit_step(
         final_timer_kwargs = {
             "maximum_pressure_change": maximum_pressure_change,
             "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
-            "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
-            or None,
-            "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
-            or None,
+            "maximum_saturation_change": saturation_change_result.max_phase_saturation_change,
+            "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change,
             "newton_iterations": newton_iterations,
         }
 
@@ -2031,10 +2025,8 @@ def _run_explicit_step(
         "cfl_threshold": saturation_solution.cfl_threshold,
         "maximum_pressure_change": maximum_pressure_change,
         "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
-        "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
-        or None,
-        "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
-        or None,
+        "maximum_saturation_change": saturation_change_result.max_phase_saturation_change,
+        "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change,
     }
 
     if not saturation_result.success:

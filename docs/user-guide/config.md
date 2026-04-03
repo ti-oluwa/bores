@@ -139,24 +139,30 @@ See [Schemes](simulation/schemes.md) for detailed information on each evolution 
 
 See [Solvers](simulation/solvers.md) and [Preconditioners](simulation/preconditioners.md) for details.
 
-### Time Step Controls
+### Explicit Scheme Controls
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `saturation_cfl_threshold` | `float` | `0.7` | Maximum saturation CFL number |
-| `pressure_cfl_threshold` | `float` | `0.9` | Maximum pressure CFL number |
+| `saturation_cfl_threshold` | `float` | `0.7` | Maximum saturation CFL number (explicit scheme only) |
+| `pressure_cfl_threshold` | `float` | `0.9` | Maximum pressure CFL number (explicit scheme only) |
+
+### Time Step Saturation Controls
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
 | `maximum_oil_saturation_change` | `float` | `0.6` | Maximum oil saturation change per step |
 | `maximum_water_saturation_change` | `float` | `0.6` | Maximum water saturation change per step |
 | `maximum_gas_saturation_change` | `float` | `0.5` | Maximum gas saturation change per step |
-| `maximum_pressure_change` | `float` | `500.0` | Maximum pressure change per step (psi) |
 
-!!! tip "Gas Saturation Change Limits"
+### Time Step Pressure Controls
 
-    The default `maximum_gas_saturation_change` of 0.5 is intentionally lenient. Gas saturation can change rapidly during solution gas liberation or gas injection, and tightening this limit forces very small timesteps that slow the simulation significantly without meaningful accuracy gains. Only lower this value when you specifically need fine resolution of gas saturation evolution, such as detailed gas coning studies or near-critical fluid behavior. For most simulations, leave it at the default or increase it further.
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `maximum_pressure_change` | `float` | `1000.0` | Maximum pressure change per step (psi) |
 
 !!! tip "Pressure Change Limits"
 
-    The default `maximum_pressure_change` of 500 psi is appropriate for most field-scale models with initial pressures above 3,000 psi. For lower-pressure reservoirs or simulations with rapid pressure transients (well shutins, gas breakthrough), you may need a tighter limit. A useful rule of thumb is to keep `maximum_pressure_change` below 10 to 15% of the initial reservoir pressure. For example, a shallow reservoir at 1,500 psi might use `maximum_pressure_change=150.0`, while a deep HPHT reservoir at 12,000 psi can comfortably use the default or even `maximum_pressure_change=800.0`.
+    The default `maximum_pressure_change` of 1000 psi is appropriate for most field-scale models. For lower-pressure reservoirs or simulations with rapid pressure transients (well shutins, gas breakthrough), you may need a tighter limit. A useful rule of thumb is to keep `maximum_pressure_change` below 10 to 15% of the initial reservoir pressure. For example, a shallow reservoir at 1,500 psi might use `maximum_pressure_change=150.0`, while a deep HPHT reservoir at 12,000 psi can use higher values like `maximum_pressure_change=1200.0`.
 
 See [Time Step Control](simulation/timestep-control.md) for guidance on adjusting these.
 
@@ -185,6 +191,39 @@ The default relative mobility ranges are:
 - Gas: $10^{-12}$ to $10^{6}$
 
 These ranges prevent division by zero and numerical overflow in mobility calculations. You rarely need to change them.
+
+### Implicit Solver Configuration
+
+These parameters control Newton-Raphson solvers in implicit and sequential-implicit schemes.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `jacobian_assembly_method` | `str` | `"analytical"` | Jacobian assembly: `"analytical"` or `"numerical"` |
+| `maximum_newton_iterations` | `int` | `15` | Maximum Newton-Raphson iterations per solve |
+| `newton_tolerance` | `float` | `1e-6` | Relative residual tolerance for Newton convergence |
+| `maximum_line_search_cuts` | `int` | `4` | Maximum line search bisections per Newton step |
+| `maximum_saturation_change` | `float` | `0.05` | Maximum per-cell saturation change per Newton iteration |
+| `newton_saturation_change_tolerance` | `float` | `1e-4` | Saturation change tolerance for dual convergence check |
+| `newton_stagnation_patience` | `int` | `3` | Consecutive non-improving iterations before stagnation |
+| `newton_stagnation_improvement_threshold` | `float` | `0.01` | Minimum fractional residual reduction per iteration (1% default) |
+
+### Sequential Implicit Outer Iteration Configuration
+
+These parameters control outer loop convergence for the sequential-implicit scheme.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `pressure_outer_convergence_tolerance` | `float` | `1e-3` | Relative pressure inter-iterate tolerance |
+| `saturation_outer_convergence_tolerance` | `float` | `1e-2` | Absolute saturation inter-iterate tolerance |
+
+### Additional Numerical Controls
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `normalize_saturations` | `bool` | `True` | Normalize saturations so Sw + So + Sg = 1.0 after each step |
+| `log_interval` | `int` | `5` | Log progress every N steps |
+| `output_frequency` | `int` | `1` | Yield a state every N steps |
+| `warn_well_anomalies` | `bool` | `True` | Warn about anomalous well flow rates |
 
 ### Hysteresis
 
@@ -288,14 +327,14 @@ Since `Config` is immutable, you cannot modify fields directly. Use `copy()` or 
 
 ```python
 # Create a new config with a different scheme
-implicit_config = config.copy(scheme="implicit")
+implicit_config = config.copy(scheme="full-sequential-implicit")
 
 # Multiple changes at once
 tuned_config = config.copy(
-    scheme="implicit",
+    scheme="full-sequential-implicit",
     pressure_solver="gmres",
     pressure_preconditioner="amg",
-    maximum_solver_iterations=400,
+    maximum_newton_iterations=20,
 )
 ```
 
@@ -305,10 +344,10 @@ tuned_config = config.copy(
 
 ```python
 # This works
-updated = config.with_updates(scheme="implicit")
+updated = config.with_updates(scheme="full-sequential-implicit")
 
 # This raises AttributeError because "schemee" is not a valid field
-updated = config.with_updates(schemee="implicit")  # AttributeError
+updated = config.with_updates(schemee="full-sequential-implicit")  # AttributeError
 ```
 
 Use `with_updates()` when you want protection against typos in parameter names. Use `copy()` when you prefer the shorter name and are confident in the parameter names.

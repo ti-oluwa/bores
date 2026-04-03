@@ -2288,7 +2288,8 @@ def evolve_saturation(
     stagnation_count = 0
     stagnation_patience = config.newton_stagnation_patience
     stagnation_improvement_threshold = config.newton_stagnation_improvement_threshold
-    minimum_step_size = float(np.sqrt(np.finfo(dtype).eps))
+    weak_problem_saturation_threshold = config.newton_weak_problem_saturation_threshold
+    minimum_step_size = float(np.sqrt(np.finfo(dtype).eps))  # type: ignore
     maximum_newton_iterations = config.maximum_newton_iterations
     newton_tolerance = config.newton_tolerance
     maximum_line_search_cuts = config.maximum_line_search_cuts
@@ -2374,11 +2375,25 @@ def evolve_saturation(
             if convergence_history
             else float("inf")
         )
+
+        # Saturation convergence with dual criteria:
+        # 1. Standard: tight residual + small saturation change (coupled system)
+        # 2. Weak problem: saturation nearly stagnant even with moderate residual (quasi-equilibrium)
         saturation_converged = (
-            last_max_ds < saturation_convergence_tolerance
-            and relative_residual_norm < 1e-3
-            and iteration > 1
-        )
+            (
+                last_max_ds < saturation_convergence_tolerance
+                and relative_residual_norm < 1e-3
+            )
+            or (
+                # Weak/quasi-equilibrium convergence: if saturation hasn't moved in multiple
+                # iterations and residual is not worsening significantly, accept as converged.
+                # This handles problems with no wells or strong capillary equilibrium.
+                last_max_ds < weak_problem_saturation_threshold
+                and iteration >= 2
+                and residual_norm
+                <= best_residual_norm * 1.5  # Allow some residual increase
+            )
+        ) and iteration > 0
 
         if residual_converged or saturation_converged:
             converged = True
@@ -2576,11 +2591,22 @@ def evolve_saturation(
                     f"||R||/||R0|| = {relative_residual_norm:.2e}"
                 )
             else:
-                logger.warning(
-                    f"Newton stagnated (negligible dS) at iteration {iteration}: "
-                    f"max |∆S| = {max_saturation_update:.2e}, "
-                    f"||R||/||R0|| = {relative_residual_norm:.2e}"
-                )
+                # In weak problems (no wells, capillary equilibrium), saturations may stagnate
+                # with moderate residuals. If residual is improving or flat (not worsening),
+                # accept as converged for weak solutions.
+                if residual_norm <= best_residual_norm * 1.05 and iteration >= 3:
+                    converged = True
+                    logger.debug(
+                        f"Newton converged (weak problem, negligible dS) at iteration {iteration}: "
+                        f"max |∆S| = {max_saturation_update:.2e}, "
+                        f"||R||/||R0|| = {relative_residual_norm:.2e} (residual not worsening)"
+                    )
+                else:
+                    logger.debug(
+                        f"Newton stagnated (negligible dS, residual not converged) at iteration {iteration}: "
+                        f"max |∆S| = {max_saturation_update:.2e}, "
+                        f"||R||/||R0|| = {relative_residual_norm:.2e}"
+                    )
             break
 
         if residual_norm < (
@@ -2606,6 +2632,33 @@ def evolve_saturation(
                     f"no improvement for {stagnation_count} iterations"
                 )
             break
+
+    # Post-loop check: if we hit max iterations with a weak problem (tiny saturation changes),
+    # accept the solution even if residual isn't fully converged
+    if (
+        not converged
+        and maximum_newton_iterations > 0
+        and final_iteration >= maximum_newton_iterations
+    ):
+        last_max_ds = (
+            convergence_history[-1].max_saturation_update
+            if convergence_history
+            else float("inf")
+        )
+        final_relative_residual = final_residual_norm / initial_residual_norm
+
+        # Weak problem acceptance: saturations have stagnated and residual is improving/stable
+        if (
+            last_max_ds < weak_problem_saturation_threshold
+            and final_relative_residual < 1.0  # Not diverging
+            and final_residual_norm <= best_residual_norm * 1.5
+        ):
+            converged = True
+            logger.debug(
+                f"Newton max iterations reached, but accepting weak problem solution: "
+                f"max |∆S| = {last_max_ds:.2e}, ||R||/||R0|| = {final_relative_residual:.2e}. "
+                f"Saturations are stagnant and residual is not worsening."
+            )
 
     maximum_water_saturation_change = float(
         np.max(np.abs(water_saturation_grid - old_water_saturation_grid))

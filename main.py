@@ -139,13 +139,12 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    wells=wells,
+    # wells=wells,
     scheme="si",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
-    jacobian_assembly_method="numerical",
     maximum_pressure_change=1800,
 )
 

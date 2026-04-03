@@ -77,7 +77,7 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="implicit",
+    scheme="sequential-implicit",
     pressure_preconditioner="cpr",
 )
 ```

@@ -355,6 +355,28 @@ class Config(
     where Newton updates oscillate or make negligible progress.
     """
 
+    newton_weak_problem_saturation_threshold: float = attrs.field(  # type: ignore
+        default=1e-8,
+        validator=attrs.validators.gt(0),
+    )
+    """
+    Saturation change threshold for detecting quasi-equilibrium (weak) problems.
+
+    When saturations barely move (max |∆S| < threshold) for multiple iterations
+    and the residual is not increasing significantly, the Newton solver converges
+    even if the relative residual norm is moderately above 1e-3. This handles
+    problems with no wells or strong capillary equilibrium where the system
+    reaches a quasi-equilibrium state with non-zero but acceptable residuals.
+
+    Typical use case:
+    - Natural field depletion with no wells: saturations remain nearly constant
+      due to capillary balance, but residuals may be 1-5% of initial
+    - Reduce this value (e.g., 1e-10) for stricter saturation requirements
+    - Increase this value (e.g., 1e-6) for more lenient weak problem detection
+
+    Default: 1e-8 (approximately machine precision for 32-bit floats)
+    """
+
     pressure_outer_convergence_tolerance: float = attrs.field(
         default=1e-3,
         validator=attrs.validators.and_(
