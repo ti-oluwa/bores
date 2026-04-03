@@ -47,7 +47,7 @@ def is_array(x: typing.Any) -> bool:
     return hasattr(x, "shape") and isinstance(x.shape, tuple)
 
 
-@numba.njit(cache=True, parallel=True)
+@numba.njit(cache=True)
 def _apply_mask_2d(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
     Apply values (scalar or array) to a 2D array where mask is True (in-place).
@@ -64,7 +64,7 @@ def _apply_mask_2d(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> 
                 arr[i, j] = values[i, j]
 
 
-@numba.njit(cache=True, parallel=True)
+@numba.njit(cache=True)
 def _apply_mask_3d(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
     Apply values (scalar or array) to a 3D array where mask is True (in-place).
@@ -81,7 +81,7 @@ def _apply_mask_3d(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> 
                     arr[i, j, k] = values[i, j, k]
 
 
-@numba.njit(cache=True, parallel=True)
+@numba.njit(cache=True)
 def _apply_mask_nd(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
     Apply values (scalar or array) to an N-dimensional array where mask is True (in-place).
@@ -113,7 +113,7 @@ def apply_mask(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None
         _apply_mask_nd(arr, mask, values)
 
 
-@numba.njit(cache=True, parallel=True)
+@numba.njit(cache=True)
 def _get_mask_2d(arr: npt.NDArray, mask: npt.NDArray, fill_value: float):
     """
     Return a new 2D array where values are kept if mask is True, otherwise replaced with fill_value.
@@ -134,7 +134,7 @@ def _get_mask_2d(arr: npt.NDArray, mask: npt.NDArray, fill_value: float):
     return out
 
 
-@numba.njit(cache=True, parallel=True)
+@numba.njit(cache=True)
 def _get_mask_3d(arr: npt.NDArray, mask: npt.NDArray, fill_value: float):
     """
     Return a new 3D array where values are kept if mask is True, otherwise replaced with fill_value.
@@ -156,7 +156,7 @@ def _get_mask_3d(arr: npt.NDArray, mask: npt.NDArray, fill_value: float):
     return out
 
 
-@numba.njit(cache=True, parallel=True)
+@numba.njit(cache=True)
 def _get_mask_nd(arr: npt.NDArray, mask: npt.NDArray, fill_value: float):
     """
     Return a new N-dimensional array where values are kept if mask is True, otherwise replaced with fill_value.
