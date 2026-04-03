@@ -37,7 +37,7 @@ from bores.types import (
     ThreeDimensionalGrid,
     ThreeDimensions,
 )
-from bores.wells import Wells
+from bores.wells.base import Wells
 
 logger = logging.getLogger(__name__)
 

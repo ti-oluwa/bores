@@ -2,6 +2,7 @@
 Stream model state with optional persistence for memory-efficient simulation workflows.
 """
 
+import atexit
 import logging
 import queue
 import threading
@@ -15,6 +16,7 @@ from bores.errors import StorageError, StreamError
 from bores.states import ModelState, validate_state
 from bores.stores import DataStore, EntryMeta
 from bores.types import NDimension
+from bores.utils import _close_iter
 
 __all__ = ["StateStream", "StreamProgress"]
 
@@ -241,7 +243,14 @@ class StateStream(typing.Generic[NDimension]):
             self._consumed = True
 
         if self.background_io:
+            if max_queue_size <= 0:
+                logger.warning(
+                    "Unbounded queue configured (max_queue_size <= 0). "
+                    "This can lead to memory exhaustion."
+                )
             self._start_io_worker()
+
+        atexit.register(self.close)  # Ensure resources cleaned up on exit
 
     def _start_io_worker(self) -> None:
         """Start the background I/O worker thread."""
@@ -418,9 +427,12 @@ class StateStream(typing.Generic[NDimension]):
 
         if self.store is None:
             logger.info("No store provided, streaming without persistence")
-            for state in self.states:
-                self._yield_count += 1
-                yield state
+            try:
+                for state in self.states:
+                    self._yield_count += 1
+                    yield state
+            finally:
+                _close_iter(self.states)
             self._consumed = True
             return
 
@@ -429,23 +441,26 @@ class StateStream(typing.Generic[NDimension]):
             f"Streaming -> {self.store} ({io_mode}, batch_size={self.batch_size})"
         )
 
-        for state in self.states:
-            self._yield_count += 1
+        try:
+            for state in self.states:
+                self._yield_count += 1
 
-            # Surface any background I/O errors before continuing/yielding
-            if self.background_io:
-                self._check_io_error()
+                # Surface any background I/O errors before continuing/yielding
+                if self.background_io:
+                    self._check_io_error()
 
-            yield state
+                yield state
 
-            if self._should_save(state=state):
-                self._batch.append(state)
+                if self._should_save(state=state):
+                    self._batch.append(state)
 
-                if self._should_flush():
-                    self.flush(block=False)
+                    if self._should_flush():
+                        self.flush(block=False)
 
-                if self._should_checkpoint(state=state):
-                    self._save_checkpoint(state=state)
+                    if self._should_checkpoint(state=state):
+                        self._save_checkpoint(state=state)
+        finally:
+            _close_iter(self.states)
 
         # Flush whatever is left
         if self._batch and self.auto_save:
@@ -506,6 +521,10 @@ class StateStream(typing.Generic[NDimension]):
                 if exc_type is None:
                     raise
 
+        # Close the underlying states iterable if it has not already been closed
+        if not self._consumed and self.states is not None:
+            _close_iter(self.states)
+
         if exc_type is None:
             logger.info(
                 f"Stream complete: {self._saved_count} states saved, "
@@ -515,6 +534,20 @@ class StateStream(typing.Generic[NDimension]):
             logger.error(
                 f"Stream interrupted after {self._saved_count} states have been saved: {exc_val}"
             )
+
+    def close(self) -> None:
+        """
+        Manually close the stream, flushing any remaining states and stopping background I/O.
+
+        This is useful if not using a context manager. After calling `close()`, the stream is exhausted.
+        Calling `close()` again has no effect.
+        """
+        if self._consumed:
+            logger.debug("Stream already consumed/closed")
+            return
+
+        logger.debug("Manually closing stream...")
+        self.__exit__(None, None, None)
 
     def last(self) -> typing.Optional[ModelState[NDimension]]:
         """
@@ -649,19 +682,24 @@ class StateStream(typing.Generic[NDimension]):
 
             pred = _predicate
 
+        states = None
         try:
-            for state in self.store.load(
+            states = self.store.load(
                 ModelState,
                 indices=indices,
                 predicate=pred,
                 validator=validator or (validate_state if self.validate else None),
-            ):
+            )
+            for state in states:
                 self._yield_count += 1
                 yield state
         except StorageError as exc:
             raise StreamError(
                 f"An error occured while replaying stream: {exc}"
             ) from exc
+        finally:
+            if states is not None:
+                _close_iter(states)
 
         logger.debug(f"Replay complete: {self._yield_count} total yielded")
 
@@ -760,13 +798,15 @@ class StateStream(typing.Generic[NDimension]):
                 if block:
                     self._wait_for_queue()
 
-            except queue.Full:
+            except queue.Full as exc:
                 logger.error(
-                    f"I/O queue full ({self.max_queue_size}) "
-                    f"Consider increasing `max_queue_size`, ensure `max_queue_size` is a certain magnitude larger than "
-                    f"`batch_size` ({self.batch_size}), or slow down the simulation."
+                    f"I/O queue full ({self.max_queue_size}). "
+                    f"Cannot buffer more states."
                 )
-                raise StreamError("I/O queue full. Backpressure limit reached")
+                raise StreamError(
+                    "I/O queue exhausted. Simulation running faster than disk writes. "
+                    "Increase `max_queue_size` or reduce `batch_size`."
+                ) from exc
         else:
             logger.debug(f"Flushing batch of {batch_size} states to {self.store}")
 

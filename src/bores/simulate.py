@@ -2493,6 +2493,7 @@ def run(
     pvt_tables = config.pvt_tables
     freeze_saturation_pressure = config.freeze_saturation_pressure
     log_interval = config.log_interval
+    capture_timer_state = config.capture_timer_state
 
     logger.info("Starting simulation workflow...")
     logger.info(
@@ -2942,7 +2943,7 @@ def run(
                         production_formation_volume_factors=production_fvfs,
                         injection_bhps=injection_bhps,
                         production_bhps=production_bhps,
-                        timer_state=timer.dump_state(),
+                        timer_state=timer.dump_state() if capture_timer_state else None,
                     )
                     logger.debug("Yielding model state")
                     yield state

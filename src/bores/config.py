@@ -532,6 +532,16 @@ class Config(
     high-rate gas injection).
     """
 
+    capture_timer_state: bool = True
+    """
+    Whether to capture and include the timer state in the yielded model states during simulation monitoring.
+
+    When True (default), the `Timer` state (current time, step, etc.) is included in the `ModelState` objects yielded by the simulator. 
+    This allows for more informative logging and analysis of simulation progress.
+    When False, the timer state is not included in the yielded states, which may reduce memory usage if the timer state is 
+    large or if many states are captured.
+    """
+
     _lock: threading.Lock = attrs.field(
         factory=threading.Lock, init=False, repr=False, hash=False
     )

@@ -1,4 +1,5 @@
 import base64
+import logging
 import typing
 
 import numba  # type: ignore[import-untyped]
@@ -8,6 +9,8 @@ import orjson
 from numba.extending import overload  # type: ignore[import-untyped]
 
 from bores.types import FloatOrArray
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "apply_mask",
@@ -343,3 +346,13 @@ def safe_json_dumps(data: typing.Any) -> bytes:
 
 def safe_json_loads(data: typing.Any) -> typing.Any:
     return _walk(orjson.loads(data))
+
+
+def _close_iter(iter: typing.Any) -> None:
+    """Helper to close an iterator if it has a close method."""
+    close_method = getattr(iter, "close", None)
+    if callable(close_method):
+        try:
+            close_method()
+        except Exception as exc:
+            logger.warning(f"Error closing iterator: {exc}", exc_info=True)

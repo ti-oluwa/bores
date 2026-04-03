@@ -7,7 +7,6 @@ import attrs
 import numba
 import numpy as np
 import numpy.typing as npt
-import plotly.graph_objects as go  # type: ignore[import-untyped]
 
 from bores.constants import c
 from bores.errors import ValidationError
@@ -1593,60 +1592,6 @@ class RelativePermeabilityTable(StoreSerializable):
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
             **kwargs,
-        )
-
-    def plot(
-        self,
-        water_saturation: npt.NDArray[np.floating[typing.Any]],
-        oil_saturation: npt.NDArray[np.floating[typing.Any]],
-        gas_saturation: npt.NDArray[np.floating[typing.Any]],
-        title: str | None = None,
-        x_label: str = "Saturation",
-        y_label: str = "Relative Permeability",
-        plot_kwargs: dict[str, typing.Any] | None = None,
-        **kwargs: typing.Any,
-    ) -> go.Figure:
-        """
-        Plot relative permeabilities as a function of saturation.
-
-        Creates a Plotly figure showing water, oil, and gas relative permeabilities
-        across the saturation range. Requires array inputs for generating smooth curves.
-
-        :param water_saturation: Water saturation array (fraction, 0-1).
-        :param oil_saturation: Oil saturation array (fraction, 0-1).
-        :param gas_saturation: Gas saturation array (fraction, 0-1).
-        :param title: Optional plot title. If None, a default title is used.
-        :param x_label: X-axis label (default: "Saturation").
-        :param y_label: Y-axis label (default: "Relative Permeability").
-        :param plot_kwargs: Additional keyword arguments to pass to `make_series_plot`,
-            such as `width`, `height`, `show_legend`, `legend_position`, etc.
-        :param kwargs: Additional keyword arguments to pass to `get_relative_permeabilities`,
-            if needed by specific table implementations.
-        :return: Plotly `graph_objects.Figure` object.
-        """
-        from bores.visualization.plotly1d import make_series_plot
-
-        relperms = self.get_relative_permeabilities(
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-            **kwargs,
-        )
-        data = {
-            "Water Relative Permeability (krw)": relperms["water"],
-            "Oil Relative Permeability (kro)": relperms["oil"],
-            "Gas Relative Permeability (krg)": relperms["gas"],
-        }
-        if title is None:
-            title = "Relative Permeabilities"
-        if plot_kwargs is None:
-            plot_kwargs = {}
-        return make_series_plot(
-            data=data,  # type: ignore[arg-type]
-            title=title,
-            x_label=x_label,
-            y_label=y_label,
-            **plot_kwargs,
         )
 
 
