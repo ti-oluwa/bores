@@ -38,7 +38,7 @@ jobs:
           version: "latest"
 
       - name: Install dependencies
-        run: uv pip install zensical
+        run: uv pip install zensical --system
       
       - name: Build Documentation
         run: zensical build --clean 
