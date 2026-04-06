@@ -147,7 +147,20 @@ PreconditionerFactory = typing.Callable[
 Preconditioner = typing.Union[LinearOperator, PreconditionerStr, PreconditionerFactory]
 
 SolverStr = typing.Union[
-    typing.Literal["gmres", "lgmres", "bicgstab", "tfqmr", "cg", "cgs", "direct"], str
+    typing.Literal[
+        "gmres",
+        "lgmres",
+        "bicgstab",
+        "tfqmr",
+        "cg",
+        "cgs",
+        "minres",
+        "bicg",
+        "qmr",
+        "gcrotmk",
+        "direct",
+    ],
+    str,
 ]
 
 
