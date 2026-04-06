@@ -1740,6 +1740,8 @@ def _run_full_sequential_implicit_step(
             water_viscosity_grid=iter_fluid_properties.water_viscosity_grid,
             oil_viscosity_grid=iter_fluid_properties.oil_effective_viscosity_grid,
             gas_viscosity_grid=iter_fluid_properties.gas_viscosity_grid,
+            porosity_grid=padded_rock_properties.porosity_grid,
+            permeability_grid=padded_rock_properties.absolute_permeability.mean,
             relative_permeability_table=config.rock_fluid_tables.relative_permeability_table,
             capillary_pressure_table=config.rock_fluid_tables.capillary_pressure_table,
             disable_capillary_effects=config.disable_capillary_effects,
@@ -2597,6 +2599,8 @@ def run(
         padded_water_viscosity_grid = padded_fluid_properties.water_viscosity_grid
         padded_oil_viscosity_grid = padded_fluid_properties.oil_effective_viscosity_grid
         padded_gas_viscosity_grid = padded_fluid_properties.gas_viscosity_grid
+        padded_porosity_grid = padded_rock_properties.porosity_grid
+        padded_permeability_grid = padded_rock_properties.absolute_permeability.mean
         relative_permeability_table = rock_fluid_tables.relative_permeability_table
         capillary_pressure_table = rock_fluid_tables.capillary_pressure_table
         (
@@ -2614,6 +2618,8 @@ def run(
             water_viscosity_grid=padded_water_viscosity_grid,
             oil_viscosity_grid=padded_oil_viscosity_grid,
             gas_viscosity_grid=padded_gas_viscosity_grid,
+            porosity_grid=padded_porosity_grid,
+            permeability_grid=padded_permeability_grid,
             relative_permeability_table=relative_permeability_table,
             capillary_pressure_table=capillary_pressure_table,
             disable_capillary_effects=disable_capillary_effects,
@@ -2729,6 +2735,8 @@ def run(
                         water_viscosity_grid=padded_fluid_properties.water_viscosity_grid,
                         oil_viscosity_grid=padded_fluid_properties.oil_viscosity_grid,
                         gas_viscosity_grid=padded_fluid_properties.gas_viscosity_grid,
+                        porosity_grid=padded_porosity_grid,
+                        permeability_grid=padded_permeability_grid,
                         relative_permeability_table=relative_permeability_table,
                         capillary_pressure_table=capillary_pressure_table,
                         disable_capillary_effects=disable_capillary_effects,

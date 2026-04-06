@@ -35,6 +35,8 @@ def build_rock_fluid_properties_grids(
     water_viscosity_grid: NDimensionalGrid[ThreeDimensions],
     oil_viscosity_grid: NDimensionalGrid[ThreeDimensions],
     gas_viscosity_grid: NDimensionalGrid[ThreeDimensions],
+    porosity_grid: NDimensionalGrid[ThreeDimensions],
+    permeability_grid: NDimensionalGrid[ThreeDimensions],
     relative_permeability_table: RelativePermeabilityTable,
     capillary_pressure_table: typing.Optional[CapillaryPressureTable] = None,
     disable_capillary_effects: bool = False,
@@ -59,6 +61,8 @@ def build_rock_fluid_properties_grids(
     :param water_viscosity_grid: Water viscosity grid.
     :param oil_viscosity_grid: Oil viscosity grid.
     :param gas_viscosity_grid: Gas viscosity grid.
+    :param porosity_grid: Reservoir porosity grid (fraction).
+    :param permeability_grid: Reservoir mean permeability grid (mD).
     :param relative_permeability_table: Relative permeability table.
     :param capillary_pressure_table: Optional capillary pressure table. Required if capillary effects are enabled.
     :param disable_capillary_effects: If True, capillary effects are disabled (zero capillary pressures).
@@ -132,6 +136,8 @@ def build_rock_fluid_properties_grids(
             residual_oil_saturation_water_grid=residual_oil_saturation_water_grid,
             residual_oil_saturation_gas_grid=residual_oil_saturation_gas_grid,
             residual_gas_saturation_grid=residual_gas_saturation_grid,
+            porosity_grid=porosity_grid,
+            permeability_grid=permeability_grid,
             capillary_pressure_table=capillary_pressure_table,
         )
         if capillary_strength_factor != 1.0:

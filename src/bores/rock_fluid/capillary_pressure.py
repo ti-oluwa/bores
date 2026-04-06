@@ -2937,7 +2937,6 @@ def _compute_leverett_j_capillary_pressures_array(
         effective_water_saturation = np.clip(
             effective_water_saturation, saturation_epsilon, one - saturation_epsilon
         )
-
         j_value_ow = j_function_coefficient * (
             effective_water_saturation ** (-j_function_exponent)
         )
@@ -2948,6 +2947,7 @@ def _compute_leverett_j_capillary_pressures_array(
             * j_value_ow
             * dyne_per_cm_to_psi
         )
+        pc_ow = pc_ow.astype(dtype)
 
         if wettability == Wettability.WATER_WET:
             oil_water_capillary_pressure = np.where(valid_water, pc_ow, zero)
@@ -2970,7 +2970,6 @@ def _compute_leverett_j_capillary_pressures_array(
         effective_gas_saturation = np.clip(
             effective_gas_saturation, saturation_epsilon, one - saturation_epsilon
         )
-
         j_value_go = j_function_coefficient * (
             effective_gas_saturation ** (-j_function_exponent)
         )
@@ -2981,9 +2980,10 @@ def _compute_leverett_j_capillary_pressures_array(
             * j_value_go
             * dyne_per_cm_to_psi
         )
+        pcgo = pcgo.astype(dtype)
         gas_oil_capillary_pressure = np.where(valid_gas, pcgo, zero)
 
-    return oil_water_capillary_pressure.astype(sw.dtype), gas_oil_capillary_pressure.astype(sw.dtype)
+    return oil_water_capillary_pressure, gas_oil_capillary_pressure
 
 
 def compute_leverett_j_capillary_pressures(

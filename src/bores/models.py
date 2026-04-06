@@ -170,12 +170,22 @@ class RockPermeability(PadMixin[NDimension], StoreSerializable):
     """N-dimensional numpy array representing the permeability distribution in the y-direction (mD)."""
     z: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0)))  # type: ignore[assignment]
     """N-dimensional numpy array representing the permeability distribution in the z-direction (mD)."""
+    mean: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0)))  # type: ignore[assignment]
+    """N-dimensional numpy array representing the mean (geometric by default) of permeability distribution (mD)."""
 
     def __attrs_post_init__(self) -> None:
         if self.y.size == 0:
             object.__setattr__(self, "y", self.x)
         if self.z.size == 0:
             object.__setattr__(self, "z", self.x)
+
+        if self.mean.size == 0:
+            isotropic = self.y.size == 0 and self.z.size == 0
+            if isotropic:
+                object.__setattr__(self, "mean", self.x)
+            else:  # anisotropic
+                mean = (self.x * self.y * self.z) ** 1 / 3
+                object.__setattr__(self, "mean", mean)
 
     def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
         return attrs.fields(type(self))

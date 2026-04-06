@@ -479,6 +479,8 @@ def compute_rock_fluid_properties(
             water_viscosity_grid=fluid_properties.water_viscosity_grid,
             oil_viscosity_grid=fluid_properties.oil_effective_viscosity_grid,
             gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
+            porosity_grid=rock_properties.porosity_grid,
+            permeability_grid=rock_properties.absolute_permeability.mean,
             relative_permeability_table=config.rock_fluid_tables.relative_permeability_table,
             capillary_pressure_table=config.rock_fluid_tables.capillary_pressure_table,
             disable_capillary_effects=config.disable_capillary_effects,

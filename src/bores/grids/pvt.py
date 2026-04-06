@@ -199,6 +199,8 @@ def build_three_phase_capillary_pressure_grids(
     residual_oil_saturation_water_grid: NDimensionalGrid[NDimension],
     residual_oil_saturation_gas_grid: NDimensionalGrid[NDimension],
     residual_gas_saturation_grid: NDimensionalGrid[NDimension],
+    porosity_grid: NDimensionalGrid[NDimension],
+    permeability_grid: NDimensionalGrid[NDimension],
     capillary_pressure_table: CapillaryPressureTable,
 ) -> typing.Tuple[NDimensionalGrid[NDimension], NDimensionalGrid[NDimension]]:
     """
@@ -212,11 +214,14 @@ def build_three_phase_capillary_pressure_grids(
     :param residual_oil_saturation_water_grid: N-Dimensional array of residual oil saturation values during water flooding (fraction).
     :param residual_oil_saturation_gas_grid: N-Dimensional array of residual oil saturation values during gas flooding (fraction).
     :param residual_gas_saturation_grid: N-Dimensional array of residual gas saturation values (fraction).
+    :param porosity_grid: N-Dimensional array of reservoir porosity (fraction).
+    :param permeability_grid: N-Dimensional array of mean reservoir permeability (mD).
     :param capillary_pressure_table: `CapillaryPressureTable` object containing parameters for capillary pressure calculations.
     :return: Tuple of (oil_water_capillary_pressure_grid, gas_oil_capillary_pressure_grid)
         where each grid is a N-Dimensional numpy array of capillary pressures (psi).
     """
-    oil_saturation_grid = 1.0 - water_saturation_grid - gas_saturation_grid
+    one = water_saturation_grid.dtype.type(1.0)
+    oil_saturation_grid = one - water_saturation_grid - gas_saturation_grid
     # Check if table supports array/vectorized operations
     supports_arrays = getattr(capillary_pressure_table, "supports_arrays", False)
 
@@ -230,6 +235,8 @@ def build_three_phase_capillary_pressure_grids(
             residual_oil_saturation_water=residual_oil_saturation_water_grid,
             residual_oil_saturation_gas=residual_oil_saturation_gas_grid,
             residual_gas_saturation=residual_gas_saturation_grid,
+            porosity=porosity_grid,
+            permeability=permeability_grid,
         )
         oil_water_capillary_pressure_grid = capillary_pressures["oil_water"]  # type: ignore[assignment]
         gas_oil_capillary_pressure_grid = capillary_pressures["gas_oil"]  # type: ignore[assignment]
@@ -238,9 +245,7 @@ def build_three_phase_capillary_pressure_grids(
         oil_water_capillary_pressure_grid = build_uniform_grid(
             grid_shape=water_saturation_grid.shape, value=0.0
         )
-        gas_oil_capillary_pressure_grid = build_uniform_grid(
-            grid_shape=water_saturation_grid.shape, value=0.0
-        )
+        gas_oil_capillary_pressure_grid = oil_water_capillary_pressure_grid.copy()
 
         for indices in itertools.product(*map(range, water_saturation_grid.shape)):
             # Get current saturations for the cell
@@ -253,6 +258,8 @@ def build_three_phase_capillary_pressure_grids(
             residual_oil_saturation_water = residual_oil_saturation_water_grid[indices]
             residual_oil_saturation_gas = residual_oil_saturation_gas_grid[indices]
             residual_gas_saturation = residual_gas_saturation_grid[indices]
+            porosity = porosity_grid[indices]
+            permeability = permeability_grid[indices]
 
             capillary_pressures = capillary_pressure_table(
                 water_saturation=water_saturation,
@@ -262,6 +269,8 @@ def build_three_phase_capillary_pressure_grids(
                 residual_oil_saturation_water=residual_oil_saturation_water,
                 residual_oil_saturation_gas=residual_oil_saturation_gas,
                 residual_gas_saturation=residual_gas_saturation,
+                porosity=porosity,
+                permeability=permeability,
             )
             oil_water_capillary_pressure_grid[indices] = capillary_pressures[
                 "oil_water"
@@ -350,12 +359,8 @@ def build_three_phase_relative_permeabilities_grids(
         water_relative_permeability_grid = build_uniform_grid(
             grid_shape=water_saturation_grid.shape, value=0.0
         )
-        oil_relative_permeability_grid = build_uniform_grid(
-            grid_shape=water_saturation_grid.shape, value=0.0
-        )
-        gas_relative_permeability_grid = build_uniform_grid(
-            grid_shape=water_saturation_grid.shape, value=0.0
-        )
+        oil_relative_permeability_grid = water_relative_permeability_grid.copy()
+        gas_relative_permeability_grid = water_relative_permeability_grid.copy()
         nx, ny, nz = water_saturation_grid.shape
 
         for i, j, k in itertools.product(range(nx), range(ny), range(nz)):
