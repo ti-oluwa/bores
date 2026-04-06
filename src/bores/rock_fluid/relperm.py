@@ -86,8 +86,8 @@ class MixingRule:
 
     **Construction**:
 
-    Normally produced by the ``@mixing_rule`` decorator, which registers the
-    rule and returns a ``MixingRule`` instance.  You can also build one
+    Normally produced by the `@mixing_rule` decorator, which registers the
+    rule and returns a `MixingRule` instance.  You can also build one
     directly:
 
     ```python
@@ -219,6 +219,19 @@ class MixingRule:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(func={self.func!r}, dfunc={self._dfunc!r})"
+
+    def __hash__(self) -> int:
+        def resolve_callable_identity(obj):
+            # unwrap nested MixingRule
+            if isinstance(obj, MixingRule):
+                return resolve_callable_identity(obj.func)
+
+            # functions / methods / callables
+            return id(obj)
+
+        func_id = resolve_callable_identity(self.func)
+        dfunc_id = id(self._dfunc) if self._dfunc is not None else 0
+        return hash((func_id, dfunc_id))
 
 
 def _central_difference_partial_derivatives(

@@ -30,7 +30,7 @@ __all__ = [
 
 def array(obj: typing.Any, **kwargs: typing.Any):
     """
-    Wrapper around np.array to enforce global dtype.
+    Wrapper around `np.array` to enforce global dtype.
 
     :param obj: Object to convert to numpy array
     :param kwargs: Additional keyword arguments for `np.array`

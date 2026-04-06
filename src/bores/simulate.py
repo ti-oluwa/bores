@@ -124,8 +124,8 @@ class StepResult(typing.Generic[NDimension]):
 @attrs.frozen(slots=True)
 class SaturationChangeCheckResult:
     violated: bool
-    max_phase_saturation_change: float
-    max_allowed_phase_saturation_change: float
+    max_phase_saturation_change: typing.Optional[float]
+    max_allowed_phase_saturation_change: typing.Optional[float]
     message: typing.Optional[str] = None
 
 
@@ -210,8 +210,8 @@ def _check_saturation_changes(
     """
     violated = False
     messages = []
-    max_phase_saturation_change = 0.0
-    max_allowed_phase_saturation_change = 0.0
+    max_phase_saturation_change = None
+    max_allowed_phase_saturation_change = None
 
     oil_tolerance = max(tolerance, 0.005 * max_allowed_oil_saturation_change)
     max_tolerable_oil_saturation_change = max_allowed_oil_saturation_change * (
@@ -233,7 +233,10 @@ def _check_saturation_changes(
     if maximum_water_saturation_change > max_tolerable_water_saturation_change:
         violated = True
         # If water saturation change is the largest so far, update the max values
-        if maximum_water_saturation_change > max_phase_saturation_change:
+        if (
+            max_phase_saturation_change is None
+            or maximum_water_saturation_change > max_phase_saturation_change
+        ):
             max_phase_saturation_change = maximum_water_saturation_change
             max_allowed_phase_saturation_change = max_allowed_water_saturation_change
         messages.append(
@@ -247,7 +250,10 @@ def _check_saturation_changes(
     if maximum_gas_saturation_change > max_tolerable_gas_saturation_change:
         violated = True
         # If gas saturation change is the largest so far, update the max values
-        if maximum_gas_saturation_change > max_phase_saturation_change:
+        if (
+            max_phase_saturation_change is None
+            or maximum_gas_saturation_change > max_phase_saturation_change
+        ):
             max_phase_saturation_change = maximum_gas_saturation_change
             max_allowed_phase_saturation_change = max_allowed_gas_saturation_change
         messages.append(
@@ -2867,7 +2873,8 @@ def run(
                     )
                 else:
                     raise ValidationError(
-                        f"Invalid simualtion scheme {scheme!r}. Available schemes include 'impes', 'sequential-implicit', 'full-sequential-implicit', or 'explicit'."
+                        f"Invalid simualtion scheme {scheme!r}. "
+                        "Available schemes include 'impes', 'sequential-implicit', 'full-sequential-implicit', or 'explicit'."
                     )
 
                 # If the step was successful, accept that step proposal

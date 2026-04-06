@@ -1149,6 +1149,7 @@ def monitor(
     last_diagnostics: typing.Optional[StepDiagnostics] = None
 
     simulation = None
+    error = None
     try:
         if is_generic_input:
             simulation = input
@@ -1213,9 +1214,12 @@ def monitor(
             else:
                 yield state
 
+    except Exception as exc:
+        error = exc
+
     finally:
         if live is not None:
-            if last_diagnostics is not None:
+            if error is None and last_diagnostics is not None:
                 # Render the final state into the panel before stopping so
                 # the completed view stays in terminal scroll-back history.
                 live.update(
@@ -1235,7 +1239,7 @@ def monitor(
             bores_logger.handlers = original_handlers
             bores_logger.propagate = original_propagate
 
-        if tqdm_bar is not None:
+        if error is None and tqdm_bar is not None:
             tqdm_bar.update(float(100.0 - last_percentage))  # Ensure bar reaches 100 %
             tqdm_bar.close()
 
@@ -1248,3 +1252,6 @@ def monitor(
 
         if simulation is not None:
             _close_iter(simulation)
+
+        if error is not None:
+            raise error
