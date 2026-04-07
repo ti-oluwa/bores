@@ -901,16 +901,16 @@ class InjectedFluid(WellFluid):
         :param temperature: The temperature at which to evaluate the density (°F).
         :kwargs: Additional parameters for phase density calculations.
 
-            For water:
-                - `gas_free_water_formation_volume_factor`: pre-computed Bwf (bbl/STB).
-                  Computed internally if not provided.
-                - `gas_solubility_in_water`: Rsw (SCF/STB). Defaults to 0.0
-                  (injection water assumed gas-free).
-                - `gas_gravity`: gas specific gravity. Defaults to `self.specific_gravity`.
+        For water:
+            - `gas_free_water_formation_volume_factor`: pre-computed Bwf (bbl/STB).
+                Computed internally if not provided.
+            - `gas_solubility_in_water`: Rsw (SCF/STB). Defaults to 0.0
+                (injection water assumed gas-free).
+            - `gas_gravity`: gas specific gravity. Defaults to `self.specific_gravity`.
 
-            For gas:
-                - `gas_compressibility_factor`: Z-factor (dimensionless).
-                  Computed via DAK if not provided.
+        For gas:
+            - `gas_compressibility_factor`: Z-factor (dimensionless).
+                Computed via DAK if not provided.
 
         :return: The density of the fluid (lbm/ft³).
         """
@@ -1028,12 +1028,12 @@ class InjectedFluid(WellFluid):
         :param temperature: The temperature at which to evaluate the viscosity (°F).
         :kwargs: Additional parameters for viscosity calculations.
 
-            For gas:
-                - `gas_density`: pre-computed gas density (lbm/ft³).
-                  Computed internally if not provided.
-                - `gas_compressibility_factor`: Z-factor (dimensionless).
-                  Computed via DAK if neither `gas_density` nor this value
-                  is provided.
+        For gas:
+            - `gas_density`: pre-computed gas density (lbm/ft³).
+                Computed internally if not provided.
+            - `gas_compressibility_factor`: Z-factor (dimensionless).
+                Computed via DAK if neither `gas_density` nor this value
+                is provided.
 
         :return: The viscosity of the fluid (cP).
         """
@@ -1140,17 +1140,17 @@ class InjectedFluid(WellFluid):
         :param temperature: The temperature at which to evaluate the compressibility (°F).
         :kwargs: Additional parameters for compressibility calculations.
 
-            For water:
-                - `bubble_point_pressure`: water bubble point pressure (psi).
-                - `gas_formation_volume_factor`: Bg (ft³/scf).
-                - `gas_solubility_in_water`: Rsw (scf/STB).
-                - `gas_free_water_formation_volume_factor`: Bwf (bbl/STB).
-                  Computed internally if not provided.
+        For water:
+            - `bubble_point_pressure`: water bubble point pressure (psi).
+            - `gas_formation_volume_factor`: Bg (ft³/scf).
+            - `gas_solubility_in_water`: Rsw (scf/STB).
+            - `gas_free_water_formation_volume_factor`: Bwf (bbl/STB).
+                Computed internally if not provided.
 
-            For gas:
-                - `gas_gravity`: gas specific gravity (dimensionless).
-                  Uses `self.specific_gravity` if not provided.
-                - `gas_compressibility_factor`: Z-factor (dimensionless).
+        For gas:
+            - `gas_gravity`: gas specific gravity (dimensionless).
+                Uses `self.specific_gravity` if not provided.
+            - `gas_compressibility_factor`: Z-factor (dimensionless).
 
         :return: The compressibility of the fluid (psi⁻¹).
         """
@@ -1235,13 +1235,13 @@ class InjectedFluid(WellFluid):
         :param temperature: The temperature at which to evaluate the formation volume factor (°F).
         :kwargs: Additional parameters for formation volume factor calculations.
 
-            For water:
-                - `water_density`: pre-computed water density (lbm/ft³).
-                  Computed internally from correlations if not provided.
+        For water:
+            - `water_density`: pre-computed water density (lbm/ft³).
+                Computed internally from correlations if not provided.
 
-            For gas:
-                - `gas_compressibility_factor`: Z-factor (dimensionless).
-                  Computed via DAK if not provided.
+        For gas:
+            - `gas_compressibility_factor`: Z-factor (dimensionless).
+                Computed via DAK if not provided.
 
         :return: The formation volume factor of the fluid (bbl/STB for water, ft³/SCF for gas).
         """

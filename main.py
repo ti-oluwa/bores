@@ -10,23 +10,23 @@ grid_shape = typing.cast(bores.ThreeDimensions, (10, 10, 3))
 cell_dimension = (1000.0, 1000.0)
 
 # Build property grids
-thickness = bores.build_uniform_grid(grid_shape, value=100.0)  # ft
-pressure = bores.build_uniform_grid(grid_shape, value=3000.0)  # psi
-porosity = bores.build_uniform_grid(grid_shape, value=0.20)  # fraction
-temperature = bores.build_uniform_grid(grid_shape, value=180.0)  # deg F
-oil_viscosity = bores.build_uniform_grid(grid_shape, value=1.5)  # cP
-bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)  # psi
-oil_specific_gravity = bores.build_uniform_grid(grid_shape, value=0.85)
+thickness = bores.uniform_grid(grid_shape, value=100.0)  # ft
+pressure = bores.uniform_grid(grid_shape, value=3000.0)  # psi
+porosity = bores.uniform_grid(grid_shape, value=0.20)  # fraction
+temperature = bores.uniform_grid(grid_shape, value=180.0)  # deg F
+oil_viscosity = bores.uniform_grid(grid_shape, value=1.5)  # cP
+bubble_point = bores.uniform_grid(grid_shape, value=2500.0)  # psi
+oil_specific_gravity = bores.uniform_grid(grid_shape, value=0.85)
 
 # Residual and irreducible saturations
-residual_oil_saturation_water = bores.build_uniform_grid(grid_shape, value=0.12)
-residual_oil_saturation_gas = bores.build_uniform_grid(grid_shape, value=0.10)
-residual_gas_saturation = bores.build_uniform_grid(grid_shape, value=0.05)
-irreducible_water_saturation = bores.build_uniform_grid(grid_shape, value=0.06)
-connate_water_saturation = bores.build_uniform_grid(grid_shape, value=0.06)
+residual_oil_saturation_water = bores.uniform_grid(grid_shape, value=0.12)
+residual_oil_saturation_gas = bores.uniform_grid(grid_shape, value=0.10)
+residual_gas_saturation = bores.uniform_grid(grid_shape, value=0.05)
+irreducible_water_saturation = bores.uniform_grid(grid_shape, value=0.06)
+connate_water_saturation = bores.uniform_grid(grid_shape, value=0.06)
 
 # Build depth grid and compute initial saturations from fluid contacts
-depth = bores.build_depth_grid(thickness, datum=5000.0)  # Top at 5000 ft
+depth = bores.depth_grid(thickness, datum=5000.0)  # Top at 5000 ft
 water_saturation, oil_saturation, gas_saturation = bores.build_saturation_grids(
     depth_grid=depth,
     gas_oil_contact=5050.0,  # Above reservoir (no gas cap)
@@ -39,7 +39,7 @@ water_saturation, oil_saturation, gas_saturation = bores.build_saturation_grids(
 )
 
 # Isotropic permeability: 100 mD
-perm_grid = bores.build_uniform_grid(grid_shape, value=100.0)
+perm_grid = bores.uniform_grid(grid_shape, value=100.0)
 permeability = bores.RockPermeability(x=perm_grid)
 
 # Build the reservoir model
@@ -142,7 +142,7 @@ config = bores.Config(
     wells=wells,
     scheme="impes",
     pressure_solver="cg",
-    saturation_solver="qmr",
+    saturation_solver="cgs",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     maximum_pressure_change=1800,

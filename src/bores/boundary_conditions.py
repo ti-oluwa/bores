@@ -1,5 +1,7 @@
 """Boundary condition implementations for 2D/3D grids."""
 
+import numba
+
 import copy
 import enum
 import functools
@@ -217,18 +219,21 @@ def deserialize_boundary_function(
 
 
 @boundary_function
+@numba.njit(cache=True)
 def parametric_gradient(x, y, slope=0.5, intercept=2000):
     """Parameterized linear gradient."""
     return intercept - slope * x
 
 
 @boundary_function
+@numba.njit(cache=True)
 def sinusoidal_pressure(t: float, amplitude=200, period=86400, offset=2000):
     """Sinusoidal time-dependent pressure (daily cycle)."""
     return offset + amplitude * np.sin(2 * np.pi * t / period)
 
 
 @boundary_function
+@numba.njit(cache=True)
 def exponential_decay(t: float, initial=2000, time_constant=3600):
     """Exponential pressure decay."""
     return initial * np.exp(-t / time_constant)
@@ -438,7 +443,7 @@ class BoundaryMetadata:
     """Original grid shape (without ghost cells)."""
 
     def __attrs_post_init__(self) -> None:
-        """Auto-generate coordinates if not provided but cell_dimension and grid_shape are available."""
+        """Auto-generate coordinates if not provided but `cell_dimension` and `grid_shape` are available."""
         if (
             self.coordinates is None
             and self.cell_dimension is not None

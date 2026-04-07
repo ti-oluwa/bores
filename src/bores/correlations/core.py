@@ -321,7 +321,7 @@ def compute_total_fluid_compressibility(
     return total_fluid_compressibility
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, inline="always")
 def compute_harmonic_mean(value1: float, value2: float) -> float:
     """
     Computes the harmonic mean of two values.

@@ -196,7 +196,7 @@ class MixingRule:
                 gas_saturation=gas_saturation,
             )
             if isinstance(derivatives, Mapping):
-                return derivatives
+                return derivatives  # type: ignore[return-value]
             return MixingRulePartialDerivatives(
                 d_kro_d_kro_w=derivatives[0],
                 d_kro_d_kro_g=derivatives[1],
@@ -221,12 +221,10 @@ class MixingRule:
         return f"{self.__class__.__name__}(func={self.func!r}, dfunc={self._dfunc!r})"
 
     def __hash__(self) -> int:
-        def resolve_callable_identity(obj):
+        def resolve_callable_identity(obj: typing.Any):
             # unwrap nested MixingRule
             if isinstance(obj, MixingRule):
                 return resolve_callable_identity(obj.func)
-
-            # functions / methods / callables
             return id(obj)
 
         func_id = resolve_callable_identity(self.func)
@@ -2721,7 +2719,6 @@ class BrooksCoreyThreePhaseRelPermModel(
         :param residual_oil_saturation_gas: Optional override for residual oil saturation after gas flood.
         :param residual_gas_saturation: Optional override for residual gas saturation.
         :return: `RelativePermeabilities` dictionary.
-        0 <= water_saturation, oil_saturation, gas_saturation <= 1
         """
         Sorw = (
             residual_oil_saturation_water

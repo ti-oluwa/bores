@@ -654,7 +654,7 @@ def _build_transition_zones(
             depth_grid[gas_oil_zone] - gas_oil_contact_top
         ) / gas_oil_transition_thickness
         # Clip frac to avoid numerical issues
-        frac = np.clip(frac, 0.0, 1.0)
+        np.clip(frac, 0.0, 1.0, out=frac)
         weight = np.power(frac, transition_curvature_exponent)
 
         # Gas: from (1 - Sor_gas - Swc) to Sgr
@@ -701,7 +701,7 @@ def _build_transition_zones(
             depth_grid[oil_water_zone] - oil_water_contact_top
         ) / oil_water_transition_thickness
         # Clip frac to avoid numerical issues
-        frac = np.clip(frac, 0.0, 1.0)
+        np.clip(frac, 0.0, 1.0, out=frac)
         weight = np.power(frac, transition_curvature_exponent)
 
         # Water: from Swc to (1 - Sor_water)

@@ -6,6 +6,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.interpolate import PchipInterpolator
 
+from bores.errors import ValidationError
 from bores.grids.utils import Spacing, make_saturation_grid
 from bores.rock_fluid.capillary_pressure import (
     CapillaryPressureTable,
@@ -21,6 +22,7 @@ from bores.rock_fluid.relperm import (
 from bores.serialization import Serializable
 from bores.types import (
     CapillaryPressures,
+    FloatOrArray,
     FluidPhase,
     RelativePermeabilities,
 )
@@ -38,8 +40,7 @@ class RockFluidTables(Serializable):
     """
     Tables defining rock-fluid interactions in the reservoir.
 
-    Made up of a relative permeability table and an optional capillary pressure
-    table.
+    Made up of a relative permeability table and an optional capillary pressure table.
     """
 
     relative_permeability_table: RelativePermeabilityTable
@@ -47,11 +48,20 @@ class RockFluidTables(Serializable):
 
     def get_relative_permeabilities(
         self,
-        water_saturation: float,
-        oil_saturation: float,
-        gas_saturation: float,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
         **kwargs: typing.Any,
     ) -> RelativePermeabilities:
+        """
+        Compute relative permeabilities for water, oil, and gas using the underlying relative permeability model/table.
+
+        :param water_saturation: Water saturation (fraction) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction) - scalar or array.
+        :param kwargs: Additional keyword arguments required by the relative permeability model/table
+        :return: `RelativePermeabilities` dictionary.
+        """
         return self.relative_permeability_table.get_relative_permeabilities(
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
@@ -61,13 +71,24 @@ class RockFluidTables(Serializable):
 
     def get_capillary_pressures(
         self,
-        water_saturation: float,
-        oil_saturation: float,
-        gas_saturation: float,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
         **kwargs: typing.Any,
     ) -> CapillaryPressures:
+        """
+        Compute oil water and gas-oil capillary pressures using the underlying capillary pressure model/table.
+
+        :param water_saturation: Water saturation (fraction, 0-1) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction, 0-1) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction, 0-1) - scalar or array.
+        :param irreducible_water_saturation: Optional override for Swc - scalar or array.
+        :param kwargs: Additional keyword arguments required by the relative permeability model/table
+        :param permeability: Optional override for permeability - scalar or array.
+        :return: `CapillaryPressures` dictionary.
+        """
         if self.capillary_pressure_table is None:
-            raise ValueError("Capillary pressure table is not defined.")
+            raise ValidationError("Capillary pressure table is not defined.")
         return self.capillary_pressure_table.get_capillary_pressures(
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
@@ -522,7 +543,7 @@ def _sample_oil_water_relative_permeabilities(
             water_relative_permeability_derivative,
             oil_relative_permeability_derivative,
         )
-    return (  # type: ignore[return-value]
+    return (
         oil_water_reference_saturations,
         oil_relative_permeability,
         water_relative_permeability,
@@ -659,7 +680,7 @@ def _sample_gas_oil_relative_permeabilities(
             oil_relative_permeability_derivative,
             gas_relative_permeability_derivative,
         )
-    return (  # type: ignore[return-value]
+    return (
         gas_oil_reference_saturations,
         gas_relative_permeability,
         oil_relative_permeability,
@@ -889,15 +910,14 @@ def as_three_phase_relperm_table(
     Convert any `RelativePermeabilityTable` to a `ThreePhaseRelPermTable`
     backed by piecewise-linear `TwoPhaseRelPermTable` instances.
 
-    Returns `model` unchanged if it is already a `ThreePhaseRelPermTable`.
-
     Analytical derivatives are sampled at every knot and stored in the
     two-phase sub-tables so that `get_*_derivative` returns smooth,
     consistent values instead of piecewise-linear slopes.
 
     For tabular source models (`ThreePhaseRelPermTable`) the existing knots
-    are PCHIP-resampled to the denser output grid, recovering C¹-continuous
-    values and derivatives without any additional model calls.
+    are PCHIP-resampled to the specified `n_points` and `spacing` grid, recovering C¹-continuous
+    values and derivatives, and allowing efficient grid refinement
+    and endpoint enrichment without any additional model calls.
 
     :param model: Source analytical or tabular relative permeability model.
     :param irreducible_water_saturation: Irreducible water saturation (Swc).
@@ -919,9 +939,6 @@ def as_three_phase_relperm_table(
     :param mixing_rule: Three-phase oil relative permeability mixing rule.
     :return: `ThreePhaseRelPermTable` with piecewise-linear sub-tables.
     """
-    if isinstance(model, ThreePhaseRelPermTable):
-        return model
-
     resolved_irreducible_water_saturation = _resolve_saturation_endpoint(
         argument_value=irreducible_water_saturation,
         model=model,
@@ -1123,12 +1140,15 @@ def as_three_phase_capillary_pressure_table(
     Convert any `CapillaryPressureTable` to a `ThreePhaseCapillaryPressureTable` backed by piecewise-linear
     `TwoPhaseCapillaryPressureTable` instances.
 
-    Returns `model` unchanged if it is already a `ThreePhaseCapillaryPressureTable`.
-
     Analytical derivatives are sampled at every knot and stored in the
     two-phase sub-tables. The default `n_endpoint_extra=30` (vs 20 for
     relperm) reflects that Pc curves are unbounded near residual saturation,
-    making endpoint fidelity especially important for SI convergence.
+    making endpoint fidelity especially important for implicit convergence.
+
+    For tabular source models (`ThreePhaseCapillaryPressureTable`) the existing knots
+    are PCHIP-resampled to the specified `n_points` and `spacing` grid, recovering C¹-continuous
+    values and derivatives, and allowing efficient grid refinement
+    and endpoint enrichment without any additional model calls.
 
     :param model: Source analytical or tabular capillary pressure model.
     :param irreducible_water_saturation: Irreducible water saturation (Swc).
@@ -1149,9 +1169,6 @@ def as_three_phase_capillary_pressure_table(
         sub-table. Overrides the auto-generated grid when supplied.
     :return: `ThreePhaseCapillaryPressureTable` backed by piecewise-linear sub-tables.
     """
-    if isinstance(model, ThreePhaseCapillaryPressureTable):
-        return model
-
     resolved_irreducible_water_saturation = _resolve_saturation_endpoint(
         argument_value=irreducible_water_saturation,
         model=model,

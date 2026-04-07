@@ -457,9 +457,13 @@ def _run_impes_step(
     logger.debug("Pressure boundary condition applied.")
 
     # Clamp pressures to valid range just for additional safety and to remove numerical noise
-    padded_pressure_grid = np.clip(
-        padded_pressure_grid, min_valid_pressure, max_valid_pressure
-    ).astype(dtype, copy=False)
+    np.clip(
+        padded_pressure_grid,
+        min_valid_pressure,
+        max_valid_pressure,
+        dtype=dtype,
+        out=padded_pressure_grid,
+    )
 
     # Update fluid properties with new pressure grid
     logger.debug("Updating fluid properties with new pressure grid...")
@@ -966,9 +970,13 @@ def _run_sequential_implicit_step(
     )
     logger.debug("Pressure boundary conditions applied.")
 
-    padded_pressure_grid = np.clip(
-        padded_pressure_grid, min_valid_pressure, max_valid_pressure
-    ).astype(dtype, copy=False)
+    np.clip(
+        padded_pressure_grid,
+        min_valid_pressure,
+        max_valid_pressure,
+        dtype=dtype,
+        out=padded_pressure_grid,
+    )
 
     old_solution_gas_to_oil_ratio_grid = (
         padded_fluid_properties.solution_gas_to_oil_ratio_grid.copy()
@@ -1402,9 +1410,13 @@ def _run_full_sequential_implicit_step(
             time=time,
             pad_width=pad_width,
         )
-        padded_pressure_grid = np.clip(
-            padded_pressure_grid, min_valid_pressure, max_valid_pressure
-        ).astype(dtype, copy=False)
+        np.clip(
+            padded_pressure_grid,
+            min_valid_pressure,
+            max_valid_pressure,
+            dtype=dtype,
+            out=padded_pressure_grid,
+        )
 
         # PVT update at the new pressure, then solution gas flash
         old_solution_gas_to_oil_ratio_grid = (
@@ -1970,9 +1982,13 @@ def _run_explicit_step(
     logger.debug("Pressure boundary condition applied.")
 
     # Clamp pressures to valid range just for additional safety and to remove numerical noise
-    padded_pressure_grid = np.clip(
-        padded_pressure_grid, min_valid_pressure, max_valid_pressure
-    ).astype(dtype, copy=False)
+    np.clip(
+        padded_pressure_grid,
+        min_valid_pressure,
+        max_valid_pressure,
+        dtype=dtype,
+        out=padded_pressure_grid,
+    )
     logger.debug("Pressure evolution completed!")
 
     # Explicit specific: Re-use current fluid properties for saturation evolution.
