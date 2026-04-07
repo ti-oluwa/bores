@@ -525,7 +525,7 @@ def _avg_bhp_for_well_cells(
     return sum(values) / len(values) if values else 0.0
 
 
-def _build_well_diagnostics(
+def build_well_diagnostics(
     state: ModelState[ThreeDimensions],
 ) -> typing.List[WellRateDiagnostics]:
     """
@@ -616,155 +616,10 @@ def _build_well_diagnostics(
     return results
 
 
-def _compute_material_balance_errors(
-    current_state: ModelState[ThreeDimensions],
-    previous_state: ModelState[ThreeDimensions],
-    time_step_size: float,
-) -> typing.Dict[str, float]:
-    """
-    Compute material balance errors for each phase.
-
-    MBE = Δreservoir volume - (Injection - Production) * Δt
-
-    Where:
-    - ΔVolume = Current_volume - Previous_volume (in reservoir barrels)
-    - Injection/Production rates are in surface conditions (STB/day or SCF/day)
-    - FVF converts surface → reservoir volumes
-    """
-    current_model = current_state.model
-    previous_model = previous_state.model
-    current_fluid_properties = current_model.fluid_properties
-    previous_fluid_properties = previous_model.fluid_properties
-    rock_properties = current_model.rock_properties
-    thickness = current_model.thickness_grid
-
-    # Cell volumes (acre-ft → ft³)
-    cell_size_x = current_model.cell_dimension[0]
-    cell_size_y = current_model.cell_dimension[1]
-    cell_area = cell_size_x * cell_size_y * c.SQUARE_FEET_TO_ACRES
-    pore_volume = (
-        rock_properties.porosity_grid
-        * rock_properties.net_to_gross_ratio_grid
-        * thickness
-        * cell_area
-        * c.ACRE_FOOT_TO_BARRELS
-    )
-
-    # Oil Phase
-    current_oil_volume = np.sum(
-        pore_volume
-        * current_fluid_properties.oil_saturation_grid
-        / current_fluid_properties.oil_formation_volume_factor_grid
-    )
-    previous_oil_volume = np.sum(
-        pore_volume
-        * previous_fluid_properties.oil_saturation_grid
-        / previous_fluid_properties.oil_formation_volume_factor_grid
-    )
-    oil_volume_change = current_oil_volume - previous_oil_volume  # STB
-
-    # Surface rates → reservoir volumes
-    oil_injection_rate = _convert_to_total_surface_rate(
-        rates=current_state.injection_rates,
-        fvfs=current_state.injection_fvfs,
-        phase="oil",
-    )
-    oil_production_rate = _convert_to_total_surface_rate(
-        rates=current_state.production_rates,
-        fvfs=current_state.production_fvfs,
-        phase="oil",
-    )
-
-    oil_net_rate = oil_injection_rate - oil_production_rate  # STB/day
-    oil_expected_change = oil_net_rate * (time_step_size / 86400.0)  # STB
-
-    absolute_oil_mbe = oil_volume_change - oil_expected_change
-    relative_oil_mbe = (absolute_oil_mbe / max(abs(previous_oil_volume), 1.0)) * 100.0
-
-    # Water Phase
-    current_water_volume = np.sum(
-        pore_volume
-        * current_fluid_properties.water_saturation_grid
-        / current_fluid_properties.water_formation_volume_factor_grid
-    )
-    previous_water_volume = np.sum(
-        pore_volume
-        * previous_fluid_properties.water_saturation_grid
-        / previous_fluid_properties.water_formation_volume_factor_grid
-    )
-    water_volume_change = current_water_volume - previous_water_volume
-
-    water_injection_rate = _convert_to_total_surface_rate(
-        rates=current_state.injection_rates,
-        fvfs=current_state.injection_fvfs,
-        phase="water",
-    )
-    water_production_rate = _convert_to_total_surface_rate(
-        rates=current_state.production_rates,
-        fvfs=current_state.production_fvfs,
-        phase="water",
-    )
-
-    water_net_rate = water_injection_rate - water_production_rate
-    water_expected_change = water_net_rate * (time_step_size / 86400.0)
-
-    absolute_water_mbe = water_volume_change - water_expected_change
-    relative_water_mbe = (
-        absolute_water_mbe / max(abs(previous_water_volume), 1.0)
-    ) * 100.0
-
-    # Gas Phase
-    # Convert gas volumes from SCF to reservoir barrels for consistency
-    current_gas_volume = (
-        np.sum(pore_volume * current_fluid_properties.gas_saturation_grid)
-        / c.BARRELS_TO_CUBIC_FEET
-    )  # res bbl
-    previous_gas_volume = (
-        np.sum(pore_volume * previous_fluid_properties.gas_saturation_grid)
-        / c.BARRELS_TO_CUBIC_FEET
-    )
-    gas_volume_change = current_gas_volume - previous_gas_volume
-
-    gas_injection_rate = _convert_to_total_surface_rate(
-        rates=current_state.injection_rates,
-        fvfs=current_state.injection_fvfs,
-        phase="gas",
-    )  # SCF/day
-    gas_production_rate = _convert_to_total_surface_rate(
-        rates=current_state.production_rates,
-        fvfs=current_state.production_fvfs,
-        phase="gas",
-    )
-
-    gas_net_rate = gas_injection_rate - gas_production_rate
-    gas_expected_change = (
-        gas_net_rate * (time_step_size / c.DAYS_PER_SECOND)
-    ) / c.BARRELS_TO_CUBIC_FEET  # SCF → res bbl
-
-    absolute_gas_mbe = gas_volume_change - gas_expected_change
-    relative_gas_mbe = (absolute_gas_mbe / max(abs(previous_gas_volume), 1.0)) * 100.0
-
-    # Total MBE (in reservoir barrels)
-    total_absolute_mbe = absolute_oil_mbe + absolute_water_mbe + absolute_gas_mbe
-    total_volume = previous_oil_volume + previous_water_volume + previous_gas_volume
-    total_relative_mbe = (total_absolute_mbe / max(abs(total_volume), 1.0)) * 100.0
-    return {
-        "absolute_oil_mbe": float(absolute_oil_mbe),
-        "absolute_water_mbe": float(absolute_water_mbe),
-        "absolute_gas_mbe": float(absolute_gas_mbe),
-        "total_absolute_mbe": float(total_absolute_mbe),
-        "relative_oil_mbe": float(relative_oil_mbe),
-        "relative_water_mbe": float(relative_water_mbe),
-        "relative_gas_mbe": float(relative_gas_mbe),
-        "total_relative_mbe": float(total_relative_mbe),
-    }
-
-
-def _build_step_diagnostics(
+def build_step_diagnostics(
     state: ModelState[ThreeDimensions],
-    previous_state: typing.Optional[ModelState[ThreeDimensions]],
     wall_time_ms: float,
-    timer_kwargs: typing.Dict[str, typing.Any],
+    step_result: typing.Optional[StepResult[ThreeDimensions]],
 ) -> StepDiagnostics:
     """
     Build a `StepDiagnostics` instance from a `ModelState`.
@@ -817,27 +672,24 @@ def _build_step_diagnostics(
         phase="gas",
     )
 
-    # Compute MBE if we have a previous state
-    if previous_state is not None:
-        mbe_results = _compute_material_balance_errors(
-            current_state=state,
-            previous_state=previous_state,
-            time_step_size=state.step_size,
-        )
-    else:
-        # For the first step, there's no MBE to compute
-        mbe_results = {
-            "absolute_oil_mbe": 0.0,
-            "absolute_water_mbe": 0.0,
-            "absolute_gas_mbe": 0.0,
-            "relative_oil_mbe": 0.0,
-            "relative_water_mbe": 0.0,
-            "relative_gas_mbe": 0.0,
-            "total_absolute_mbe": 0.0,
-            "total_relative_mbe": 0.0,
+    # Compute MBE
+    mbe = None if step_result is None else step_result.mbe
+    if mbe is not None:
+        mbe_kwargs = {
+            "absolute_oil_mbe": float(mbe.absolute_oil_mbe or 0.0),
+            "absolute_water_mbe": float(mbe.absolute_water_mbe or 0.0),
+            "absolute_gas_mbe": float(mbe.absolute_gas_mbe or 0.0),
+            "total_absolute_mbe": float(mbe.total_absolute_mbe or 0.0),
+            "relative_oil_mbe": float(mbe.relative_oil_mbe or 0.0),
+            "relative_water_mbe": float(mbe.relative_water_mbe or 0.0),
+            "relative_gas_mbe": float(mbe.relative_gas_mbe or 0.0),
+            "total_relative_mbe": float(mbe.total_relative_mbe or 0.0),
         }
+    else:
+        mbe_kwargs = {}
 
-    well_diagnostics = _build_well_diagnostics(state)
+    well_diagnostics = build_well_diagnostics(state)
+    timer_kwargs = {} if step_result is None else step_result.timer_kwargs
     return StepDiagnostics(
         step=state.step,
         elapsed_time=state.time,
@@ -870,7 +722,7 @@ def _build_step_diagnostics(
         water_production_rate=water_production_rate,
         gas_production_rate=gas_production_rate,
         well_diagnostics=well_diagnostics,
-        **mbe_results,
+        **mbe_kwargs,
         converged=True,
     )
 
@@ -1058,9 +910,7 @@ def _build_rich_panel(
             "MBE (total)", f"[{mbe_style}]{total_mbe:.2e}%[/{mbe_style}]"
         )
         solver_table.add_row("MBE (oil)", f"{diagnostics.relative_oil_mbe:.2e}%")
-        solver_table.add_row(
-            "MBE (water)", f"{diagnostics.relative_water_mbe:.2e}%"
-        )
+        solver_table.add_row("MBE (water)", f"{diagnostics.relative_water_mbe:.2e}%")
         solver_table.add_row("MBE (gas)", f"{diagnostics.relative_gas_mbe:.2e}%")
 
     # Two-column grid: physics left, solver right
@@ -1275,24 +1125,22 @@ def monitor(
     config = config.with_updates(log_interval=0)
     total_simulation_time: float = float(config.timer.simulation_time)
     stats = RunStats()
-    _timer_kwargs: typing.Dict[str, typing.Any] = {}
+    _step_result: typing.Optional[StepResult] = None
 
     def _on_step_rejected(
         step_result: StepResult, step_size: float, elapsed_time: float
     ) -> None:
-        nonlocal _timer_kwargs, on_step_rejected
+        nonlocal _step_result, on_step_rejected
         stats.record_rejection()
-        _timer_kwargs.clear()
-        _timer_kwargs.update(step_result.timer_kwargs)
+        _step_result = step_result
         if on_step_rejected is not None:
             on_step_rejected(step_result, step_size, elapsed_time)
 
     def _on_step_accepted(
         step_result: StepResult, step_size: float, elapsed_time: float
     ) -> None:
-        nonlocal _timer_kwargs, on_step_accepted
-        _timer_kwargs.clear()
-        _timer_kwargs.update(step_result.timer_kwargs)
+        nonlocal _step_result, on_step_accepted
+        _step_result = step_result
         if on_step_accepted is not None:
             on_step_accepted(step_result, step_size, elapsed_time)
 
@@ -1348,7 +1196,6 @@ def monitor(
     step_start = time.perf_counter()
     last_percentage = 0.0
     last_diagnostics: typing.Optional[StepDiagnostics] = None
-    previous_state: typing.Optional[ModelState[ThreeDimensions]] = None
 
     simulation = None
     error = None
@@ -1373,15 +1220,13 @@ def monitor(
             step_end = time.perf_counter()
             wall_ms = (step_end - step_start) * 1000.0
             step_start = step_end
-            diagnostics = _build_step_diagnostics(
+            diagnostics = build_step_diagnostics(
                 state=state,
-                previous_state=previous_state,
                 wall_time_ms=wall_ms,
-                timer_kwargs=_timer_kwargs,
+                step_result=_step_result,
             )
             stats.record(diagnostics)
             last_diagnostics = diagnostics
-            previous_state = state
 
             extended = (
                 monitor.extended_every > 0

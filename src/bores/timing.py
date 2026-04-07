@@ -80,6 +80,14 @@ class TimerState(TypedDict):
     backoff_factor: float
     aggressive_backoff_factor: float
     maximum_steps: typing.Optional[int]
+    maximum_absolute_oil_mbe: typing.Optional[float]
+    maximum_absolute_water_mbe: typing.Optional[float]
+    maximum_absolute_gas_mbe: typing.Optional[float]
+    maximum_total_absolute_mbe: typing.Optional[float]
+    maximum_relative_oil_mbe: typing.Optional[float]
+    maximum_relative_water_mbe: typing.Optional[float]
+    maximum_relative_gas_mbe: typing.Optional[float]
+    maximum_total_relative_mbe: typing.Optional[float]
     maximum_rejections: int
     maximum_growth_per_step: float
     step_size_smoothing: float
@@ -148,6 +156,24 @@ class Timer(StoreSerializable):
     """Number of recent steps to track for performance analysis."""
     failure_memory_window: int = 5
     """Number of recent failures to remember for adaptive behavior."""
+
+    # MBE-based step control (all optional)
+    maximum_absolute_oil_mbe: typing.Optional[float] = None
+    """Absolute oil MBE threshold (res ft³). Reject step if exceeded."""
+    maximum_absolute_water_mbe: typing.Optional[float] = None
+    """Absolute water MBE threshold (res ft³). Reject step if exceeded."""
+    maximum_absolute_gas_mbe: typing.Optional[float] = None
+    """Absolute gas MBE threshold (res ft³). Reject step if exceeded."""
+    maximum_total_absolute_mbe: typing.Optional[float] = None
+    """Total absolute MBE threshold (res ft³). Reject step if exceeded."""
+    maximum_relative_oil_mbe: typing.Optional[float] = None
+    """Relative oil MBE threshold (fraction, e.g. 0.01 = 1%). Reject step if exceeded."""
+    maximum_relative_water_mbe: typing.Optional[float] = None
+    """Relative water MBE threshold (fraction). Reject step if exceeded."""
+    maximum_relative_gas_mbe: typing.Optional[float] = None
+    """Relative gas MBE threshold (fraction). Reject step if exceeded."""
+    maximum_total_relative_mbe: typing.Optional[float] = None
+    """Total relative MBE threshold (fraction). Reject step if exceeded."""
 
     # State variables
     elapsed_time: float = attrs.field(init=False, default=0.0)
@@ -302,6 +328,14 @@ class Timer(StoreSerializable):
         maximum_allowed_saturation_change: typing.Optional[float] = None,
         maximum_pressure_change: typing.Optional[float] = None,
         maximum_allowed_pressure_change: typing.Optional[float] = None,
+        absolute_oil_mbe: typing.Optional[float] = None,
+        absolute_water_mbe: typing.Optional[float] = None,
+        absolute_gas_mbe: typing.Optional[float] = None,
+        total_absolute_mbe: typing.Optional[float] = None,
+        relative_oil_mbe: typing.Optional[float] = None,
+        relative_water_mbe: typing.Optional[float] = None,
+        relative_gas_mbe: typing.Optional[float] = None,
+        total_relative_mbe: typing.Optional[float] = None,
     ) -> float:
         """
         Registers a rejected time step proposal and computes an intelligently adjusted time step size
@@ -360,6 +394,14 @@ class Timer(StoreSerializable):
             maximum_allowed_saturation_change=maximum_allowed_saturation_change,
             maximum_pressure_change=maximum_pressure_change,
             maximum_allowed_pressure_change=maximum_allowed_pressure_change,
+            absolute_oil_mbe=absolute_oil_mbe,
+            absolute_water_mbe=absolute_water_mbe,
+            absolute_gas_mbe=absolute_gas_mbe,
+            total_absolute_mbe=total_absolute_mbe,
+            relative_oil_mbe=relative_oil_mbe,
+            relative_water_mbe=relative_water_mbe,
+            relative_gas_mbe=relative_gas_mbe,
+            total_relative_mbe=total_relative_mbe,
             aggressive=aggressive,
         )
         self.next_step_size *= factor
@@ -406,6 +448,14 @@ class Timer(StoreSerializable):
         maximum_allowed_saturation_change: typing.Optional[float] = None,
         maximum_pressure_change: typing.Optional[float] = None,
         maximum_allowed_pressure_change: typing.Optional[float] = None,
+        absolute_oil_mbe: typing.Optional[float] = None,
+        absolute_water_mbe: typing.Optional[float] = None,
+        absolute_gas_mbe: typing.Optional[float] = None,
+        total_absolute_mbe: typing.Optional[float] = None,
+        relative_oil_mbe: typing.Optional[float] = None,
+        relative_water_mbe: typing.Optional[float] = None,
+        relative_gas_mbe: typing.Optional[float] = None,
+        total_relative_mbe: typing.Optional[float] = None,
         aggressive: bool = False,
     ) -> float:
         """
@@ -533,6 +583,35 @@ class Timer(StoreSerializable):
                 )
                 factors.append(newton_iteration_factor)
 
+        # MBE-based backoff
+        mbe_pairs = [
+            (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "absolute oil MBE"),
+            (absolute_water_mbe, self.maximum_absolute_water_mbe, "absolute water MBE"),
+            (absolute_gas_mbe, self.maximum_absolute_gas_mbe, "absolute gas MBE"),
+            (total_absolute_mbe, self.maximum_total_absolute_mbe, "total absolute MBE"),
+            (relative_oil_mbe, self.maximum_relative_oil_mbe, "relative oil MBE"),
+            (relative_water_mbe, self.maximum_relative_water_mbe, "relative water MBE"),
+            (relative_gas_mbe, self.maximum_relative_gas_mbe, "relative gas MBE"),
+            (total_relative_mbe, self.maximum_total_relative_mbe, "total relative MBE"),
+        ]
+        for actual, limit, label in mbe_pairs:
+            if actual is None or limit is None:
+                continue
+            actual_abs = abs(actual)
+            if actual_abs > limit:
+                overshoot = actual_abs / limit
+                if overshoot > 3.0:
+                    mbe_factor = 0.4
+                elif overshoot > 1.5:
+                    mbe_factor = 0.6
+                else:
+                    mbe_factor = max(limit / actual_abs * 0.9, 0.7)
+                logger.debug(
+                    f"MBE violation ({label}): |{actual:.3e}| > {limit:.3e} "
+                    f"(ratio {overshoot:.2f}), factor={mbe_factor:.3f}"
+                )
+                factors.append(mbe_factor)
+
         # If we have specific information, use the most conservative (smallest) factor
         if factors:
             final_factor = min(factors)
@@ -554,7 +633,16 @@ class Timer(StoreSerializable):
         maximum_allowed_saturation_change: typing.Optional[float] = None,
         maximum_pressure_change: typing.Optional[float] = None,
         maximum_allowed_pressure_change: typing.Optional[float] = None,
-    ) -> bool:
+        absolute_oil_mbe: typing.Optional[float] = None,
+        absolute_water_mbe: typing.Optional[float] = None,
+        absolute_gas_mbe: typing.Optional[float] = None,
+        total_absolute_mbe: typing.Optional[float] = None,
+        relative_oil_mbe: typing.Optional[float] = None,
+        relative_water_mbe: typing.Optional[float] = None,
+        relative_gas_mbe: typing.Optional[float] = None,
+        total_relative_mbe: typing.Optional[float] = None,
+        **kwargs: typing.Any
+    ) -> typing.Tuple[bool, str]:
         """
         Determine if a time step is acceptable based on given criteria
 
@@ -564,26 +652,63 @@ class Timer(StoreSerializable):
         :param maximum_allowed_saturation_change: Maximum allowed saturation change threshold.
         :param maximum_pressure_change: Maximum pressure change in the accepted step.
         :param maximum_allowed_pressure_change: Maximum allowed pressure change threshold.
-        :return: True if the timestep is acceptable. Else, Flase.
+        :return: Tuple of (acceptable, error/message). The first item is True if the timestep is acceptable. Else, Flase.
         """
         cfl_limit = (
             cfl_threshold if cfl_threshold is not None else self.maximum_cfl_number
         )
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > cfl_limit:
-            return False
+            return (
+                False,
+                f"Maximum CFL limit ({cfl_limit}) violated. Maximum CFL encountered is {maximum_cfl_encountered}",
+            )
 
         if (
             maximum_saturation_change is not None
             and maximum_allowed_saturation_change is not None
             and maximum_saturation_change > maximum_allowed_saturation_change
         ):
-            return False
+            return (
+                False,
+                f"Maximum allowed saturation change ({maximum_allowed_saturation_change}) violated. "
+                "Maximum saturation change encountered is {maximum_saturation_change}",
+            )
 
-        return (
+        if (
             maximum_pressure_change is not None
             and maximum_allowed_pressure_change is not None
             and maximum_pressure_change > maximum_allowed_pressure_change
-        )
+        ):
+            return (
+                False,
+                f"Maximum allowed saturation change ({maximum_allowed_saturation_change}) violated. "
+                "Maximum saturation change encountered is {maximum_saturation_change}",
+            )
+
+        mbe_violated = False
+        mbe_message_parts = []
+        mbe_checks = [
+            (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "abs oil MBE"),
+            (absolute_water_mbe, self.maximum_absolute_water_mbe, "abs water MBE"),
+            (absolute_gas_mbe, self.maximum_absolute_gas_mbe, "abs gas MBE"),
+            (total_absolute_mbe, self.maximum_total_absolute_mbe, "total abs MBE"),
+            (relative_oil_mbe, self.maximum_relative_oil_mbe, "rel oil MBE"),
+            (relative_water_mbe, self.maximum_relative_water_mbe, "rel water MBE"),
+            (relative_gas_mbe, self.maximum_relative_gas_mbe, "rel gas MBE"),
+            (total_relative_mbe, self.maximum_total_relative_mbe, "total rel MBE"),
+        ]
+        for actual, limit, label in mbe_checks:
+            if limit is None or actual is None:
+                continue
+            if actual > limit:
+                mbe_violated = True
+                mbe_message_parts.append(f"{label}: |{actual:.3e}| > {limit:.3e}")
+
+        if mbe_violated:
+            message = f"MBE limits violated: " + "; ".join(mbe_message_parts)
+            return True, message
+
+        return True, "Step acceptable"
 
     def accept_step(
         self,
@@ -596,6 +721,14 @@ class Timer(StoreSerializable):
         maximum_allowed_saturation_change: typing.Optional[float] = None,
         maximum_pressure_change: typing.Optional[float] = None,
         maximum_allowed_pressure_change: typing.Optional[float] = None,
+        absolute_oil_mbe: typing.Optional[float] = None,
+        absolute_water_mbe: typing.Optional[float] = None,
+        absolute_gas_mbe: typing.Optional[float] = None,
+        total_absolute_mbe: typing.Optional[float] = None,
+        relative_oil_mbe: typing.Optional[float] = None,
+        relative_water_mbe: typing.Optional[float] = None,
+        relative_gas_mbe: typing.Optional[float] = None,
+        total_relative_mbe: typing.Optional[float] = None,
     ) -> float:
         """
         Registers an accepted time step and computes the next time step size
@@ -905,6 +1038,14 @@ class Timer(StoreSerializable):
             "backoff_factor": self.backoff_factor,
             "aggressive_backoff_factor": self.aggressive_backoff_factor,
             "maximum_steps": self.maximum_steps,
+            "maximum_absolute_oil_mbe": self.maximum_absolute_oil_mbe,
+            "maximum_absolute_water_mbe": self.maximum_absolute_water_mbe,
+            "maximum_absolute_gas_mbe": self.maximum_absolute_gas_mbe,
+            "maximum_total_absolute_mbe": self.maximum_total_absolute_mbe,
+            "maximum_relative_oil_mbe": self.maximum_relative_oil_mbe,
+            "maximum_relative_water_mbe": self.maximum_relative_water_mbe,
+            "maximum_relative_gas_mbe": self.maximum_relative_gas_mbe,
+            "maximum_total_relative_mbe": self.maximum_total_relative_mbe,
             "maximum_growth_per_step": self.maximum_growth_per_step,
             "maximum_rejections": self.maximum_rejections,
             "step_size_smoothing": self.step_size_smoothing,
@@ -974,6 +1115,14 @@ class Timer(StoreSerializable):
             "backoff_factor": state.get("backoff_factor", 0.5),
             "aggressive_backoff_factor": state.get("aggressive_backoff_factor", 0.25),
             "maximum_steps": state.get("maximum_steps"),
+            "maximum_absolute_oil_mbe": state.get("maximum_absolute_oil_mbe", None),
+            "maximum_absolute_water_mbe": state.get("maximum_absolute_water_mbe", None),
+            "maximum_absolute_gas_mbe": state.get("maximum_absolute_gas_mbe", None),
+            "maximum_total_absolute_mbe": state.get("maximum_total_absolute_mbe", None),
+            "maximum_relative_oil_mbe": state.get("maximum_relative_oil_mbe", None),
+            "maximum_relative_water_mbe": state.get("maximum_relative_water_mbe", None),
+            "maximum_relative_gas_mbe": state.get("maximum_relative_gas_mbe", None),
+            "maximum_total_relative_mbe": state.get("maximum_total_relative_mbe", None),
             "maximum_rejections": state.get("maximum_rejections", 10),
             "maximum_growth_per_step": state.get("maximum_growth_per_step", 1.5),
             "step_size_smoothing": state.get("step_size_smoothing", 0.7),

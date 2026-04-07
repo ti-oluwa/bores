@@ -90,6 +90,234 @@ Simulation aborted to avoid propagation of unphysical results.
 
 
 @attrs.frozen(slots=True)
+class MaterialBalanceErrors:
+    """
+    Material balance errors computed at the end of a time step.
+
+    All volumes are in reservoir ft³ (res ft³).
+    Relative errors are dimensionless fractions (not percent).
+    """
+
+    absolute_oil_mbe: float  # res ft³
+    absolute_water_mbe: float  # res ft³
+    absolute_gas_mbe: float  # res ft³ (free + dissolved)
+    total_absolute_mbe: float  # res ft³
+
+    relative_oil_mbe: float  # fraction
+    relative_water_mbe: float  # fraction
+    relative_gas_mbe: float  # fraction
+    total_relative_mbe: float  # fraction
+
+
+def compute_material_balance_errors(
+    current_fluid: FluidProperties[ThreeDimensions],
+    previous_fluid: FluidProperties[ThreeDimensions],
+    rock: RockProperties[ThreeDimensions],
+    thickness_grid: NDimensionalGrid[ThreeDimensions],
+    cell_dimension: typing.Tuple[float, float],
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
+    time_step_size: float,
+) -> MaterialBalanceErrors:
+    """
+    Compute per-phase material balance errors at reservoir conditions (res ft³).
+
+    All rate tensors hold values in ft³/day (reservoir condition).
+
+    MBE = ΔV_reservoir - (Q_inj - Q_prod) * Δt
+
+    Gas MBE includes free gas plus solution gas dissolved in oil (Rs) and water (Rsw).
+
+    :param current_fluid: Fluid properties at end of time step.
+    :param previous_fluid: Fluid properties at start of time step.
+    :param rock: Rock properties (porosity, NTG, etc.).
+    :param thickness_grid: Un-padded cell thickness grid (ft).
+    :param cell_dimension: (dx, dy) in ft.
+    :param injection_rates: Injection rate sparse tensors (ft³/day, res cond).
+    :param production_rates: Production rate sparse tensors (ft³/day, res cond).
+    :param time_step_size: Time step size in seconds.
+    :return: `MaterialBalanceErrors` instance.
+    """
+    dx, dy = cell_dimension
+    # Cell pore volume in res ft³
+    pore_volume = (
+        rock.porosity_grid * rock.net_to_gross_ratio_grid * thickness_grid * dx * dy
+    )  # res ft³
+
+    time_step_size_in_days = time_step_size / 86400.0
+
+    # OIL
+    # Reservoir oil volume = Vp * So / Bo  (res ft³ → surface STB → back via Bo)
+    # But we want res ft³ consistently, so:  Vp * So  (already res ft³ of pore)
+    # divided by Bo gives surface STB; multiply by Bo gives res ft³ again — circular.
+    # Correct approach: res oil volume = Vp * So (res ft³ of oil phase at reservoir cond)
+    # For MBE we track surface volumes and convert back:
+    #   ΔN_surface = Δ(Vp * So / Bo)   [STB]
+    # Then MBE_res = [Δ(Vp*So/Bo) - (Qinj_o - Qprod_o)/Bo_avg] * Bo_avg
+    # Simpler: work entirely in res ft³.
+    #   res oil vol = Vp * So
+    #   net inflow res ft³ = (Qinj_o - Qprod_o) * dt  (already res ft³/day)
+    # This is the correct reservoir-volume MBE without unit conversion.
+
+    current_oil_volume = float(np.sum(pore_volume * current_fluid.oil_saturation_grid))
+    previous_oil_volume = float(
+        np.sum(pore_volume * previous_fluid.oil_saturation_grid)
+    )
+    oil_volume_change = current_oil_volume - previous_oil_volume
+
+    net_oil_inflow = 0.0
+    for key in injection_rates.oil:
+        net_oil_inflow += float(injection_rates.oil[key])
+    for key in production_rates.oil:
+        net_oil_inflow -= float(production_rates.oil[key])
+    net_oil_inflow *= time_step_size_in_days  # res ft³
+
+    absolute_oil_mbe = oil_volume_change - net_oil_inflow
+    reference_oil = max(abs(previous_oil_volume), 1.0)
+    relative_oil_mbe = absolute_oil_mbe / reference_oil
+
+    # WATER
+    current_water_volume = float(
+        np.sum(pore_volume * current_fluid.water_saturation_grid)
+    )
+    previous_water_volume = float(
+        np.sum(pore_volume * previous_fluid.water_saturation_grid)
+    )
+    water_volume_change = current_water_volume - previous_water_volume
+
+    net_water_inflow = 0.0
+    for key in injection_rates.water:
+        net_water_inflow += float(injection_rates.water[key])
+    for key in production_rates.water:
+        net_water_inflow -= float(production_rates.water[key])
+    net_water_inflow *= time_step_size_in_days
+
+    absolute_water_mbe = water_volume_change - net_water_inflow
+    reference_water = max(abs(previous_water_volume), 1.0)
+    relative_water_mbe = absolute_water_mbe / reference_water
+
+    # GAS
+    # Total gas in place (res ft³) = free gas + solution gas in oil + solution gas in water
+    # Free gas (res ft³):           Vp * Sg
+    # Solution gas in oil (res ft³): Vp * So * Rs * Bg   where Bg = Bo_g / Bo  ... complex
+    # Simpler consistent approach: convert everything to surface SCF then back.
+    #
+    # Gas in place at surface (SCF):
+    #   G = Vp * Sg / Bg  +  Vp * So * Rs / Bo  +  Vp * Sw * Rsw / Bw
+    # where Bg [res ft³/SCF], Bo [res bbl/STB→ ft³ via *5.614583], Bw similar.
+    #
+    # To stay in res ft³:  multiply G_surface by Bg_ref (use current Bg field mean).
+    # But that introduces a reference Bg choice.  The cleanest approach:
+    # track G in surface SCF and report MBE in surface SCF, then convert to res ft³
+    # using the mean Bg for reporting alongside oil and water in res ft³.
+    #
+    # We'll report all MBEs in res ft³ using phase-specific FVFs for gas.
+
+    BBL_TO_FT3 = c.BARRELS_TO_CUBIC_FEET  # 5.614583 ft³/bbl
+
+    # Bg in res ft³/SCF  (gas_formation_volume_factor_grid is in ft³/SCF already per models.py)
+    current_gas_fvf = current_fluid.gas_formation_volume_factor_grid
+    previous_gas_fvf = previous_fluid.gas_formation_volume_factor_grid
+
+    # Bo in res ft³/STB  (oil_formation_volume_factor_grid is bbl/STB → × 5.614583)
+    current_oil_fvf = current_fluid.oil_formation_volume_factor_grid * BBL_TO_FT3
+    previous_oil_fvf = previous_fluid.oil_formation_volume_factor_grid * BBL_TO_FT3
+
+    # Bw in res ft³/STB
+    current_water_fvf = current_fluid.water_formation_volume_factor_grid * BBL_TO_FT3
+    previous_water_fvf = previous_fluid.water_formation_volume_factor_grid * BBL_TO_FT3
+
+    # Rs in SCF/STB, Rsw in SCF/STB
+    current_solution_gor = current_fluid.solution_gas_to_oil_ratio_grid
+    previous_solution_gor = previous_fluid.solution_gas_to_oil_ratio_grid
+    current_gas_solubility_in_water = current_fluid.gas_solubility_in_water_grid
+    previous_gas_solubility_in_water = previous_fluid.gas_solubility_in_water_grid
+
+    # Total gas in place in surface SCF
+    # free gas: (Vp * Sg) / Bg
+    # dissolved in oil: (Vp * So / Bo) * Rs
+    # dissolved in water: (Vp * Sw / Bw) * Rsw
+    current_gas_volume_scf = float(
+        np.sum(
+            pore_volume
+            * current_fluid.gas_saturation_grid
+            / np.maximum(current_gas_fvf, 1e-30)
+            + pore_volume
+            * current_fluid.oil_saturation_grid
+            / np.maximum(current_oil_fvf, 1e-30)
+            * current_solution_gor
+            + pore_volume
+            * current_fluid.water_saturation_grid
+            / np.maximum(current_water_fvf, 1e-30)
+            * current_gas_solubility_in_water
+        )
+    )
+    previous_gas_volume_scf = float(
+        np.sum(
+            pore_volume
+            * previous_fluid.gas_saturation_grid
+            / np.maximum(previous_gas_fvf, 1e-30)
+            + pore_volume
+            * previous_fluid.oil_saturation_grid
+            / np.maximum(previous_oil_fvf, 1e-30)
+            * previous_solution_gor
+            + pore_volume
+            * previous_fluid.water_saturation_grid
+            / np.maximum(previous_water_fvf, 1e-30)
+            * previous_gas_solubility_in_water
+        )
+    )
+    gas_volume_change_scf = current_gas_volume_scf - previous_gas_volume_scf
+
+    # Net gas inflow: injection_rates.gas and production_rates.gas are in res ft³/day.
+    # Convert to SCF/day using Bg at current conditions (cell-averaged).
+    # For simplicity use grid-mean Bg; or sum cell-by-cell for accuracy.
+    net_gas_inflow_scf = 0.0
+    for key in injection_rates.gas:
+        cell_idx = key
+        gas_fvf = (
+            float(current_gas_fvf[cell_idx])
+            if current_gas_fvf[cell_idx] > 0
+            else float(np.mean(current_gas_fvf))
+        )
+        net_gas_inflow_scf += float(injection_rates.gas[key]) / gas_fvf
+    for key in production_rates.gas:
+        cell_idx = key
+        gas_fvf = (
+            float(current_gas_fvf[cell_idx])
+            if current_gas_fvf[cell_idx] > 0
+            else float(np.mean(current_gas_fvf))
+        )
+        net_gas_inflow_scf -= float(production_rates.gas[key]) / gas_fvf
+    net_gas_inflow_scf *= time_step_size_in_days  # SCF
+
+    absolute_gas_mbe_scf = gas_volume_change_scf - net_gas_inflow_scf  # SCF
+    # Convert to res ft³ using mean current Bg for consistent reporting units
+    mean_gas_fvf = float(np.mean(current_gas_fvf))
+    absolute_gas_mbe = absolute_gas_mbe_scf * mean_gas_fvf  # res ft³
+    reference_gas = max(abs(previous_gas_volume_scf) * mean_gas_fvf, 1.0)
+    relative_gas_mbe = absolute_gas_mbe / reference_gas
+
+    # TOTAL
+    total_absolute_mbe = absolute_oil_mbe + absolute_water_mbe + absolute_gas_mbe
+    total_reference = max(
+        abs(previous_oil_volume) + abs(previous_water_volume) + reference_gas, 1.0
+    )
+    total_relative_mbe = total_absolute_mbe / total_reference
+
+    return MaterialBalanceErrors(
+        absolute_oil_mbe=absolute_oil_mbe,
+        absolute_water_mbe=absolute_water_mbe,
+        absolute_gas_mbe=absolute_gas_mbe,
+        total_absolute_mbe=total_absolute_mbe,
+        relative_oil_mbe=relative_oil_mbe,
+        relative_water_mbe=relative_water_mbe,
+        relative_gas_mbe=relative_gas_mbe,
+        total_relative_mbe=total_relative_mbe,
+    )
+
+
+@attrs.frozen(slots=True)
 class StepResult(typing.Generic[NDimension]):
     """
     Result from executing one time step of the simulation.
@@ -117,6 +345,8 @@ class StepResult(typing.Generic[NDimension]):
     """Whether the time step evolution was successful."""
     message: typing.Optional[str] = None
     """Optional message providing additional information about the time step result."""
+    mbe: typing.Optional[MaterialBalanceErrors] = None
+    """Material balance errors for this time step. None for rejected steps or first step."""
     timer_kwargs: typing.Dict[str, typing.Any] = attrs.field(factory=dict)
     """Kwargs that should be passed to the simulation timer on accepting or rejecting a step."""
 
@@ -365,6 +595,7 @@ def _run_impes_step(
     :return: `StepResult` containing updated rates and fluid properties.
     """
     old_pressure_grid = padded_fluid_properties.pressure_grid.copy()
+    initial_padded_fluid_properties = padded_fluid_properties
 
     logger.debug("Evolving pressure (implicit)...")
     injection_rates = _make_rates(grid_shape)
@@ -803,6 +1034,29 @@ def _run_impes_step(
                 residual_gas_drainage_ratio=config.residual_gas_drainage_ratio,
             )
         )
+
+    mbe = compute_material_balance_errors(
+        current_fluid=padded_fluid_properties.unpad(pad_width=pad_width),
+        previous_fluid=initial_padded_fluid_properties.unpad(pad_width=pad_width),
+        rock=padded_rock_properties.unpad(pad_width=pad_width),
+        thickness_grid=thickness_grid,
+        cell_dimension=cell_dimension,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        time_step_size=time_step_size,
+    )
+    timer_kwargs.update(
+        {
+            "absolute_oil_mbe": mbe.absolute_oil_mbe,
+            "absolute_water_mbe": mbe.absolute_water_mbe,
+            "absolute_gas_mbe": mbe.absolute_gas_mbe,
+            "total_absolute_mbe": mbe.total_absolute_mbe,
+            "relative_oil_mbe": mbe.relative_oil_mbe,
+            "relative_water_mbe": mbe.relative_water_mbe,
+            "relative_gas_mbe": mbe.relative_gas_mbe,
+            "total_relative_mbe": mbe.total_relative_mbe,
+        }
+    )
     logger.debug("Saturation evolution completed!")
     return StepResult(
         fluid_properties=padded_fluid_properties,
@@ -816,6 +1070,7 @@ def _run_impes_step(
         production_bhps=production_bhps,
         success=True,
         message=saturation_result.message,
+        mbe=mbe,
         timer_kwargs=timer_kwargs,
     )
 
@@ -879,6 +1134,7 @@ def _run_sequential_implicit_step(
     """
     # Save old pressure grid before implicit solve (needed for PVT volume correction)
     old_pressure_grid = padded_fluid_properties.pressure_grid.copy()
+    initial_padded_fluid_properties = padded_fluid_properties
 
     logger.debug("Evolving pressure (implicit)...")
     injection_rates = _make_rates(grid_shape)
@@ -1210,6 +1466,28 @@ def _run_sequential_implicit_step(
             )
         )
 
+    mbe = compute_material_balance_errors(
+        current_fluid=padded_fluid_properties.unpad(pad_width=pad_width),
+        previous_fluid=initial_padded_fluid_properties.unpad(pad_width=pad_width),
+        rock=padded_rock_properties.unpad(pad_width=pad_width),
+        thickness_grid=thickness_grid,
+        cell_dimension=cell_dimension,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        time_step_size=time_step_size,
+    )
+    timer_kwargs.update(
+        {
+            "absolute_oil_mbe": mbe.absolute_oil_mbe,
+            "absolute_water_mbe": mbe.absolute_water_mbe,
+            "absolute_gas_mbe": mbe.absolute_gas_mbe,
+            "total_absolute_mbe": mbe.total_absolute_mbe,
+            "relative_oil_mbe": mbe.relative_oil_mbe,
+            "relative_water_mbe": mbe.relative_water_mbe,
+            "relative_gas_mbe": mbe.relative_gas_mbe,
+            "total_relative_mbe": mbe.total_relative_mbe,
+        }
+    )
     logger.debug("Sequential implicit step completed!")
     return StepResult(
         fluid_properties=padded_fluid_properties,
@@ -1223,6 +1501,7 @@ def _run_sequential_implicit_step(
         production_bhps=production_bhps,
         success=True,
         message=saturation_result.message,
+        mbe=mbe,
         timer_kwargs=timer_kwargs,
     )
 
@@ -1288,6 +1567,7 @@ def _run_full_sequential_implicit_step(
     pressure_tolerance = config.pressure_outer_convergence_tolerance
     maximum_newton_iterations = config.maximum_newton_iterations
     maximum_outer_iterations = config.maximum_outer_iterations
+    initial_padded_fluid_properties = padded_fluid_properties
 
     logger.debug(
         f"Outer iteration tolerances - "
@@ -1297,10 +1577,12 @@ def _run_full_sequential_implicit_step(
 
     # Snapshots of the start-of-timestep state, updated after each outer iteration
     # to compute inter-iterate drift for the convergence check.
-    prev_pressure_grid = padded_fluid_properties.pressure_grid.copy()
-    prev_water_saturation_grid = padded_fluid_properties.water_saturation_grid.copy()
-    prev_oil_saturation_grid = padded_fluid_properties.oil_saturation_grid.copy()
-    prev_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
+    previous_pressure_grid = padded_fluid_properties.pressure_grid.copy()
+    previous_water_saturation_grid = (
+        padded_fluid_properties.water_saturation_grid.copy()
+    )
+    previous_oil_saturation_grid = padded_fluid_properties.oil_saturation_grid.copy()
+    previous_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
 
     # Working state updated each outer iteration
     iter_fluid_properties = padded_fluid_properties
@@ -1690,7 +1972,7 @@ def _run_full_sequential_implicit_step(
                 np.max(
                     np.abs(
                         iter_fluid_properties.water_saturation_grid
-                        - prev_water_saturation_grid
+                        - previous_water_saturation_grid
                     )
                 )
             ),
@@ -1698,7 +1980,7 @@ def _run_full_sequential_implicit_step(
                 np.max(
                     np.abs(
                         iter_fluid_properties.oil_saturation_grid
-                        - prev_oil_saturation_grid
+                        - previous_oil_saturation_grid
                     )
                 )
             ),
@@ -1706,14 +1988,14 @@ def _run_full_sequential_implicit_step(
                 np.max(
                     np.abs(
                         iter_fluid_properties.gas_saturation_grid
-                        - prev_gas_saturation_grid
+                        - previous_gas_saturation_grid
                     )
                 )
             ),
         )
         reference_pressure = max(float(np.mean(np.abs(padded_pressure_grid))), 1.0)
         relative_outer_pressure_change = (
-            float(np.max(np.abs(padded_pressure_grid - prev_pressure_grid)))
+            float(np.max(np.abs(padded_pressure_grid - previous_pressure_grid)))
             / reference_pressure
         )
 
@@ -1768,10 +2050,12 @@ def _run_full_sequential_implicit_step(
             phase_appearance_tolerance=config.phase_appearance_tolerance,
         )
 
-        prev_pressure_grid = padded_pressure_grid.copy()
-        prev_water_saturation_grid = iter_fluid_properties.water_saturation_grid.copy()
-        prev_oil_saturation_grid = iter_fluid_properties.oil_saturation_grid.copy()
-        prev_gas_saturation_grid = iter_fluid_properties.gas_saturation_grid.copy()
+        previous_pressure_grid = padded_pressure_grid.copy()
+        previous_water_saturation_grid = (
+            iter_fluid_properties.water_saturation_grid.copy()
+        )
+        previous_oil_saturation_grid = iter_fluid_properties.oil_saturation_grid.copy()
+        previous_gas_saturation_grid = iter_fluid_properties.gas_saturation_grid.copy()
         injection_rates = _make_rates(grid_shape)
         production_rates = _make_rates(grid_shape)
         injection_fvfs = _make_fvfs(grid_shape)
@@ -1802,6 +2086,28 @@ def _run_full_sequential_implicit_step(
             )
         )
 
+    mbe = compute_material_balance_errors(
+        current_fluid=padded_fluid_properties.unpad(pad_width=pad_width),
+        previous_fluid=initial_padded_fluid_properties.unpad(pad_width=pad_width),
+        rock=padded_rock_properties.unpad(pad_width=pad_width),
+        thickness_grid=thickness_grid,
+        cell_dimension=cell_dimension,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        time_step_size=time_step_size,
+    )
+    final_timer_kwargs.update(
+        {
+            "absolute_oil_mbe": mbe.absolute_oil_mbe,
+            "absolute_water_mbe": mbe.absolute_water_mbe,
+            "absolute_gas_mbe": mbe.absolute_gas_mbe,
+            "total_absolute_mbe": mbe.total_absolute_mbe,
+            "relative_oil_mbe": mbe.relative_oil_mbe,
+            "relative_water_mbe": mbe.relative_water_mbe,
+            "relative_gas_mbe": mbe.relative_gas_mbe,
+            "total_relative_mbe": mbe.total_relative_mbe,
+        }
+    )
     logger.debug("Sequential implicit step completed.")
     return StepResult(
         fluid_properties=iter_fluid_properties,
@@ -1815,6 +2121,7 @@ def _run_full_sequential_implicit_step(
         production_bhps=production_bhps,
         success=True,
         message=saturation_result.message,
+        mbe=mbe,
         timer_kwargs=final_timer_kwargs,
     )
 
@@ -1873,6 +2180,7 @@ def _run_explicit_step(
     :return: `StepResult` containing updated rates and fluid properties.
     """
     old_pressure_grid = padded_fluid_properties.pressure_grid.copy()
+    initial_padded_fluid_properties = padded_fluid_properties
 
     logger.debug("Evolving pressure (explicit)...")
     injection_rates = _make_rates(grid_shape)
@@ -2270,6 +2578,29 @@ def _run_explicit_step(
                 residual_gas_drainage_ratio=config.residual_gas_drainage_ratio,
             )
         )
+
+    mbe = compute_material_balance_errors(
+        current_fluid=padded_fluid_properties.unpad(pad_width=pad_width),
+        previous_fluid=initial_padded_fluid_properties.unpad(pad_width=pad_width),
+        rock=padded_rock_properties.unpad(pad_width=pad_width),
+        thickness_grid=thickness_grid,
+        cell_dimension=cell_dimension,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        time_step_size=time_step_size,
+    )
+    timer_kwargs.update(
+        {
+            "absolute_oil_mbe": mbe.absolute_oil_mbe,
+            "absolute_water_mbe": mbe.absolute_water_mbe,
+            "absolute_gas_mbe": mbe.absolute_gas_mbe,
+            "total_absolute_mbe": mbe.total_absolute_mbe,
+            "relative_oil_mbe": mbe.relative_oil_mbe,
+            "relative_water_mbe": mbe.relative_water_mbe,
+            "relative_gas_mbe": mbe.relative_gas_mbe,
+            "total_relative_mbe": mbe.total_relative_mbe,
+        }
+    )
     return StepResult(
         fluid_properties=padded_fluid_properties,
         rock_properties=padded_rock_properties,
@@ -2282,6 +2613,7 @@ def _run_explicit_step(
         production_bhps=production_bhps,
         success=True,
         message=saturation_result.message,
+        mbe=mbe,
         timer_kwargs=timer_kwargs,
     )
 
@@ -2894,22 +3226,28 @@ def run(
                     )
 
                 # If the step was successful, accept that step proposal
+                acceptable = False
+                timer_kwargs = result.timer_kwargs
+                error_msg = None
                 if result.success:
-                    # Now we can accept the proposed time step size and we now agree that this is a new step
-                    logger.debug(f"Time step {new_step} completed successfully.")
-                    timer.accept_step(step_size=step_size, **result.timer_kwargs)
-                    if log_interval:
-                        log_progress(
-                            step=timer.step,
-                            step_size=step_size,
-                            time_elapsed=timer.elapsed_time,
-                            total_time=timer.simulation_time,
-                            is_last_step=timer.is_last_step,
-                            interval=log_interval,
-                        )
-                    if on_step_accepted is not None:
-                        on_step_accepted(result, step_size, timer.elapsed_time)
-                else:
+                    acceptable, error_msg = timer.is_acceptable(**timer_kwargs)
+                    if acceptable:
+                        # Now we can accept the proposed time step size and we now agree that this is a new step
+                        logger.debug(f"Time step {new_step} completed successfully.")
+                        timer.accept_step(step_size=step_size, **timer_kwargs)
+                        if log_interval:
+                            log_progress(
+                                step=timer.step,
+                                step_size=step_size,
+                                time_elapsed=timer.elapsed_time,
+                                total_time=timer.simulation_time,
+                                is_last_step=timer.is_last_step,
+                                interval=log_interval,
+                            )
+                        if on_step_accepted is not None:
+                            on_step_accepted(result, step_size, timer.elapsed_time)
+
+                if not acceptable:
                     # Reject the step, adjust the time step size, and retry
                     logger.debug(
                         f"Time step {new_step} failed with step size {step_size}. Retrying with smaller step size."
@@ -2918,12 +3256,12 @@ def run(
                         timer.reject_step(
                             step_size=step_size,
                             aggressive=timer.rejection_count > 5,
-                            **result.timer_kwargs,
+                            **timer_kwargs,
                         )
                     except TimingError as exc:
                         raise SimulationError(
                             f"Simulation failed at time step {new_step} and cannot reduce step size further. {exc}."
-                            f"\n{result.message}"
+                            f"\n{error_msg or result.message or ''}"
                         ) from exc
 
                     if on_step_rejected is not None:

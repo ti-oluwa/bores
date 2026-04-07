@@ -1079,7 +1079,7 @@ class FormationVolumeFactors(Serializable, typing.Generic[DType, ShapeT]):
         `0.0` if none are defined.
 
         :param key: The N-dimensional cell index typed as `ShapeT`.
-        :returns: A tuple `(water_bhp, oil_bhp, gas_bhp)` each of type
+        :returns: A tuple `(water_fvf, oil_fvf, gas_fvf)` each of type
             `DType`.
         """
         return self.water[key], self.oil[key], self.gas[key]
@@ -1097,7 +1097,7 @@ class FormationVolumeFactors(Serializable, typing.Generic[DType, ShapeT]):
         Set the water, oil and gas formation volume factors at the specified cell.
 
         :param key: The N-dimensional cell index typed as `ShapeT`.
-        :param value: A three-tuple `(water_bhp, oil_bhp, gas_bhp)`.
+        :param value: A three-tuple `(water_fvf, oil_fvf, gas_fvf)`.
         """
         water, oil, gas = value
         self.oil[key] = oil
