@@ -142,40 +142,21 @@ def evolve_pressure(
         capillary_pressure_grids
     )
 
-    # Compute mobility grids for x, y, z directions
-    mobility_grids = compute_mobility_grids(
-        absolute_permeability_x=absolute_permeability.x,
-        absolute_permeability_y=absolute_permeability.y,
-        absolute_permeability_z=absolute_permeability.z,
-        water_relative_mobility_grid=water_relative_mobility_grid,
-        oil_relative_mobility_grid=oil_relative_mobility_grid,
-        gas_relative_mobility_grid=gas_relative_mobility_grid,
-        md_per_cp_to_ft2_per_psi_per_day=c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY,
-    )
-
-    (
-        (water_mobility_grid_x, oil_mobility_grid_x, gas_mobility_grid_x),
-        (water_mobility_grid_y, oil_mobility_grid_y, gas_mobility_grid_y),
-        (water_mobility_grid_z, oil_mobility_grid_z, gas_mobility_grid_z),
-    ) = mobility_grids
-
     # Compute CFL number for this time step
     pressure_cfl = compute_pressure_cfl_number(
         time_step_size_in_days=time_step_size_in_days,
         porosity_grid=porosity_grid,
-        total_compressibility_grid=total_compressibility_grid,  # type: ignore
+        total_compressibility_grid=total_compressibility_grid,
         thickness_grid=thickness_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
-        water_mobility_grid_x=water_mobility_grid_x,
-        oil_mobility_grid_x=oil_mobility_grid_x,
-        gas_mobility_grid_x=gas_mobility_grid_x,
-        water_mobility_grid_y=water_mobility_grid_y,
-        oil_mobility_grid_y=oil_mobility_grid_y,
-        gas_mobility_grid_y=gas_mobility_grid_y,
-        water_mobility_grid_z=water_mobility_grid_z,
-        oil_mobility_grid_z=oil_mobility_grid_z,
-        gas_mobility_grid_z=gas_mobility_grid_z,
+        water_relative_mobility_grid=water_relative_mobility_grid,
+        oil_relative_mobility_grid=oil_relative_mobility_grid,
+        gas_relative_mobility_grid=gas_relative_mobility_grid,
+        face_transmissibilities_x=face_transmissibilities.x,
+        face_transmissibilities_y=face_transmissibilities.y,
+        face_transmissibilities_z=face_transmissibilities.z,
+        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
     max_pressure_cfl = config.pressure_cfl_threshold
     if pressure_cfl > max_pressure_cfl:
@@ -342,39 +323,27 @@ def compute_pressure_cfl_number(
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
-    water_mobility_grid_x: ThreeDimensionalGrid,
-    oil_mobility_grid_x: ThreeDimensionalGrid,
-    gas_mobility_grid_x: ThreeDimensionalGrid,
-    water_mobility_grid_y: ThreeDimensionalGrid,
-    oil_mobility_grid_y: ThreeDimensionalGrid,
-    gas_mobility_grid_y: ThreeDimensionalGrid,
-    water_mobility_grid_z: ThreeDimensionalGrid,
-    oil_mobility_grid_z: ThreeDimensionalGrid,
-    gas_mobility_grid_z: ThreeDimensionalGrid,
+    water_relative_mobility_grid: ThreeDimensionalGrid,
+    oil_relative_mobility_grid: ThreeDimensionalGrid,
+    gas_relative_mobility_grid: ThreeDimensionalGrid,
+    face_transmissibilities_x: ThreeDimensionalGrid,
+    face_transmissibilities_y: ThreeDimensionalGrid,
+    face_transmissibilities_z: ThreeDimensionalGrid,
+    md_per_cp_to_ft2_per_psi_per_day: float,
 ) -> float:
     """
-    Compute the maximum CFL number across all cells for pressure evolution.
+    Compute the maximum CFL number across all cells for pressure evolution,
+    using precomputed geometric face transmissibilities.
 
-    CFL = Δt * (Σ Transmissibility) / (φ * c_t * V)
+    CFL = Δt * (Σ T_face * lambda_total_face) / (φ * c_t * V)
 
-    For stability, CFL should be ≤ 1.0 (or a safety factor like 0.5)
+    Each T_face (mD·ft) already encodes k_harmonic * A / L.
+    Multiplying by lambda_total (dimensionless relative mobility, in mD/cP units
+    before conversion) and the unit conversion factor gives ft²/psi/day —
+    the same transmissibility used in the pressure equation.
 
-    :param time_step_size_in_days: Current time step size (days)
-    :param porosity_grid: Porosity grid (fraction)
-    :param total_compressibility_grid: Total compressibility (1/psi)
-    :param thickness_grid: Cell thickness (ft)
-    :param cell_size_x: Cell size in x (ft)
-    :param cell_size_y: Cell size in y (ft)
-    :param water_mobility_grid_x: Water mobility in x-direction (ft²/psi·day)
-    :param oil_mobility_grid_x: Oil mobility in x-direction (ft²/psi·day)
-    :param gas_mobility_grid_x: Gas mobility in x-direction (ft²/psi·day)
-    :param water_mobility_grid_y: Water mobility in y-direction (ft²/psi·day)
-    :param oil_mobility_grid_y: Oil mobility in y-direction (ft²/psi·day)
-    :param gas_mobility_grid_y: Gas mobility in y-direction (ft²/psi·day)
-    :param water_mobility_grid_z: Water mobility in z-direction (ft²/psi·day)
-    :param oil_mobility_grid_z: Oil mobility in z-direction (ft²/psi·day)
-    :param gas_mobility_grid_z: Gas mobility in z-direction (ft²/psi·day)
-    :return: Maximum CFL number across all cells
+    For the CFL check we use the harmonic mean of the two adjacent cells'
+    total relative mobilities as the face mobility estimate.
     """
     cell_count_x, cell_count_y, cell_count_z = porosity_grid.shape
     maximum_cfl = 0.0
@@ -387,43 +356,109 @@ def compute_pressure_cfl_number(
                 cell_porosity = porosity_grid[i, j, k]
                 cell_compressibility = total_compressibility_grid[i, j, k]
 
-                # Compute total transmissibility to all neighbors
+                if cell_compressibility <= 0.0 or cell_porosity <= 0.0:
+                    continue
+
+                cell_total_mobility = (
+                    water_relative_mobility_grid[i, j, k]
+                    + oil_relative_mobility_grid[i, j, k]
+                    + gas_relative_mobility_grid[i, j, k]
+                )
+
                 total_transmissibility = 0.0
 
-                # X-direction transmissibilities (2 neighbors: i+1 and i-1)
-                geometric_factor_x = cell_size_y * cell_thickness / cell_size_x
-                total_mobility_x = (
-                    water_mobility_grid_x[i, j, k]
-                    + oil_mobility_grid_x[i, j, k]
-                    + gas_mobility_grid_x[i, j, k]
+                # X: forward face (i→i+1) and backward face (i-1→i)
+                east_mobility = (
+                    water_relative_mobility_grid[i + 1, j, k]
+                    + oil_relative_mobility_grid[i + 1, j, k]
+                    + gas_relative_mobility_grid[i + 1, j, k]
                 )
-                total_transmissibility += 2.0 * total_mobility_x * geometric_factor_x
-
-                # Y-direction transmissibilities (2 neighbors: j+1 and j-1)
-                geometric_factor_y = cell_size_x * cell_thickness / cell_size_y
-                total_mobility_y = (
-                    water_mobility_grid_y[i, j, k]
-                    + oil_mobility_grid_y[i, j, k]
-                    + gas_mobility_grid_y[i, j, k]
+                east_face_mobility = compute_harmonic_mean(
+                    cell_total_mobility, east_mobility
                 )
-                total_transmissibility += 2.0 * total_mobility_y * geometric_factor_y
-
-                # Z-direction transmissibilities (2 neighbors: k+1 and k-1)
-                geometric_factor_z = cell_size_x * cell_size_y / cell_thickness
-                total_mobility_z = (
-                    water_mobility_grid_z[i, j, k]
-                    + oil_mobility_grid_z[i, j, k]
-                    + gas_mobility_grid_z[i, j, k]
+                total_transmissibility += (
+                    face_transmissibilities_x[i, j, k]
+                    * east_face_mobility
+                    * md_per_cp_to_ft2_per_psi_per_day
                 )
-                total_transmissibility += 2.0 * total_mobility_z * geometric_factor_z
 
-                # Compute CFL number for this cell
-                if cell_compressibility > 0.0 and cell_porosity > 0.0:
-                    cell_cfl = (time_step_size_in_days * total_transmissibility) / (
-                        cell_porosity * cell_compressibility * cell_volume
-                    )
+                west_mobility = (
+                    water_relative_mobility_grid[i - 1, j, k]
+                    + oil_relative_mobility_grid[i - 1, j, k]
+                    + gas_relative_mobility_grid[i - 1, j, k]
+                )
+                west_face_mobility = compute_harmonic_mean(
+                    cell_total_mobility, west_mobility
+                )
+                total_transmissibility += (
+                    face_transmissibilities_x[i - 1, j, k]
+                    * west_face_mobility
+                    * md_per_cp_to_ft2_per_psi_per_day
+                )
 
-                    maximum_cfl = max(maximum_cfl, cell_cfl)
+                # Y: forward face (j→j+1) and backward face (j-1→j)
+                south_mobility = (
+                    water_relative_mobility_grid[i, j + 1, k]
+                    + oil_relative_mobility_grid[i, j + 1, k]
+                    + gas_relative_mobility_grid[i, j + 1, k]
+                )
+                south_face_mobility = compute_harmonic_mean(
+                    cell_total_mobility, south_mobility
+                )
+                total_transmissibility += (
+                    face_transmissibilities_y[i, j, k]
+                    * south_face_mobility
+                    * md_per_cp_to_ft2_per_psi_per_day
+                )
+
+                north_mobility = (
+                    water_relative_mobility_grid[i, j - 1, k]
+                    + oil_relative_mobility_grid[i, j - 1, k]
+                    + gas_relative_mobility_grid[i, j - 1, k]
+                )
+                north_face_mobility = compute_harmonic_mean(
+                    cell_total_mobility, north_mobility
+                )
+                total_transmissibility += (
+                    face_transmissibilities_y[i, j - 1, k]
+                    * north_face_mobility
+                    * md_per_cp_to_ft2_per_psi_per_day
+                )
+
+                # Z: forward face (k→k+1) and backward face (k-1→k)
+                bottom_mobility = (
+                    water_relative_mobility_grid[i, j, k + 1]
+                    + oil_relative_mobility_grid[i, j, k + 1]
+                    + gas_relative_mobility_grid[i, j, k + 1]
+                )
+                bottom_face_mobility = compute_harmonic_mean(
+                    cell_total_mobility, bottom_mobility
+                )
+                total_transmissibility += (
+                    face_transmissibilities_z[i, j, k]
+                    * bottom_face_mobility
+                    * md_per_cp_to_ft2_per_psi_per_day
+                )
+
+                top_mobility = (
+                    water_relative_mobility_grid[i, j, k - 1]
+                    + oil_relative_mobility_grid[i, j, k - 1]
+                    + gas_relative_mobility_grid[i, j, k - 1]
+                )
+                top_face_mobility = compute_harmonic_mean(
+                    cell_total_mobility, top_mobility
+                )
+                total_transmissibility += (
+                    face_transmissibilities_z[i, j, k - 1]
+                    * top_face_mobility
+                    * md_per_cp_to_ft2_per_psi_per_day
+                )
+
+                cell_cfl = (time_step_size_in_days * total_transmissibility) / (
+                    cell_porosity * cell_compressibility * cell_volume
+                )
+                maximum_cfl = max(maximum_cfl, cell_cfl)
+
     return maximum_cfl
 
 
