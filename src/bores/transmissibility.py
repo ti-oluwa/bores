@@ -25,7 +25,6 @@ class FaceTransmissibilities(typing.NamedTuple):
         z: face between cell (i,j,k) and (i,j,k+1)
 
     The last slice in each direction has no forward neighbour and holds zeros.
-    Ghost/boundary cells are included so indices align with padded grids.
     """
 
     x: ThreeDimensionalGrid
@@ -42,11 +41,7 @@ def build_face_transmissibilities(
 ) -> FaceTransmissibilities:
     """
     Precompute geometric face transmissibilities T_geo = k_harmonic * A / L for
-    every forward-facing interface in x, y, and z on the *padded* grid.
-
-    Ghost cells mirror their boundary neighbours in both permeability and geometry,
-    so transmissibilities at boundary-ghost interfaces are identical to those at the
-    adjacent interior-boundary interfaces.
+    every forward-facing interface in x, y, and z on the grid.
 
     Result arrays are shaped (nx, ny, nz) where (nx, ny, nz) = padded grid shape.
     Entry [i, j, k] is the transmissibility of the face between (i,j,k) and:

@@ -779,11 +779,11 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
 @app.cell
 def setup_store(Path, bores):
     store = bores.HDF5Store(filepath=Path("./benchmarks/runs/spe1/results/spe1.h5"))
-    return (store,)
+    return
 
 
 @app.cell
-def run_simulation(Path, bores, store):
+def run_simulation(Path, bores):
     # Load run from saved files
     run = bores.Run.from_files(
         model_path=Path("./benchmarks/runs/spe1/setup/model.h5"),
@@ -791,17 +791,19 @@ def run_simulation(Path, bores, store):
         pvt_tables_path=Path("./benchmarks/runs/spe1/setup/pvt.h5"),
     )
 
-    with bores.StateStream(run, store=store, background_io=True) as stream:
-        last_state = stream.last()
-        last_state.model.save(Path("./benchmarks/runs/spe1/results/model.h5"))
-    return
+    # with bores.StateStream(run, store=store, background_io=True) as stream:
+    #     last_state = stream.last()
+    #     last_state.model.save(Path("./benchmarks/runs/spe1/results/model.h5"))
+
+    states = list(run)
+    return (states,)
 
 
 @app.cell
-def load_states(bores, store):
-    store_stream = bores.StateStream(store=store)
-    states = list(store_stream.replay(steps=None))
-    return (states,)
+def load_states():
+    # store_stream = bores.StateStream(store=store)
+    # states = list(store_stream.replay(steps=None))
+    return
 
 
 @app.cell

@@ -1,21 +1,43 @@
-"""Boundary condition implementations for 2D/3D grids."""
+"""
+Boundary condition implementations for 2D/3D reservoir grids.
 
-import numba
+**Design overview**
 
-import copy
+Boundary conditions in this module follow a *ghost-cell* approach: for every
+boundary face the simulator maintains one layer of ghost (halo) cells whose
+values are set by the boundary condition before each flux computation. The
+approach is industry-standard and avoids any padding / un-padding overhead
+during the solve - grids are padded once at simulation start and stay padded
+throughout.
+
+Every concrete boundary condition is a *callable* that receives a description
+of the boundary cells it must fill and returns a numpy array of ghost values.
+The `BoundaryConditions` container owns one condition per face, assembles the
+full ghost-cell dictionary via `get_boundaries`, and caches static contributions
+so that constant conditions (Neumann, Dirichlet) are computed only once.
+
+**Units**
+
+All flux values returned by FLUX-type boundary conditions are in **ft³/day**.
+Users who work in bbl/day must convert before constructing a boundary condition.
+"""
+
 import enum
 import functools
 import threading
 import typing
-from collections import defaultdict
 
 import attrs
 import numpy as np
 from typing_extensions import ParamSpec, Self
 
+from bores.constants import c
 from bores.errors import DeserializationError, SerializationError, ValidationError
+from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids, RelPermGrids
+from bores.models import FluidProperties, RockProperties
 from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
+from bores.transmissibility import FaceTransmissibilities
 from bores.types import NDimension, NDimensionalGrid
 
 __all__ = [
@@ -23,27 +45,41 @@ __all__ = [
     "BoundaryCondition",
     "BoundaryConditions",
     "BoundaryMetadata",
+    "BoundaryType",
     "CarterTracyAquifer",
-    "ConstantBoundary",
     "DirichletBoundary",
-    "FluxBoundary",
-    "GridBoundaryCondition",
-    "LinearGradientBoundary",
+    "GhostCellIndex",
+    "GhostCellMap",
     "NeumannBoundary",
-    "NoFlowBoundary",
     "ParameterizedBoundaryFunction",
-    "PeriodicBoundary",
     "RobinBoundary",
-    "SpatialBoundary",
-    "TimeDependentBoundary",
-    "VariableBoundary",
     "boundary_function",
+    "get_boundary_function",
+    "list_boundary_functions",
 ]
 
+GhostCellIndex = typing.Tuple[int, int, int]
+"""Padded-grid (i, j, k) index identifying a single ghost cell."""
 
+GhostCellMap = typing.Dict[int, float]
+"""
+Flat-key ghost-cell map used in `get_boundaries`.
+
+Keys are ghost-cell flat indices computed as ``i*ny*nz + j*nz + k`` over
+the *padded* grid shape.  Values are the ghost-cell quantities - either a
+pressure (psi) for PRESSURE-type BCs or a volumetric flux (ft³/day) for
+FLUX-type BCs.
+
+The flat-integer key makes the dict straightforwardly usable from Numba
+jitted functions when annotated as ``numba.typed.Dict(numba.int64, numba.float64)``.
+Regular Python dicts with ``int`` keys and ``float`` values are accepted by
+Numba when the function signature is typed explicitly.
+"""
+
+# Boundary-function registry
 _BOUNDARY_FUNCTIONS: typing.Dict[str, typing.Callable] = {}
-"""Registry of boundary functions."""
 _boundary_function_lock = threading.Lock()
+
 P = ParamSpec("P")
 R = typing.TypeVar("R")
 
@@ -68,46 +104,49 @@ def boundary_function(
     typing.Callable[P, R],
     typing.Callable[[typing.Callable[P, R]], typing.Callable[P, R]],
 ]:
+    """Register a callable as a named boundary function for serialization.
+
+    A boundary function is any callable that computes values (pressure, flux,
+    or a production-index array) to support a boundary condition.  Registering
+    a function allows `BoundaryCondition` subclasses that store it as an
+    attribute to be serialized and deserialized by name.
+
+    Usage::
+
+        @boundary_function
+        def linear_pressure_gradient(x, y):
+            return 2000 - 0.5 * x
+
+        @boundary_function(name="custom_gradient")
+        def my_gradient(x, y):
+            return 2500 + 0.1 * x
+
+    :param func: The function to register.  When the decorator is used
+        without arguments this is supplied automatically by Python.
+    :param name: Optional registration key.  Defaults to ``func.__name__``.
+    :param override: If *True*, an existing registration under the same name
+        is silently replaced.
+    :return: The (unmodified) function, or a decorator when called without
+        a function argument.
+    :raises ValidationError: If the function has no usable name or the name
+        is already taken and *override* is *False*.
     """
-    Register a boundary function for serialization.
 
-    A boundary function is a callable that computes boundary values, usually
-    pressure or flux, based on spatial coordinates and/or time. This is basically any function you pass to
-    a `BoundaryCondition` that computes values based on position, time or any other parameters.
-
-    Usage:
-    ```python
-    @boundary_function
-    def linear_pressure_gradient(x, y):
-        return 2000 - 0.5 * x
-
-    # Or with custom name:
-    @boundary_function(name="custom_gradient")
-    def my_gradient(x, y):
-        return 2500 + 0.1 * x
-    ```
-
-    :param func: The function to register.
-    :param name: Optional custom name for registration. Uses `__name__` if not provided.
-    :param override: If True, allows overriding existing registrations.
-    :return: The registered function or a decorator.
-    """
-
-    def decorator(func: typing.Callable[P, R]) -> typing.Callable[P, R]:
-        key = name or getattr(func, "__name__", None)
+    def decorator(fn: typing.Callable[P, R]) -> typing.Callable[P, R]:
+        key = name or getattr(fn, "__name__", None)
         if not key:
             raise ValidationError(
-                "Boundary function must have a `__name__` attribute or a name must be provided."
+                "Boundary function must have a `__name__` attribute or a name "
+                "must be provided via the `name` argument."
             )
-
         with _boundary_function_lock:
             if not override and key in _BOUNDARY_FUNCTIONS:
                 raise ValidationError(
-                    f"Boundary function '{key}' already registered. "
+                    f"Boundary function '{key}' is already registered. "
                     f"Use `override=True` or choose a different name."
                 )
-            _BOUNDARY_FUNCTIONS[key] = func
-        return func
+            _BOUNDARY_FUNCTIONS[key] = fn
+        return fn
 
     if func is not None:
         return decorator(func)
@@ -115,460 +154,405 @@ def boundary_function(
 
 
 def list_boundary_functions() -> typing.List[str]:
-    """List all registered boundary functions."""
+    """Return the names of all registered boundary functions."""
     with _boundary_function_lock:
         return list(_BOUNDARY_FUNCTIONS.keys())
 
 
 def get_boundary_function(name: str) -> typing.Callable:
-    """
-    Get a registered boundary function by name.
+    """Return a registered boundary function by name.
 
-    :param name: Name of the registered boundary function.
-    :return: The boundary function.
-    :raises ValidationError: If the boundary function is not registered.
+    :param name: Registration key used when the function was decorated.
+    :return: The callable.
+    :raises ValidationError: If *name* is not found in the registry.
     """
     with _boundary_function_lock:
         if name not in _BOUNDARY_FUNCTIONS:
             raise ValidationError(
-                f"Boundary function '{name}' not registered. "
+                f"Boundary function '{name}' is not registered. "
                 f"Use `@boundary_function` to register it. "
                 f"Available: {list(_BOUNDARY_FUNCTIONS.keys())}"
             )
         return _BOUNDARY_FUNCTIONS[name]
 
 
-def serialize_boundary_function(
+def _serialize_boundary_function(
     func: typing.Callable[..., typing.Any], recurse: bool = True
 ) -> typing.Dict[str, typing.Any]:
-    """
-    Serialize a boundary function.
+    """Serialize a boundary function to a JSON-compatible dict.
 
-    Supports:
-    1. Registered functions (by name)
-    2. Parameterized functions (functools.partial)
-    3. Built-in serializable function wrappers
+    Supports registered functions, `functools.partial` wrappers, and
+    `ParameterizedBoundaryFunction` instances.
+
+    :param func: The callable to serialize.
+    :param recurse: Passed through to `ParameterizedBoundaryFunction.dump`.
+    :return: A dict with a ``"type"`` discriminator key.
+    :raises SerializationError: If the function cannot be identified.
     """
-    # Check if it's a registered function
     with _boundary_function_lock:
-        for name, registered_func in _BOUNDARY_FUNCTIONS.items():
-            if func is registered_func:
-                return {"type": "registered", "name": name}
+        for reg_name, registered in _BOUNDARY_FUNCTIONS.items():
+            if func is registered:
+                return {"type": "registered", "name": reg_name}
 
-    # Handle partial functions (parameterized)
     if isinstance(func, functools.partial):
-        base_func_data = serialize_boundary_function(func.func, recurse)
         return {
             "type": "partial",
-            "func": base_func_data,
+            "func": _serialize_boundary_function(func.func, recurse),
             "args": list(func.args),
             "kwargs": dict(func.keywords),
         }
 
-    # Handle built-in serializable wrappers
     if isinstance(func, ParameterizedBoundaryFunction):
-        return {
-            "type": "parameterized",
-            "data": func.dump(recurse),
-        }
+        return {"type": "parameterized", "data": func.dump(recurse)}
 
-    # Cannot serialize, must be registered
     raise SerializationError(
-        f"Cannot serialize boundary function {func}. "
-        f"Please register it with @boundary_function. "
-        f"Available functions: {list(_BOUNDARY_FUNCTIONS.keys())}"
+        f"Cannot serialize boundary function {func!r}. "
+        f"Register it with `@boundary_function` first. "
+        f"Available: {list(_BOUNDARY_FUNCTIONS.keys())}"
     )
 
 
-def deserialize_boundary_function(
+def _deserialize_boundary_function(
     data: typing.Mapping[str, typing.Any],
 ) -> typing.Callable[..., typing.Any]:
-    """Deserialize a boundary function from serialized data."""
+    """Deserialize a boundary function from a dict produced by `_serialize_boundary_function`.
+
+    :param data: Serialized representation.
+    :return: The reconstructed callable.
+    :raises DeserializationError: On unknown or malformed data.
+    """
     func_type = data.get("type")
 
     if func_type == "registered":
         if "name" not in data:
             raise DeserializationError(
-                "Missing 'name' for registered boundary function."
+                "Missing 'name' key for registered boundary function."
             )
         return get_boundary_function(data["name"])
 
-    elif func_type == "partial":
+    if func_type == "partial":
         if "func" not in data:
-            raise DeserializationError("Missing 'func' for partial boundary function.")
+            raise DeserializationError(
+                "Missing 'func' key for partial boundary function."
+            )
+        base = _deserialize_boundary_function(data["func"])
+        return functools.partial(base, *data.get("args", []), **data.get("kwargs", {}))
 
-        base_func = deserialize_boundary_function(data["func"])
-        return functools.partial(
-            base_func,
-            *data.get("args", []),
-            **data.get("kwargs", {}),
-        )
-
-    elif func_type == "parameterized":
+    if func_type == "parameterized":
         if "data" not in data:
             raise DeserializationError(
-                "Missing 'data' for parameterized boundary function."
+                "Missing 'data' key for parameterized boundary function."
             )
         return ParameterizedBoundaryFunction.load(data["data"])
 
-    else:
-        raise DeserializationError(
-            f"Unknown boundary function type: {func_type}. "
-            f"Valid types: 'registered', 'partial', 'parameterized'"
-        )
-
-
-@boundary_function
-@numba.njit(cache=True)
-def parametric_gradient(x, y, slope=0.5, intercept=2000):
-    """Parameterized linear gradient."""
-    return intercept - slope * x
-
-
-@boundary_function
-@numba.njit(cache=True)
-def sinusoidal_pressure(t: float, amplitude=200, period=86400, offset=2000):
-    """Sinusoidal time-dependent pressure (daily cycle)."""
-    return offset + amplitude * np.sin(2 * np.pi * t / period)
-
-
-@boundary_function
-@numba.njit(cache=True)
-def exponential_decay(t: float, initial=2000, time_constant=3600):
-    """Exponential pressure decay."""
-    return initial * np.exp(-t / time_constant)
+    raise DeserializationError(
+        f"Unknown boundary function type: '{func_type}'. "
+        f"Valid types are 'registered', 'partial', 'parameterized'."
+    )
 
 
 class ParameterizedBoundaryFunction(
-    Serializable, fields={"func_name": str, "params": typing.Dict[str, typing.Any]}
+    Serializable,
+    fields={"func_name": str, "params": typing.Dict[str, typing.Any]},
 ):
-    """
-    Wrapper for parameterized boundary functions.
+    """A fully serializable alternative to `functools.partial` for boundary functions.
 
-    Alternative to `functools.partial` that's fully serializable.
+    Stores a reference to a registered boundary function by name together with
+    a fixed parameter dict.  On call, the stored parameters are merged with any
+    additional keyword arguments supplied by the caller.
 
-    Usage:
-    ```python
-    # Define a base function
-    @boundary_function
-    def parametric_gradient(x, y, slope, intercept):
-        return intercept - slope * x
+    Usage::
 
-    # Create parameterized version
-    custom_gradient = ParameterizedBoundaryFunction(
-        func_name="parametric_gradient",
-        params={"slope": 0.8, "intercept": 2500}
-    )
+        @boundary_function
+        def linear_pi(metadata, slope=1.0, intercept=0.0):
+            # returns a production-index array shaped like the boundary slice
+            ...
 
-    # Use it
-    result = custom_gradient(x_array, y_array)
-    ```
+        alpha = ParameterizedBoundaryFunction(
+            func_name="linear_pi",
+            params={"slope": 2.5, "intercept": 50.0},
+        )
+
+        robin = RobinBoundary(pressure=2000.0, alpha=alpha)
+
+    :param func_name: Name under which the base function was registered with
+        `@boundary_function`.
+    :param params: Fixed keyword parameters merged into every call.
     """
 
     def __init__(
         self,
         func_name: str,
         params: typing.Dict[str, typing.Any],
-    ):
-        """
-        Initialize parameterized function.
-
-        :param func_name: Name of the registered base boundary function
-        :param params: Dictionary of parameter names to values
-        """
+    ) -> None:
         self.func_name = func_name
         self.params = params
         self._func = get_boundary_function(func_name)
 
     def __call__(self, *args: typing.Any, **kwargs: typing.Any) -> np.ndarray:
-        """Call the function with stored parameters."""
-        merged_kwargs = {**self.params, **kwargs}
-        return self._func(*args, **merged_kwargs)
+        """Invoke the underlying function with stored parameters.
+
+        :param args: Positional arguments forwarded to the base function.
+        :param kwargs: Keyword arguments forwarded to the base function; these
+            take precedence over the stored *params*.
+        :return: Whatever the base function returns (typically an `np.ndarray`).
+        """
+        return self._func(*args, **{**self.params, **kwargs})
+
+    def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
+        return {"func_name": self.func_name, "params": self.params}
+
+    @classmethod
+    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
+        return cls(func_name=data["func_name"], params=dict(data["params"]))
+
+
+# Built-in registered alpha functions for RobinBoundary
+
+
+@boundary_function(name="constant_productivity_index")
+def _constant_productivity_index(
+    metadata: "BoundaryMetadata",
+    boundary_slice: typing.Tuple[slice, ...],
+    direction: "Boundary",
+    value: float = 1.0,
+) -> np.ndarray:
+    """Return a uniform production-index array equal to *value* over the boundary slice.
+
+    This is the simplest alpha function for `RobinBoundary`: every ghost cell
+    has the same productivity index.  Use `ParameterizedBoundaryFunction` to
+    set the actual numeric value::
+
+        alpha = ParameterizedBoundaryFunction(
+            func_name="constant_productivity_index",
+            params={"value": 25.0},
+        )
+
+    :param metadata: Boundary metadata (unused here, kept for API consistency).
+    :param boundary_slice: Slice tuple identifying the boundary cells.
+    :param direction: Face direction (unused here).
+    :param value: Scalar productivity-index value (ft³/day/psi).
+    :return: Array of shape matching ``metadata.pressure_grid[boundary_slice]``
+        filled with *value*.
+    """
+    assert metadata.fluid_properties is not None
+    shape = metadata.fluid_properties.pressure_grid[boundary_slice].shape
+    return np.full(shape, value, dtype=np.float64)
+
+
+@boundary_function(name="transmissibility_weighted_pi")
+def _transmissibility_weighted_pi(
+    metadata: "BoundaryMetadata",
+    boundary_slice: typing.Tuple[slice, ...],
+    direction: "Boundary",
+    mobility_scale: float = 1.0,
+) -> np.ndarray:
+    """Return a production-index array derived from face transmissibilities and total mobility.
+
+    The productivity index at each boundary cell is::
+
+        PI[i,j,k] = T_face[i,j,k] * lambda_total[i,j,k] * mobility_scale
+
+    where *T_face* is the geometric transmissibility of the face adjacent to
+    the ghost cell and *lambda_total* is the sum of the three-phase relative
+    mobilities at that cell.
+
+    :param metadata: Boundary metadata.  Must carry `face_transmissibilities`
+        and `relative_mobility_grids`.
+    :param boundary_slice: Slice tuple identifying the boundary cells.
+    :param direction: Face direction; determines which transmissibility array
+        (x, y, or z) is sampled.
+    :param mobility_scale: Optional multiplicative scale applied to the result.
+    :return: Array shaped like the boundary slice.
+    :raises ValidationError: If required metadata fields are absent.
+    """
+    if metadata.face_transmissibilities is None:
+        raise ValidationError(
+            "'transmissibility_weighted_pi' requires `face_transmissibilities` "
+            "in BoundaryMetadata."
+        )
+    if metadata.relative_mobility_grids is None:
+        raise ValidationError(
+            "'transmissibility_weighted_pi' requires `relative_mobility_grids` "
+            "in BoundaryMetadata."
+        )
+
+    ft = metadata.face_transmissibilities
+    if direction in (Boundary.LEFT, Boundary.RIGHT):
+        T_face = ft.x[boundary_slice]
+    elif direction in (Boundary.FRONT, Boundary.BACK):
+        T_face = ft.y[boundary_slice]
+    else:
+        T_face = ft.z[boundary_slice]
+
+    lw, lo, lg = metadata.relative_mobility_grids
+    lambda_total = lw[boundary_slice] + lo[boundary_slice] + lg[boundary_slice]
+    return T_face * lambda_total * mobility_scale
 
 
 class Boundary(enum.Enum):
-    """Enumeration of possible boundary directions."""
+    """Enumeration of possible boundary face directions."""
 
     LEFT = "left"
-    """The negative X direction (left/west face)."""
+    """The negative-x direction (west face)."""
     RIGHT = "right"
-    """The positive X direction (right/east face)."""
+    """The positive-x direction (east face)."""
     FRONT = "front"
-    """The negative Y direction (bottom/south face)."""
+    """The negative-y direction (south face)."""
     BACK = "back"
-    """The positive Y direction (top/north face)."""
+    """The positive-y direction (north face)."""
     BOTTOM = "bottom"
-    """The negative Z direction (bottom face)."""
+    """The negative-z direction (shallowest face, k=0 convention)."""
     TOP = "top"
-    """The positive Z direction (top face)."""
+    """The positive-z direction (deepest face, k=-1 convention)."""
 
 
-def get_neighbor_indices(
-    boundary_indices: typing.Tuple[slice, ...], direction: Boundary
-) -> typing.Tuple[slice, ...]:
+class BoundaryType(enum.Enum):
     """
-    Get the indices of neighboring cells for a given boundary direction.
+    Discriminator that controls how a ghost-cell value is applied by the solver.
 
-    This utility function converts boundary ghost cell indices to their
-    corresponding neighboring interior cell indices.
+    - **FLUX** - the ghost-cell value is a volumetric flow rate (ft³/day) into
+    the boundary face. The solver uses it as a Neumann source term.
 
-    :param boundary_indices: Slice indices defining the boundary region
-    :param direction: The boundary direction (left, right, etc.)
-    :return: Tuple of slice indices for the neighboring interior cells
-    :raises ValidationError: If Z-direction is used with 2D grid indices
-
-    Example usage:
-    ```python
-    from bores.boundary_conditions import get_neighbor_indices, Boundary
-
-    # For left boundary (x=0 ghost cells)
-    boundary_slice = (slice(0, 1), slice(None))
-    neighbor_slice = get_neighbor_indices(boundary_slice, Boundary.LEFT)
-    # Returns: (slice(1, 2), slice(None))  # x=1 interior cells
-
-    # For right boundary (x=-1 ghost cells)
-    boundary_slice = (slice(-1, None), slice(None))
-    neighbor_slice = get_neighbor_indices(boundary_slice, Boundary.RIGHT)
-    # Returns: (slice(-2, -1), slice(None))  # x=-2 interior cells
-    ```
+    - **PRESSURE** - the ghost-cell value is a pressure (psi).  The solver
+    treats it as a Dirichlet constraint and computes the face flux from the
+    pressure difference and transmissibility.
     """
-    neighbor_indices = list(boundary_indices)
-    ndim = len(boundary_indices)
 
-    # Validate Z-direction usage with grid dimensionality
-    if direction in [Boundary.BOTTOM, Boundary.TOP] and ndim < 3:
-        raise ValidationError(
-            f"Cannot use {direction.name} boundary direction with {ndim}D grid. "
-            "Z-direction boundaries require 3D grids."
-        )
-
-    if direction == Boundary.LEFT:
-        # Left boundary: neighbor is at x=1
-        neighbor_indices[0] = slice(1, 2)
-    elif direction == Boundary.RIGHT:
-        # Right boundary: neighbor is at x=-2
-        neighbor_indices[0] = slice(-2, -1)
-    elif direction == Boundary.FRONT:
-        # Front boundary: neighbor is at y=1
-        neighbor_indices[1] = slice(1, 2)
-    elif direction == Boundary.BACK:
-        # Back boundary: neighbor is at y=-2
-        neighbor_indices[1] = slice(-2, -1)
-    elif direction == Boundary.BOTTOM:
-        # Bottom boundary: neighbor is at z=1
-        neighbor_indices[2] = slice(1, 2)
-    elif direction == Boundary.TOP:
-        # Top boundary: neighbor is at z=-2
-        neighbor_indices[2] = slice(-2, -1)
-
-    return tuple(neighbor_indices)
+    FLUX = "flux"
+    PRESSURE = "pressure"
 
 
 @attrs.frozen
 class BoundaryMetadata:
     """
-    Optional metadata for boundary condition evaluation.
+    Metadata bundle supplied to every boundary condition call.
 
-    Provides rich context to boundary conditions, enabling spatial awareness,
-    time dependence, and physics-based calculations.
+    `BoundaryMetadata` is a lightweight wrapper - it holds *references* to
+    the simulation arrays that already exist in memory; no data is copied.
+    It is rebuilt once per time step (or once per BC evaluation pass) so its
+    construction cost is negligible.
 
-    Example usage:
-    ```python
-    import numpy as np
-    from bores.boundary_conditions import BoundaryMetadata, SpatialBoundary
+    Every field is *Optional* so that boundary conditions that do not need
+    the full context can be constructed cheaply.  A boundary condition that
+    requires a specific field should validate its presence at call time and
+    raise `ValidationError` with a clear message.
 
-    # Option 1: Auto-generate 2D coordinates from cell dimensions and grid shape
-    metadata_2d = BoundaryMetadata(
-        cell_dimension=(20.0, 20.0),         # 20x20 ft cells
-        grid_shape=(50, 25),                 # 50x25 grid (without ghost cells)
-        thickness_grid=np.full((50, 25), 10.0),  # 10 ft thickness (no ghost cells)
-        time=3600.0,                         # 1 hour simulation time
-        property_name="pressure"             # Property being updated
-    )
-    # Coordinates auto-generated: x=[-10,10,30,...,990], y=[-10,10,30,...,490]
-
-    # Option 2: Auto-generate 3D coordinates with thickness grid
-    thickness_3d = np.random.uniform(5.0, 15.0, (50, 25, 10))  # Variable thickness (no ghost cells)
-    metadata_3d = BoundaryMetadata(
-        cell_dimension=(20.0, 20.0),         # 20x20 ft cells (dx, dy)
-        grid_shape=(50, 25, 10),             # 50x25x10 grid (without ghost cells)
-        thickness_grid=thickness_3d,         # Variable thickness for z-coordinates
-        time=3600.0,
-        property_name="pressure"
-    )
-    # Z-coordinates generated from cumulative thickness values
-
-    # Option 3: Provide explicit coordinates
-    x_coords = np.linspace(0, 1000, 51)  # 0-1000 ft
-    y_coords = np.linspace(0, 500, 26)   # 0-500 ft
-    xx, yy = np.meshgrid(x_coords, y_coords, indexing='ij')
-    coordinates = np.stack([xx, yy], axis=-1)
-
-    metadata = BoundaryMetadata(
-        cell_dimension=(20.0, 20.0),
-        coordinates=coordinates,              # Explicit coordinates override auto-generation
-        thickness_grid=np.full((50, 25), 10.0),  # No ghost cells
-        time=3600.0,
-        property_name="pressure",
-        grid_shape=(50, 25)
-    )
-
-    # Use with spatial boundary
-    spatial_bc = SpatialBoundary(
-        func=lambda x, y: 2000 + 0.1 * x - 0.05 * y
-    )
-    grid = np.zeros((52, 27))  # Grid with ghost cells
-    boundary_indices = (slice(0, 1), slice(None))  # Left boundary
-
-    spatial_bc.apply(
-        grid=grid,
-        boundary_indices=boundary_indices,
-        direction=Boundary.LEFT,
-        metadata=metadata_2d
-    )
-    ```
+    :param fluid_properties: Full fluid property object for the padded grid,
+        carrying pressure, saturation, viscosity, density and PVT arrays.
+    :param rock_properties: Rock property object for the padded grid, carrying
+        porosity, permeability, compressibility and saturation endpoint grids.
+    :param relative_permeability_grids: Three-phase relative permeability
+        grids (krw, kro, krg) on the padded grid.
+    :param relative_mobility_grids: Three-phase relative mobility grids
+        (lambda_w, lambda_o, lambda_g) on the padded grid.
+    :param capillary_pressure_grids: Oil-water and gas-oil capillary pressure
+        grids on the padded grid.
+    :param face_transmissibilities: Precomputed geometric face transmissibilities
+        (x, y, z) for the padded grid in mD·ft.
+    :param time: Current simulation time in seconds.
+    :param grid_shape: Original (un-padded) grid shape as ``(nx, ny, nz)``.
+    :param cell_dimension: Physical cell dimensions ``(dx, dy)`` in feet.
+    :param thickness_grid: Un-padded cell thickness array (ft).
     """
 
-    cell_dimension: typing.Optional[typing.Tuple[float, float]] = None
-    """Physical dimensions of grid cells (dx, dy) in feet (or meters)."""
-    thickness_grid: typing.Optional[NDimensionalGrid] = None
-    """Grid of cell thickness values (same shape as original grid, No ghost cells factored in)."""
-    coordinates: typing.Optional[NDimensionalGrid] = None
-    """Physical coordinates of grid points. Auto-generated if not provided."""
+    fluid_properties: typing.Optional[FluidProperties] = None
+    """Full `FluidProperties` object for the padded grid."""
+
+    rock_properties: typing.Optional[RockProperties] = None
+    """Full `RockProperties` object for the padded grid."""
+
+    relative_permeability_grids: typing.Optional[RelPermGrids] = None
+    """Three-phase relative permeability grids (krw, kro, krg)."""
+
+    relative_mobility_grids: typing.Optional[RelativeMobilityGrids] = None
+    """Three-phase relative mobility grids (lambda_w, lambda_o, lambda_g)."""
+
+    capillary_pressure_grids: typing.Optional[CapillaryPressureGrids] = None
+    """Oil-water and gas-oil capillary pressure grids."""
+
+    face_transmissibilities: typing.Optional[FaceTransmissibilities] = None
+    """Precomputed geometric face transmissibilities (x, y, z)."""
+
     time: typing.Optional[float] = None
-    """Current simulation time."""
-    property_name: typing.Optional[str] = None
-    """Name of the property being updated."""
+    """Current simulation time (seconds)."""
+
     grid_shape: typing.Optional[typing.Tuple[int, ...]] = None
-    """Original grid shape (without ghost cells)."""
+    """Original un-padded grid shape ``(nx, ny, nz)``."""
 
-    def __attrs_post_init__(self) -> None:
-        """Auto-generate coordinates if not provided but `cell_dimension` and `grid_shape` are available."""
-        if (
-            self.coordinates is None
-            and self.cell_dimension is not None
-            and self.grid_shape is not None
-        ):
-            # Generate coordinate arrays
-            dx, dy = self.cell_dimension
+    cell_dimension: typing.Optional[typing.Tuple[float, float]] = None
+    """Physical cell dimensions ``(dx, dy)`` in feet."""
 
-            if len(self.grid_shape) == 2:
-                # 2D grid
-                nx, ny = self.grid_shape
-
-                # Create coordinate arrays (including ghost cells)
-                # Using linspace for predictable array lengths (avoids floating-point issues with arange)
-                # nx+2 points: from -dx/2 to (nx+0.5)*dx with ghost cells
-                x_coords = np.linspace(-dx / 2, (nx + 0.5) * dx, nx + 2)
-                y_coords = np.linspace(-dy / 2, (ny + 0.5) * dy, ny + 2)
-
-                # Create meshgrid and stack
-                xx, yy = np.meshgrid(x_coords, y_coords, indexing="ij")
-                coordinates = np.stack([xx, yy], axis=-1)
-
-            elif len(self.grid_shape) == 3:
-                # 3D grids need thickness information for z-coordinates
-                nx, ny, nz = self.grid_shape
-
-                # Create x and y coordinate arrays using linspace for consistent lengths
-                x_coords = np.linspace(-dx / 2, (nx + 0.5) * dx, nx + 2)
-                y_coords = np.linspace(-dy / 2, (ny + 0.5) * dy, ny + 2)
-
-                # For z-coordinates, use thickness_grid if available, otherwise assume uniform thickness
-                if self.thickness_grid is not None:
-                    # Use cumulative thickness to generate z-coordinates
-                    # thickness_grid has no ghost cells, same shape as grid_shape
-                    if self.thickness_grid.ndim == 3:
-                        # Extract thickness values for z-coordinate generation
-                        # Use first x,y location as representative (assuming uniform layers)
-                        layer_thickness = (
-                            self.thickness_grid[0, 0, :]
-                            if self.thickness_grid.shape[2] == nz
-                            else None
-                        )
-
-                        if layer_thickness is not None:
-                            # Generate z-coordinates from cumulative thickness
-                            # Convention: k=0 is TOP (shallowest), k increases downward (deeper)
-                            # z-coordinate represents depth, increasing downward
-                            z_coords = np.zeros(nz + 2)  # Include ghost cells
-
-                            # Top ghost cell (above k=0, negative depth)
-                            z_coords[0] = -layer_thickness[0] / 2
-
-                            # Interior cells: cumulative depth centers
-                            # k=0 (top/shallowest) is at z_coords[1]
-                            cumulative_depth = 0.0
-                            for k in range(nz):
-                                if k == 0:
-                                    z_coords[k + 1] = layer_thickness[k] / 2
-                                else:
-                                    cumulative_depth += layer_thickness[k - 1]
-                                    z_coords[k + 1] = (
-                                        cumulative_depth + layer_thickness[k] / 2
-                                    )
-
-                            # Bottom ghost cell (below k=-1, deepest)
-                            cumulative_depth += layer_thickness[-1]
-                            z_coords[-1] = cumulative_depth + layer_thickness[-1] / 2
-                        else:
-                            # Fallback: assume uniform thickness equal to dx
-                            dz = dx  # Default thickness
-                            z_coords = np.linspace(-dz / 2, (nz + 0.5) * dz, nz + 2)  # type: ignore[assignment]
-                    else:
-                        # Fallback: assume uniform thickness equal to dx
-                        dz = dx  # Default thickness
-                        z_coords = np.linspace(-dz / 2, (nz + 0.5) * dz, nz + 2)  # type: ignore[assignment]
-                else:
-                    # Fallback: assume uniform thickness equal to dx
-                    dz = dx  # Default thickness
-                    z_coords = np.linspace(-dz / 2, (nz + 0.5) * dz, nz + 2)  # type: ignore[assignment]
-
-                # Create meshgrid and stack
-                xx, yy, zz = np.meshgrid(x_coords, y_coords, z_coords, indexing="ij")
-                coordinates = np.stack([xx, yy, zz], axis=-1)
-
-            else:
-                raise ValidationError(
-                    f"Unsupported grid dimensionality: {len(self.grid_shape)}. Only 2D and 3D grids are supported."
-                )
-
-            object.__setattr__(self, "coordinates", coordinates)
+    thickness_grid: typing.Optional[NDimensionalGrid] = None
+    """Un-padded cell thickness array (ft)."""
 
 
 class BoundaryCondition(
     StoreSerializable,
     typing.Generic[NDimension],
-    # Register serialization handlers for boundary functions
-    serializers={"func": serialize_boundary_function},
-    deserializers={"func": deserialize_boundary_function},
+    serializers={"func": _serialize_boundary_function},
+    deserializers={"func": _deserialize_boundary_function},
 ):
     """
-    Base class for boundary conditions on N-dimensional grids.
+    Abstract base for all boundary conditions.
 
-    Each boundary condition type must implement an 'apply' method that receives
-    the full grid, boundary indices, direction, and optional metadata.
+    A boundary condition is a *callable* object. Concrete subclasses must
+    implement `__call__` to return ghost-cell values and `get_type` to declare
+    whether those values are fluxes or pressures.
+
+    Serialization is inherited from `StoreSerializable`; each subclass that
+    wants to participate in the registry must be decorated with
+    `@boundary_condition` and implement `__dump__` / `__load__`.
     """
 
     __abstract_serializable__ = True
 
-    def apply(
+    def __call__(
         self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
+        boundary_slice: typing.Tuple[slice, ...],
         direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
+        metadata: BoundaryMetadata,
+    ) -> np.ndarray:
         """
-        Apply the boundary condition to the specified grid region.
+        Compute and return ghost-cell values for the specified boundary face.
 
-        :param grid: The full grid (including ghost cells)
-        :param boundary_indices: Slice indices defining the boundary region
-        :param direction: The boundary direction (left, right, etc.)
-        :param metadata: Optional metadata for advanced boundary conditions
+        The returned array has the same shape as
+        ``metadata.fluid_properties.pressure_grid[boundary_slice]`` (or any
+        other grid on the padded domain sliced with *boundary_slice*).
+
+        :param boundary_slice: Tuple of `slice` objects that, when applied to a
+            padded grid, selects exactly the ghost-cell layer for this face.
+            For example, the left boundary of a 3-D padded grid is
+            ``(slice(0, 1), slice(None), slice(None))``.
+        :param direction: Which face of the domain this call covers.
+        :param metadata: Simulation context bundle.
+        :return: Array of ghost-cell values shaped like the boundary slice.
         """
         raise NotImplementedError
+
+    def get_type(self) -> BoundaryType:
+        """
+        Return the `BoundaryType` that describes how the returned values are used.
+
+        :return: `BoundaryType.FLUX` or `BoundaryType.PRESSURE`.
+        """
+        raise NotImplementedError
+
+    def is_static(self) -> bool:
+        """
+        Return *True* if this condition produces the same values every time step.
+
+        `BoundaryConditions.get_boundaries` uses this hint to avoid redundant
+        recomputation: faces whose condition returns *True* here are evaluated
+        once and cached; all others are re-evaluated on every call.
+
+        The default implementation returns *False* (safe but conservative).
+        Subclasses that know they are time-independent should override this.
+
+        :return: *True* if the ghost-cell values are independent of time and
+            the current field state.
+        """
+        return False
 
 
 _BOUNDARY_CONDITIONS: typing.Dict[str, typing.Type[BoundaryCondition]] = {}
@@ -581,1287 +565,453 @@ boundary_condition = make_serializable_type_registrar(
     auto_register_serializer=True,
     auto_register_deserializer=True,
 )
-"""Decorator to register a boundary condition type for serialization."""
+"""Decorator that registers a `BoundaryCondition` subclass for serialization."""
+
+
+def _neighbour_slice(
+    boundary_slice: typing.Tuple[slice, ...],
+    direction: Boundary,
+) -> typing.Tuple[slice, ...]:
+    """
+    Return the slice of interior cells adjacent to a ghost-cell layer.
+
+    :param boundary_slice: Slice that selects the ghost-cell layer.
+    :param direction: Face direction.
+    :return: Slice that selects the immediately adjacent interior cells.
+    :raises ValidationError: If a z-direction is requested on a 2-D grid.
+    """
+    nbr = list(boundary_slice)
+    ndim = len(boundary_slice)
+
+    if direction in (Boundary.BOTTOM, Boundary.TOP) and ndim < 3:
+        raise ValidationError(
+            f"Cannot use {direction.name} boundary on a {ndim}D grid. "
+            "Z-direction boundaries require 3-D grids."
+        )
+
+    if direction == Boundary.LEFT:
+        nbr[0] = slice(1, 2)
+    elif direction == Boundary.RIGHT:
+        nbr[0] = slice(-2, -1)
+    elif direction == Boundary.FRONT:
+        nbr[1] = slice(1, 2)
+    elif direction == Boundary.BACK:
+        nbr[1] = slice(-2, -1)
+    elif direction == Boundary.BOTTOM:
+        nbr[2] = slice(1, 2)
+    elif direction == Boundary.TOP:
+        nbr[2] = slice(-2, -1)
+
+    return tuple(nbr)
 
 
 @boundary_condition
-class NoFlowBoundary(BoundaryCondition[NDimension]):
+@attrs.frozen
+class NeumannBoundary(BoundaryCondition[NDimension]):
     """
-    Implements a no-flow boundary condition.
+    Constant-flux (Neumann) boundary condition.
 
-    No-flow boundaries ensure that the gradient normal to the boundary is zero,
-    effectively creating a sealed boundary where no flux occurs.
+    Returns a uniform array equal to `flux` (ft³/day) over the ghost-cell
+    layer. The default flux is **0 ft³/day**, which is equivalent to a
+    no-flow (sealed) boundary.
 
-    Example usage:
+    A positive value represents flow *into* the reservoir; a negative value
+    represents flow *out of* the reservoir. Users who specify rates in
+    bbl/day must convert to ft³/day (1 bbl = 5.614583 ft³) before
+    constructing this object (or use `c.BARRELS_TO_CUBIC_FEET` multiplier).
+
+    :param flux: Volumetric flow rate (ft³/day) applied uniformly across
+        the boundary face.  Default is *0.0* (no-flow).
+
+    Example:
     ```python
-    import numpy as np
-    from bores.boundary_conditions import NoFlowBoundary, GridBoundaryCondition, get_neighbor_indices
+    # No-flow (sealed) boundary - default
+    sealed = NeumannBoundary()
 
-    # Create a sealed reservoir boundary
-    sealed_boundary = NoFlowBoundary()
+    # Water injection at 500 ft³/day
+    injector = NeumannBoundary(flux=500.0)
 
-    # Use in a grid boundary condition for pressure
-    pressure_boundary = GridBoundaryCondition(
-        left=NoFlowBoundary(),  # Left side sealed
-        right=NoFlowBoundary(),   # Right side sealed
-        front=NoFlowBoundary(),  # Front sealed
-        back=NoFlowBoundary(),   # Back sealed
-    )
-
-    # Apply to a 2D pressure grid with ghost cells
-    pressure_grid = np.full((52, 52), 1500.0)  # 50x50 + 2 ghost cells
-    pressure_boundary.apply(pressure_grid)
-
-    # Result: Ghost cells copy values from neighboring interior cells
-    # This is implemented using the get_neighbor_indices() utility function
-    print(pressure_grid[0, :])   # Left boundary = pressure_grid[1, :]
-    print(pressure_grid[-1, :])  # Right boundary = pressure_grid[-2, :]
+    # Production at 200 bbl/day converted to ft³/day
+    producer = NeumannBoundary(flux=-200.0 * 5.614583)
     ```
     """
 
-    __type__ = "no_flow_boundary"
-    __abstract_serializable__ = True
+    __type__ = "neumann_boundary"
 
-    def apply(
+    flux: float = 0.0
+    """Volumetric flow rate (ft³/day). Positive = into reservoir."""
+
+    def __call__(
         self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
+        boundary_slice: typing.Tuple[slice, ...],
         direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
-        """Apply no-flow boundary by copying values from neighboring cells."""
-        neighbor_indices = get_neighbor_indices(boundary_indices, direction)
-        grid[boundary_indices] = grid[neighbor_indices]
+        metadata: BoundaryMetadata,
+    ) -> np.ndarray:
+        """
+        Return a uniform array filled with `flux`.
+
+        :param boundary_slice: Ghost-cell layer slice.
+        :param direction: Face direction (unused; flux is spatially uniform).
+        :param metadata: Simulation context.  Must carry `fluid_properties` so
+            that the returned array shape can be determined.
+        :return: Array shaped like the boundary slice, every element equal to
+            `self.flux`.
+        :raises ValidationError: If `metadata.fluid_properties` is *None*.
+        """
+        if metadata.fluid_properties is None:
+            raise ValidationError(
+                f"{self.__class__.__name__} requires `metadata.fluid_properties` to determine "
+                "the boundary slice shape."
+            )
+        shape = metadata.fluid_properties.pressure_grid[boundary_slice].shape
+        return np.full(shape, self.flux, dtype=np.float64)
+
+    def get_type(self) -> BoundaryType:
+        """
+        Return `BoundaryType.FLUX`.
+
+        :return: `BoundaryType.FLUX`
+        """
+        return BoundaryType.FLUX
+
+    def is_static(self) -> bool:
+        """
+        Return *True*; a constant flux never changes between time steps.
+
+        :return: *True*
+        """
+        return True
 
     def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
-        return {}
+        return {"flux": self.flux}
 
     @classmethod
     def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        return cls()
+        return cls(flux=float(data.get("flux", 0.0)))
 
 
 @boundary_condition
 @attrs.frozen
-class ConstantBoundary(BoundaryCondition[NDimension]):
+class DirichletBoundary(BoundaryCondition[NDimension]):
     """
-    Implements a constant boundary condition (Dirichlet).
+    Constant-pressure (Dirichlet) boundary condition.
 
-    Sets the boundary to a fixed constant value, useful for modeling
-    fixed pressure inlets, constant temperature walls, etc.
+    Returns a uniform array equal to `pressure` (psi) over the ghost-cell
+    layer.  The solver uses this value directly as the ghost-cell pressure,
+    driving flow across the face according to the local transmissibility.
 
-    Example usage:
+    :param pressure: Prescribed boundary pressure (psi).
+
+    Example:
+
     ```python
-    import numpy as np
-    from bores.boundary_conditions import ConstantBoundary, GridBoundaryCondition
+    # Fixed pressure inlet at 3 000 psi
+    inlet = DirichletBoundary(pressure=3000.0)
 
-    # Create constant pressure inlet at 2000 psi
-    pressure_inlet = ConstantBoundary(constant=2000.0)
-
-    # Create constant temperature boundary at 150°F
-    temperature_boundary = ConstantBoundary(constant=150.0)
-
-    # Use in reservoir simulation (pressure property only)
-    pressure_boundary = GridBoundaryCondition(
-        left=ConstantBoundary(constant=2500.0),  # High pressure injection
-        right=ConstantBoundary(constant=1000.0),   # Low pressure production
-        front=NoFlowBoundary(),                   # Sealed sides
-        back=NoFlowBoundary(),
-    )
-
-    pressure_grid = np.full((52, 52), 1500.0)
-    pressure_boundary.apply(pressure_grid)
-
-    # Result: Boundary cells set to constant values
-    assert np.all(pressure_grid[0, :] == 2500.0)   # Left = 2500 psi
-    assert np.all(pressure_grid[-1, :] == 1000.0)  # Right = 1000 psi
+    # Fixed pressure outlet at 1 200 psi
+    outlet = DirichletBoundary(pressure=1200.0)
     ```
     """
 
-    __type__ = "constant_boundary"
+    __type__ = "dirichlet_boundary"
 
-    constant: typing.Any
-    """The constant value to set at the boundary."""
+    pressure: float
+    """Boundary pressure (psi)."""
 
-    def apply(
+    def __call__(
         self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
+        boundary_slice: typing.Tuple[slice, ...],
         direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
-        """Apply constant boundary condition, preserving grid dtype."""
-        # Preserve the grid's dtype when setting constant value
-        grid[boundary_indices] = grid.dtype.type(self.constant)
-
-
-@boundary_condition
-@attrs.frozen
-class VariableBoundary(BoundaryCondition[NDimension]):
-    """
-    Implements a variable boundary condition using a callable function.
-
-    Allows for complex boundary conditions that depend on the grid state,
-    location, direction, and metadata.
-
-    Example usage:
-    ```python
-    import numpy as np
-    from bores.boundary_conditions import VariableBoundary, Boundary, get_neighbor_indices, boundary_function, GridBoundaryCondition
-
-    @boundary_function
-    def pressure_gradient_func(grid, boundary_indices, direction, metadata):
-        # Example: Pressure increases with depth
-        if direction == Boundary.BACK:  # Top boundary
-            return np.full(grid[boundary_indices].shape, 1000.0)  # Low pressure
-        elif direction == Boundary.FRONT:  # Bottom boundary
-            return np.full(grid[boundary_indices].shape, 3000.0)  # High pressure
-
-        # For sides, implement no-flow (Neumann) by copying neighbor values
-        # Copy from neighbors for other boundaries
-        neighbor_indices = get_neighbor_indices(boundary_indices, direction)
-        return grid[neighbor_indices]
-
-    # Create variable boundary
-    var_boundary = VariableBoundary(func=pressure_gradient_func)
-
-    # Use in simulation (pressure property)
-    pressure_boundary = GridBoundaryCondition(
-        left=var_boundary,
-        right=var_boundary,
-        front=var_boundary,
-        back=var_boundary,
-    )
-
-    pressure_grid = np.full((52, 52), 2000.0)
-    pressure_boundary.apply(pressure_grid)
-
-    # Result: Top = 1000 psi, Bottom = 3000 psi, sides copy neighbors (no-flow)
-    ```
-    """
-
-    __type__ = "variable_boundary"
-
-    func: typing.Callable[
-        [
-            NDimensionalGrid[NDimension],
-            typing.Tuple[slice, ...],
-            Boundary,
-            typing.Optional[BoundaryMetadata],
-        ],
-        NDimensionalGrid[NDimension],
-    ]
-    """Function to compute boundary values based on the grid, indices, direction, and metadata."""
-
-    def __attrs_post_init__(self) -> None:
-        if not callable(self.func):
-            raise ValidationError("func must be a callable function.")
-
-    def apply(
-        self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
-        direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
-        """Apply variable boundary condition using the provided function."""
-        result = self.func(grid, boundary_indices, direction, metadata)
-        # Preserve the grid's dtype
-        grid[boundary_indices] = np.asarray(result, dtype=grid.dtype)
-
-
-DirichletBoundary = ConstantBoundary
-"""Alias for `ConstantBoundary` representing Dirichlet boundary conditions."""
-
-
-@boundary_condition
-@attrs.frozen
-class SpatialBoundary(BoundaryCondition[NDimension]):
-    """
-    Implements a spatial boundary condition using coordinate-based functions.
-
-    Perfect for creating realistic geological boundaries like pressure gradients,
-    temperature profiles, or depth-dependent properties.
-
-    Example usage:
-    ```python
-    import numpy as np
-    from bores.boundary_conditions import SpatialBoundary, BoundaryMetadata, GridBoundaryCondition, boundary_function
-
-    # Create coordinate grid (1000 ft x 500 ft reservoir)
-    x_coords = np.linspace(0, 1000, 51)  # 0 to 1000 ft
-    y_coords = np.linspace(0, 500, 26)   # 0 to 500 ft
-    xx, yy = np.meshgrid(x_coords, y_coords, indexing='ij')
-    coordinates = np.stack([xx, yy], axis=-1)
-
-    metadata = BoundaryMetadata(coordinates=coordinates)
-
-    # Example 1: Linear pressure drop with distance
-    linear_gradient = boundary_function(lambda x, y: 2000 - 0.5 * x, name="linear_pressure_gradient")
-    pressure_gradient = SpatialBoundary(
-        func=linear_gradient  # 2000 psi at x=0, drops to 1500 at x=1000
-    )
-
-    # Example 2: Pressure increasing with depth
-    depth_pressure_func = boundary_function(lambda x, y: 2000 + 0.03 * y, name="depth_pressure_func")
-    depth_pressure = SpatialBoundary(
-        func=depth_pressure_func  # 2000 psi at y=0, 2015 psi at y=500
-    )
-
-    # Example 3: Radial pressure distribution from center
-    radial_pressure_func = boundary_function(lambda x, y: 2000 + 10 * np.sqrt((x-500)**2 + (y-250)**2), name="radial_pressure_distribution")
-    radial_pressure = SpatialBoundary(
-        func=radial_pressure_func  # Increases with distance from center (500,250)
-    )
-
-    # Apply to boundaries (pressure property only)
-    pressure_boundary = GridBoundaryCondition(
-        left=pressure_gradient,  # West boundary with linear gradient
-        front=depth_pressure,     # South boundary with depth-based pressure
-        right=radial_pressure,     # East boundary with radial pattern
-    )
-
-    pressure_grid = np.full((53, 28), 1800.0)  # Grid with ghost cells
-    pressure_boundary.apply(pressure_grid, metadata=metadata)
-
-    # Result: Boundaries follow spatial functions based on coordinates
-    ```
-    """
-
-    __type__ = "spatial_boundary"
-
-    func: typing.Callable[..., np.ndarray]
-    """Function that takes coordinate arrays and returns boundary values."""
-
-    def apply(
-        self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
-        direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
-        """Apply spatial boundary condition using coordinate-based function."""
-        if metadata is None or metadata.coordinates is None:
-            raise ValidationError(
-                f"{self.__class__.__name__} requires coordinate metadata"
-            )
-
-        # Extract coordinates at boundary
-        coords = metadata.coordinates[boundary_indices]
-
-        # Apply spatial function based on dimensionality and preserve dtype
-        if coords.ndim == 2:  # 2D case
-            if coords.shape[-1] >= 2:
-                result = self.func(coords[..., 0], coords[..., 1])
-            else:
-                result = self.func(coords[..., 0])
-            grid[boundary_indices] = np.asarray(result, dtype=grid.dtype)
-        elif coords.ndim == 3:  # 3D case
-            if coords.shape[-1] >= 3:
-                result = self.func(coords[..., 0], coords[..., 1], coords[..., 2])
-            elif coords.shape[-1] >= 2:
-                result = self.func(coords[..., 0], coords[..., 1])
-            else:
-                result = self.func(coords[..., 0])
-            grid[boundary_indices] = np.asarray(result, dtype=grid.dtype)
-        else:
-            # Fallback: flatten coordinates and apply function
-            flat_coords = coords.reshape(-1, coords.shape[-1])
-            if flat_coords.shape[1] >= 2:
-                result = self.func(flat_coords[:, 0], flat_coords[:, 1])
-            else:
-                result = self.func(flat_coords[:, 0])
-            grid[boundary_indices] = np.asarray(result, dtype=grid.dtype).reshape(
-                coords.shape[:-1]
-            )
-
-
-@boundary_condition
-@attrs.frozen
-class TimeDependentBoundary(BoundaryCondition[NDimension]):
-    """
-    Implements a time-dependent boundary condition.
-
-    Perfect for modeling cyclic injection, seasonal variations,
-    or any boundary condition that changes over time.
-
-    Example usage:
-    ```python
-    import numpy as np
-    from bores.boundary_conditions import TimeDependentBoundary, BoundaryMetadata, GridBoundaryCondition, boundary_function
-
-    # Example 1: Sinusoidal injection pressure (daily cycle)
-    sinusoidal_func = boundary_function(lambda t: 2000 + 200 * np.sin(2 * np.pi * t / 86400), name="sinusoidal_pressure")
-    daily_cycle = TimeDependentBoundary(
-        func=sinusoidal_func  # 24-hour cycle
-    )
-
-    # Example 2: Linear pressure ramp-up
-    linear_ramp_func = boundary_function(lambda t: min(1000 + 0.1 * t, 2500), name="linear_pressure_ramp")
-    pressure_ramp = TimeDependentBoundary(
-        func=linear_ramp_func  # Ramp from 1000 to 2500 psi
-    )
-
-    # Example 3: Exponential decay (well shut-in)
-    exponential_decay_func = boundary_function(lambda t: 2000 * np.exp(-t / 3600), name="exponential_pressure_decay")
-    pressure_decay = TimeDependentBoundary(
-        func=exponential_decay_func  # Decay with 1-hour time constant
-    )
-
-    # Example 4: Step function (sudden pressure change)
-    step_func = boundary_function(lambda t: 2500 if t > 1800 else 1500, name="step_pressure_change")
-    step_pressure = TimeDependentBoundary(
-        func=step_func  # Jump at 30 minutes
-    )
-
-    # Use in simulation at t = 12 hours (pressure property)
-    metadata = BoundaryMetadata(time=43200.0)  # 12 hours in seconds
-    pressure_boundary = GridBoundaryCondition(
-        left=daily_cycle,     # Cyclic injection
-        right=pressure_ramp,    # Gradual pressure increase
-        front=pressure_decay,  # Exponential decay
-        back=step_pressure,    # Step function
-    )
-
-    pressure_grid = np.full((52, 52), 1800.0)
-    pressure_boundary.apply(pressure_grid, metadata=metadata)
-
-    # Result: Each boundary reflects time-dependent function at t=43200s
-    print(f"Daily cycle value: {2000 + 200 * np.sin(2 * np.pi * 43200 / 86400):.1f}")
-    print(f"Ramp value: {min(1000 + 0.1 * 43200, 2500):.1f}")
-    ```
-    """
-
-    __type__ = "time_dependent_boundary"
-
-    func: typing.Callable[[float], float]
-    """Function that takes time and returns boundary value."""
-
-    def apply(
-        self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
-        direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
-        """Apply time-dependent boundary condition."""
-        if metadata is None or metadata.time is None:
-            raise ValidationError(f"{self.__class__.__name__} requires time metadata")
-
-        value = self.func(metadata.time)
-        # Preserve the grid's dtype
-        grid[boundary_indices] = grid.dtype.type(value)
-
-
-@boundary_condition
-@attrs.frozen
-class LinearGradientBoundary(BoundaryCondition[NDimension]):
-    """
-    Implements a linear gradient boundary condition.
-
-    Creates a linear variation of the property across the boundary,
-    useful for modeling pressure drops, temperature gradients, or
-    concentration profiles.
-
-    Example usage:
-    ```python
-    import numpy as np
-    from bores.boundary_conditions import LinearGradientBoundary, BoundaryMetadata, GridBoundaryCondition
-
-    # Create coordinate grid for a 1000x500 ft reservoir
-    x_coords = np.linspace(0, 1000, 51)
-    y_coords = np.linspace(0, 500, 26)
-    z_coords = np.linspace(50, 150, 11)  # 50-150 ft depth
-
-    # 3D coordinates
-    xx, yy, zz = np.meshgrid(x_coords, y_coords, z_coords, indexing='ij')
-    coordinates = np.stack([xx, yy, zz], axis=-1)
-
-    metadata = BoundaryMetadata(coordinates=coordinates)
-
-    # Example 1: Pressure drop across reservoir (west to east)
-    pressure_drop = LinearGradientBoundary(
-        start=2500.0,      # High pressure at west (x=0)
-        end=1500.0,        # Low pressure at east (x=1000)
-        direction="x"
-    )
-
-    # Example 2: Pressure gradient with depth (shallow to deep)
-    depth_pressure = LinearGradientBoundary(
-        start=2000.0,      # Lower pressure at shallow depth (z=50)
-        end=2300.0,        # Higher pressure at deep depth (z=150)
-        direction="z"
-    )
-
-    # Example 3: Pressure gradient from north to south
-    pressure_ns_gradient = LinearGradientBoundary(
-        start=2200.0,      # High pressure at north (y=0)
-        end=1800.0,        # Low pressure at south (y=500)
-        direction="y"
-    )
-
-    # Apply to 3D grid boundaries (pressure property only)
-    pressure_boundary = GridBoundaryCondition(
-        left=pressure_drop,     # West boundary: pressure drop west-east
-        front=depth_pressure,    # South boundary: pressure with depth
-        top=pressure_ns_gradient, # Top boundary: pressure north-south
-    )
-
-    pressure_grid = np.full((53, 28, 13), 2000.0)  # 3D grid with ghost cells
-    pressure_boundary.apply(pressure_grid, metadata=metadata)
-
-    # Result: Linear gradients applied to pressure boundaries
-    # West boundary varies from 2500 to 1500 psi along x-direction
-    # South boundary varies from 2000 to 2300 psi along z-direction
-    # Top boundary varies from 2200 to 1800 psi along y-direction
-    ```
-    """
-
-    __type__ = "linear_gradient_boundary"
-
-    start: float
-    """Value at the start of the gradient."""
-    end: float
-    """Value at the end of the gradient."""
-    direction: typing.Literal["x", "y", "z"]
-    """Direction of the gradient."""
-
-    def apply(
-        self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
-        direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
-        """Apply linear gradient boundary condition."""
-        if metadata is None or metadata.coordinates is None:
-            raise ValidationError(
-                f"{self.__class__.__name__} requires coordinate metadata"
-            )
-
-        coords = metadata.coordinates[boundary_indices]
-
-        # Determine which coordinate axis to use for gradient
-        if self.direction == "x":
-            coord_values = coords[..., 0]
-        elif self.direction == "y":
-            coord_values = coords[..., 1]
-        elif self.direction == "z":
-            coord_values = coords[..., 2] if coords.shape[-1] > 2 else coords[..., 0]
-        else:
-            raise ValidationError(f"Invalid gradient direction: {self.direction}")
-
-        # Calculate gradient
-        coord_min = np.min(coord_values)
-        coord_max = np.max(coord_values)
-
-        if coord_max == coord_min:
-            # No gradient possible, use start value (preserve dtype)
-            grid[boundary_indices] = grid.dtype.type(self.start)
-        else:
-            # Linear interpolation, preserve dtype
-            normalized_coords = (coord_values - coord_min) / (coord_max - coord_min)
-            result = self.start + normalized_coords * (self.end - self.start)
-            grid[boundary_indices] = result.astype(grid.dtype, copy=False)
-
-
-@boundary_condition
-@attrs.frozen
-class FluxBoundary(BoundaryCondition[NDimension]):
-    """
-    Implements a flux boundary condition (Neumann with physical interpretation).
-
-    Sets a specified flux (rate of change) across the boundary, useful for
-    modeling injection/production rates, heat flux, or mass transfer.
-
-    **Sign Convention (Library-Wide Standard):**
-    - **Positive flux (+)**: Flow INTO the reservoir (injection/inflow)
-    - **Negative flux (-)**: Flow OUT OF the reservoir (production/outflow)
-
-    This convention is consistent across all BORES modules (wells, boundaries, etc.).
-
-    Example usage:
-    ```python
-    import numpy as np
-    from bores.boundary_conditions import FluxBoundary, BoundaryMetadata, GridBoundaryCondition
-
-    # Define cell dimensions (20x20 ft cells)
-    cell_dims = (20.0, 20.0)
-    thickness = np.full((50, 50), 10.0)  # 10 ft thick reservoir (no ghost cells)
-    metadata = BoundaryMetadata(
-        cell_dimension=cell_dims,
-        thickness_grid=thickness,
-        grid_shape=(50, 50)
-    )
-
-    # Example 1: Water injection (positive flux)
-    water_injector = FluxBoundary(flux=100.0)  # 100 bbl/day/ft² injection
-
-    # Example 2: Oil production (negative flux)
-    oil_producer = FluxBoundary(flux=-50.0)    # 50 bbl/day/ft² production
-
-    # Example 3: Heat injection
-    heat_injector = FluxBoundary(flux=1000.0)  # 1000 BTU/hr/ft²
-
-    # Example 4: Gas venting (very high production)
-    gas_vent = FluxBoundary(flux=-500.0)       # 500 Mscf/day/ft²
-
-    # Set up reservoir with injection/production boundaries (pressure property)
-    pressure_boundary = GridBoundaryCondition(
-        left=water_injector,  # West: water injection
-        right=oil_producer,     # East: oil production
-        front=FluxBoundary(flux=0.0),    # South: no flux
-        back=gas_vent,         # North: gas production
-    )
-
-    # Apply to pressure grid (psi)
-    pressure_grid = np.full((52, 52), 2000.0)  # Initial 2000 psi
-    pressure_boundary.apply(pressure_grid, metadata=metadata)
-
-    # Result: Boundary values calculated from flux and cell spacing
-    # West boundary: φ_boundary = φ_neighbor + flux * dx
-    # φ_boundary = 2000 + 100 * (20/2) = 2000 + 1000 = 3000 psi
-    # East boundary: φ_boundary = 2000 + (-50) * (20/2) = 2000 - 500 = 1500 psi
-
-    print(f"Injection boundary pressure: {pressure_grid[0, 10]:.0f} psi")    # ~3000
-    print(f"Production boundary pressure: {pressure_grid[-1, 10]:.0f} psi")  # ~1500
-
-    # Physical interpretation:
-    # - Positive flux increases boundary pressure (injection)
-    # - Negative flux decreases boundary pressure (production)
-    # - Zero flux maintains neighbor pressure (no-flow equivalent)
-    ```
-    """
-
-    __type__ = "flux_boundary"
-
-    flux: float
-    """Flux value (positive for injection, negative for production)."""
-
-    def apply(
-        self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
-        direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
+        metadata: BoundaryMetadata,
+    ) -> np.ndarray:
         """
-        Apply flux boundary condition.
+        Return a uniform array filled with `pressure`.
 
-        Sign convention: positive flux = flow INTO the domain (injection),
-        negative flux = flow OUT OF the domain (production).
-
-        Ghost cell values are set so that the finite-difference gradient
-        across the boundary face equals the specified flux:
-
-            φ_ghost = φ_neighbor + sign * flux * spacing
-
-        where spacing = half the cell width in the normal direction, and:
-            sign = +1 for LEFT, FRONT, BOTTOM faces (ghost is upstream of inward flow)
-            sign = -1 for RIGHT, BACK, TOP faces  (ghost is downstream of inward flow)
-
-        Examples (dx=20 ft, so spacing=10 ft):
-            LEFT,  flux=+100  →  φ_ghost = φ_neighbor + 1000  (injection raises ghost)
-            RIGHT, flux=-50   →  φ_ghost = φ_neighbor + 500   (production raises ghost on exit side)
-            LEFT,  flux=0     →  φ_ghost = φ_neighbor          (no-flow, equivalent to NoFlowBoundary)
-
-        Note: In this codebase k=0 is the TOP (shallowest) layer and k increases
-        downward, so BOTTOM corresponds to the deepest layer (k=-1).
+        :param boundary_slice: Ghost-cell layer slice.
+        :param direction: Face direction (unused; pressure is spatially uniform).
+        :param metadata: Simulation context.  Must carry `fluid_properties`.
+        :return: Array shaped like the boundary slice, every element equal to
+            `self.pressure`.
+        :raises ValidationError: If `metadata.fluid_properties` is *None*.
         """
-        if metadata is None or metadata.cell_dimension is None:
+        if metadata.fluid_properties is None:
             raise ValidationError(
-                f"{self.__class__.__name__} requires cell dimension metadata"
+                f"{self.__class__.__name__} requires `metadata.fluid_properties` to determine "
+                "the boundary slice shape."
             )
+        shape = metadata.fluid_properties.pressure_grid[boundary_slice].shape
+        return np.full(shape, self.pressure, dtype=np.float64)
 
-        # Get neighboring cell values for gradient calculation
-        neighbor_indices = get_neighbor_indices(boundary_indices, direction)
-        neighbor_values = grid[neighbor_indices]
+    def get_type(self) -> BoundaryType:
+        """
+        Return `BoundaryType.PRESSURE`.
 
-        # Calculate distance between boundary and neighbor (half cell spacing)
-        dx, dy = metadata.cell_dimension
+        :return: `BoundaryType.PRESSURE`
+        """
+        return BoundaryType.PRESSURE
 
-        if direction in [Boundary.LEFT, Boundary.RIGHT]:
-            spacing = dx / 2.0
-        elif direction in [Boundary.FRONT, Boundary.BACK]:
-            spacing = dy / 2.0
-        elif direction in [Boundary.BOTTOM, Boundary.TOP]:
-            # For 3D, use thickness_grid if available for z-direction spacing
-            # Note: k=0 is TOP, k=-1 is BOTTOM in this codebase
-            if (
-                metadata.thickness_grid is not None
-                and metadata.thickness_grid.ndim == 3
-            ):
-                # Use average thickness at boundary layer for spacing
-                # thickness_grid has no ghost cells, so we need to map boundary to interior
-                if direction == Boundary.BOTTOM:
-                    # Bottom boundary (deepest) - use last layer thickness (k=-1)
-                    avg_thickness = np.mean(metadata.thickness_grid[:, :, -1])
-                else:  # TOP
-                    # Top boundary (shallowest) - use first layer thickness (k=0)
-                    avg_thickness = np.mean(metadata.thickness_grid[:, :, 0])
-                spacing = avg_thickness / 2.0  # type: ignore[assignment]
-            else:
-                # Fallback to dx if no thickness info
-                spacing = dx / 2.0
-        else:
-            spacing = dx / 2.0
+    def is_static(self) -> bool:
+        """
+        Return *True*; a constant pressure never changes between time steps.
 
-        # Determine sign based on boundary direction
-        # Positive flux = flow into the domain.
-        # Ghost cell value = neighbor + flux * spacing (so ghost > neighbor for injection)
-        # For LEFT/FRONT/BOTTOM: flow into domain means ghost is upstream (higher),
-        # so sign = +1.
-        # For RIGHT/BACK/TOP: flow into domain means ghost is downstream (lower
-        # relative to the right-side convention), so sign = -1.
-        if direction in [Boundary.LEFT, Boundary.FRONT, Boundary.BOTTOM]:
-            sign = 1.0
-        else:
-            sign = -1.0
+        :return: *True*
+        """
+        return True
 
-        # Apply flux boundary: dφ/dn = flux (outward normal convention)
-        # φ_boundary = φ_neighbor + sign * flux * spacing
-        # Preserve the grid's dtype
-        result = neighbor_values + sign * self.flux * spacing
-        grid[boundary_indices] = result.astype(grid.dtype, copy=False)
+    def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
+        return {"pressure": self.pressure}
+
+    @classmethod
+    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
+        return cls(pressure=float(data["pressure"]))
 
 
 @boundary_condition
 @attrs.frozen
 class RobinBoundary(BoundaryCondition[NDimension]):
     """
-    Implements a Robin (mixed/convective) boundary condition.
+    Robin (mixed) boundary condition that returns a volumetric flux (ft³/day).
 
-    Combines Dirichlet and Neumann conditions: α*φ + β*∂φ/∂n = γ
+    The boundary flux is computed as a productivity-index formulation:
 
-    Common applications:
-    - Heat transfer with convection: h*(T - T_inf) = -k*∂T/∂n
-    - Mass transfer with surface reaction
-    - Pressure boundaries with partial flow resistance
-
-    Example usage:
-    ```python
-    import numpy as np
-    from bores.boundary_conditions import RobinBoundary, BoundaryMetadata, GridBoundaryCondition
-
-    # Example 1: Convective heat transfer boundary
-    # h*(T - T_ambient) = -k*∂T/∂n  =>  α=h, β=k, γ=h*T_ambient
-    # Rearranged: T_boundary = (γ + β*T_neighbor/spacing) / (α + β/spacing)
-    convective_bc = RobinBoundary(
-        alpha=10.0,      # Heat transfer coefficient h (BTU/hr/ft²/°F)
-        beta=0.5,        # Thermal conductivity k (BTU/hr/ft/°F)
-        gamma=700.0      # h * T_ambient (10 * 70°F)
-    )
-
-    # Example 2: Semi-permeable pressure boundary
-    # Partial resistance to flow at boundary
-    semi_permeable = RobinBoundary(
-        alpha=1.0,       # Dirichlet weight
-        beta=0.1,        # Neumann weight (small = more Dirichlet-like)
-        gamma=2000.0     # Reference pressure
-    )
-
-    # Example 3: Pure Dirichlet (β=0): α*φ = γ => φ = γ/α
-    dirichlet_like = RobinBoundary(alpha=1.0, beta=0.0, gamma=1500.0)
-
-    # Example 4: Pure Neumann (α=0): β*∂φ/∂n = γ
-    neumann_like = RobinBoundary(alpha=0.0, beta=1.0, gamma=100.0)
-
-    metadata = BoundaryMetadata(
-        cell_dimension=(20.0, 20.0),
-        grid_shape=(50, 25)
-    )
-    temperature_bc = GridBoundaryCondition(
-        left=convective_bc,
-        right=semi_permeable,
-    )
-
-    temperature_grid = np.full((52, 27), 100.0)
-    temperature_bc.apply(temperature_grid, metadata=metadata)
     ```
+    q[i,j,k] = alpha(metadata, boundary_slice, direction)[i,j,k]
+                * (pressure - P_interior[i,j,k])
+    ```
+
+    where:
+
+    - *pressure* is the user-specified reference boundary pressure (psi),
+    - *P_interior* is the pressure of the adjacent interior cell (psi), and
+    - *alpha* is a user-supplied callable that returns a production-index-like
+      array (ft³/day/psi) shaped like the boundary slice.
+
+    A positive result means flow *into* the reservoir; a negative result means
+    flow *out of* the reservoir, consistent with the sign convention used
+    throughout the simulator.
+
+    The `alpha` callable must accept the same positional arguments as
+    `BoundaryCondition.__call__`, i.e. ``(metadata, boundary_slice, direction)``,
+    and must return an `np.ndarray` shaped like the boundary slice. You can use a registered
+    `@boundary_function`, a `ParameterizedBoundaryFunction`, or any callable
+    that satisfies this contract.
+
+    **Built-in alpha functions**:
+
+    Two ready-to-use alpha functions are registered by default:
+
+    - ``"constant_productivity_index"`` - uniform PI equal to a scalar
+      *value* parameter (ft³/day/psi).
+    - ``"transmissibility_weighted_pi"`` - ``T_face * lambda_total``, where
+      *T_face* is the geometric face transmissibility and *lambda_total* is
+      the sum of three-phase relative mobilities.
+
+    :param pressure: Reference boundary pressure (psi).  Typically the
+        aquifer pressure, injection manifold pressure, or any target pressure
+        at the face.
+    :param alpha: Callable ``(metadata, boundary_slice, direction) -> np.ndarray``
+        returning a production-index array (ft³/day/psi).  Must be a registered
+        boundary function or a `ParameterizedBoundaryFunction` so that the
+        condition can be serialized.
+
+    Example::
+
+        alpha = ParameterizedBoundaryFunction(
+            func_name="constant_productivity_index",
+            params={"value": 10.0},
+        )
+        robin = RobinBoundary(pressure=2500.0, alpha=alpha)
     """
 
     __type__ = "robin_boundary"
 
-    alpha: float
-    """Coefficient for the value term (Dirichlet weight)."""
-    beta: float
-    """Coefficient for the gradient term (Neumann weight)."""
-    gamma: float
-    """Right-hand side constant."""
+    pressure: float
+    """Reference boundary pressure (psi)."""
 
-    def __attrs_post_init__(self) -> None:
-        if self.alpha == 0.0 and self.beta == 0.0:
+    alpha: typing.Callable[
+        ["BoundaryMetadata", typing.Tuple[slice, ...], Boundary],
+        np.ndarray,
+    ]
+    """Production-index callable (ft³/day/psi) shaped like the boundary slice."""
+
+    def __call__(
+        self,
+        boundary_slice: typing.Tuple[slice, ...],
+        direction: Boundary,
+        metadata: BoundaryMetadata,
+    ) -> np.ndarray:
+        """
+        Compute the boundary flux array.
+
+        :param boundary_slice: Ghost-cell layer slice.
+        :param direction: Face direction.
+        :param metadata: Simulation context. Must carry `fluid_properties` so
+            that the interior neighbour pressure can be read.
+        :return: Array of volumetric fluxes (ft³/day) shaped like the boundary
+            slice. Positive = flow into the reservoir.
+        :raises ValidationError: If `metadata.fluid_properties` is *None*.
+        """
+        if metadata.fluid_properties is None:
             raise ValidationError(
-                "At least one of `alpha` or `beta` must be non-zero for Robin boundary."
+                f"{self.__class__.__name__} requires `metadata.fluid_properties` to read "
+                "interior neighbour pressures."
             )
 
-    def apply(
-        self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
-        direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
+        nbr_slice = _neighbour_slice(boundary_slice, direction)
+        p_interior = metadata.fluid_properties.pressure_grid[nbr_slice].astype(
+            np.float64, copy=False
+        )
+        pi_array = np.asarray(
+            self.alpha(metadata, boundary_slice, direction), dtype=np.float64
+        )
+        return pi_array * (self.pressure - p_interior)
+
+    def get_type(self) -> BoundaryType:
+        """Return `BoundaryType.FLUX`.
+
+        :return: `BoundaryType.FLUX`
         """
-        Apply Robin boundary condition: α*φ + β*∂φ/∂n = γ
+        return BoundaryType.FLUX
 
-        The gradient ∂φ/∂n uses the OUTWARD normal convention (standard in PDEs):
-        the normal points AWAY from the domain, so:
-            sign = -1 for LEFT, FRONT, BOTTOM faces (outward normal is negative)
-            sign = +1 for RIGHT, BACK, TOP faces    (outward normal is positive)
+    def is_static(self) -> bool:
+        """Return *False*; flux depends on the current interior pressure field.
 
-        Discretization:
-            ∂φ/∂n ≈ sign * (φ_ghost - φ_neighbor) / spacing
-
-        Substituting into α*φ_ghost + β*∂φ/∂n = γ and solving:
-            φ_ghost = (γ + β*sign*φ_neighbor/spacing) / (α + β*sign/spacing)
-
-        Special cases:
-            β=0 (pure Dirichlet): φ_ghost = γ/α  (ignores neighbor)
-            α=0 (pure Neumann):   φ_ghost = φ_neighbor + γ*spacing/sign
-                → positive γ with sign=-1 (LEFT face) means outward flux = γ,
-                  i.e. flow exits through the left face
-
-        Note: RobinBoundary's sign convention is OPPOSITE to FluxBoundary.
-        FluxBoundary defines positive as flow INTO the domain; Robin's ∂φ/∂n
-        is positive when flux points OUT of the domain (outward normal).
-
-        Note: In this codebase k=0 is the TOP (shallowest) layer and k increases
-        downward, so BOTTOM corresponds to the deepest layer (k=-1).
+        :return: *False*
         """
-        if metadata is None or metadata.cell_dimension is None:
-            raise ValidationError(
-                f"{self.__class__.__name__} requires cell dimension metadata"
-            )
-
-        # Get neighboring cell values
-        neighbor_indices = get_neighbor_indices(boundary_indices, direction)
-        neighbor_values = grid[neighbor_indices]
-
-        # Calculate spacing
-        dx, dy = metadata.cell_dimension
-        if direction in [Boundary.LEFT, Boundary.RIGHT]:
-            spacing = dx / 2.0
-        elif direction in [Boundary.FRONT, Boundary.BACK]:
-            spacing = dy / 2.0
-        else:
-            # Z-direction: use thickness if available
-            # Note: k=0 is TOP, k=-1 is BOTTOM in this codebase
-            if (
-                metadata.thickness_grid is not None
-                and metadata.thickness_grid.ndim == 3
-            ):
-                if direction == Boundary.BOTTOM:
-                    # Bottom boundary (deepest) - use last layer thickness (k=-1)
-                    avg_thickness = np.mean(metadata.thickness_grid[:, :, -1])
-                else:  # TOP
-                    # Top boundary (shallowest) - use first layer thickness (k=0)
-                    avg_thickness = np.mean(metadata.thickness_grid[:, :, 0])
-                spacing = avg_thickness / 2.0  # type: ignore[assignment]
-            else:
-                spacing = dx / 2.0
-
-        # Direction sign for gradient (outward normal convention)
-        if direction in [
-            Boundary.LEFT,
-            Boundary.FRONT,
-            Boundary.BOTTOM,
-        ]:
-            sign = -1.0
-        else:
-            sign = 1.0
-
-        # Robin BC: α*φ_boundary + β*∂φ/∂n = γ
-        # Discretized gradient: ∂φ/∂n ≈ sign * (φ_boundary - φ_neighbor) / spacing
-        # Substituting: α*φ_boundary + β*sign*(φ_boundary - φ_neighbor)/spacing = γ
-        # Solving for φ_boundary:
-        # φ_boundary * (α + β*sign/spacing) = γ + β*sign*φ_neighbor/spacing
-        # φ_boundary = (γ + β*sign*φ_neighbor/spacing) / (α + β*sign/spacing)
-
-        effective_beta = self.beta * sign / spacing
-        denominator = self.alpha + effective_beta
-
-        if np.abs(denominator) < 1e-12:
-            # Degenerate case - fall back to neighbor value
-            grid[boundary_indices] = neighbor_values
-        else:
-            # Preserve the grid's dtype
-            result = (self.gamma + effective_beta * neighbor_values) / denominator
-            grid[boundary_indices] = result.astype(grid.dtype, copy=False)
-
-
-@boundary_condition
-@attrs.frozen
-class PeriodicBoundary(BoundaryCondition[NDimension]):
-    """
-    Implements a periodic boundary condition.
-
-    Links opposite boundaries so that flow/values wrap around,
-    useful for modeling repeating geological patterns or infinite domains.
-
-    Note: For proper periodic BCs, both opposite faces must use `PeriodicBoundary`.
-
-    Example usage:
-    ```python
-    import numpy as np
-    from bores.boundary_conditions import PeriodicBoundary, GridBoundaryCondition
-
-    # Example 1: Periodic in x-direction (left-right wrap)
-    periodic_x = GridBoundaryCondition(
-        left=PeriodicBoundary(),   # Copies from right interior
-        right=PeriodicBoundary(),  # Copies from left interior
-    )
-
-    # Example 2: Fully periodic 2D domain
-    fully_periodic = GridBoundaryCondition(
-        left=PeriodicBoundary(),
-        right=PeriodicBoundary(),
-        front=PeriodicBoundary(),
-        back=PeriodicBoundary(),
-    )
-
-    pressure_grid = np.random.uniform(1000, 2000, (52, 27))
-    fully_periodic.apply(pressure_grid)
-
-    # Result:
-    # - Left ghost cells = right interior values
-    # - Right ghost cells = left interior values
-    # - Front ghost cells = back interior values
-    # - Back ghost cells = front interior values
-    ```
-    """
-
-    __type__ = "periodic_boundary"
-    __abstract_serializable__ = True
-
-    def apply(
-        self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
-        direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
-        """Apply periodic boundary by copying from opposite interior boundary."""
-        # Get indices of the opposite interior cells
-        opposite_indices = list(boundary_indices)
-
-        if direction == Boundary.LEFT:
-            # Left boundary copies from right interior (second-to-last)
-            opposite_indices[0] = slice(-2, -1)
-        elif direction == Boundary.RIGHT:
-            # Right boundary copies from left interior (second from start)
-            opposite_indices[0] = slice(1, 2)
-        elif direction == Boundary.FRONT:
-            # Front boundary copies from back interior
-            opposite_indices[1] = slice(-2, -1)
-        elif direction == Boundary.BACK:
-            # Back boundary copies from front interior
-            opposite_indices[1] = slice(1, 2)
-        elif direction == Boundary.BOTTOM:
-            # Bottom boundary copies from top interior
-            if len(boundary_indices) < 3:
-                raise ValidationError(
-                    f"Cannot apply {direction.name} to {len(boundary_indices)}D grid"
-                )
-            opposite_indices[2] = slice(-2, -1)
-        elif direction == Boundary.TOP:
-            # Top boundary copies from bottom interior
-            if len(boundary_indices) < 3:
-                raise ValidationError(
-                    f"Cannot apply {direction.name} to {len(boundary_indices)}D grid"
-                )
-            opposite_indices[2] = slice(1, 2)
-
-        grid[boundary_indices] = grid[tuple(opposite_indices)]
+        return False
 
     def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
-        return {}
+        return {
+            "pressure": self.pressure,
+            "alpha": _serialize_boundary_function(self.alpha, recurse),
+        }
 
     @classmethod
     def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        return cls()
-
-
-NeumannBoundary = FluxBoundary
-"""Alias for `FluxBoundary` representing Neumann boundary conditions (flux-based)."""
+        return cls(
+            pressure=float(data["pressure"]),
+            alpha=_deserialize_boundary_function(data["alpha"]),
+        )
 
 
 @boundary_condition
 @attrs.define
 class CarterTracyAquifer(BoundaryCondition[NDimension]):
     """
-    Carter-Tracy finite aquifer model.
+    Carter-Tracy finite aquifer boundary condition.
 
-    The Carter-Tracy model (1960) provides a semi-analytical solution for finite aquifer
-    behavior, accounting for transient pressure response and material balance between
-    the reservoir and aquifer. This is more realistic than constant pressure (infinite
-    aquifer) or no-flow (no aquifer support) boundaries.
+    Computes transient water influx from a finite radial aquifer using the
+    Van Everdingen-Hurst (1949) superposition approach as reformulated by
+    Carter and Tracy (1960). The condition returns a volumetric flux array
+    (ft³/day) - positive means water flows *into* the reservoir.
 
-    **Physical Model:**
-    The aquifer provides pressure support through water influx determined by:
-    1. Cumulative pressure drop at the reservoir-aquifer boundary
-    2. Aquifer properties (permeability, porosity, compressibility, geometry)
-    3. Van Everdingen-Hurst dimensionless water influx functions
-    4. Hydraulic diffusivity and dimensionless time
+    **Two construction modes**
 
-    **Mathematical Formulation:**
-    Water influx rate at time t:
-        Q_aquifer(t) = B * Σ[ΔP(t_i) * W_D'(t_D - t_Di)]
+    *Physical properties (recommended)* - supply `aquifer_permeability`,
+    `aquifer_porosity`, `aquifer_compressibility`, `water_viscosity`,
+    `inner_radius`, `outer_radius`, and `aquifer_thickness`.  The aquifer
+    constant *B* and hydraulic diffusivity are derived from first principles.
 
-    where:
-        - B = aquifer constant = 1.119 * φ * c_t * (r_e² - r_w²) * h * (θ/360°) / μ_w
-        - ΔP(t_i) = pressure change at time t_i
-        - W_D'(t_D) = dimensionless water influx derivative (Van Everdingen-Hurst)
-        - t_D = dimensionless time = (k / (φ * μ * c_t)) * (t / r_w²)
+    *Calibrated constant (legacy)* - supply a history-matched
+    `aquifer_constant` (bbl/psi) directly, together with
+    `dimensionless_radius_ratio`.
 
-    **Two Usage Modes:**
+    **Sign convention**
 
-    1. **Physical Properties (Recommended)**: Specify k, φ, μ, c_t, radii, thickness
-       - Dimensionally correct and physically meaningful
-       - Aquifer constant B and dimensionless time t_D computed from first principles
-       - Allows sensitivity analysis on individual properties
+    The returned flux follows the simulator-wide convention: positive values
+    represent influx (injection) into the reservoir, negative values represent
+    withdrawal.
 
-    2. **Calibrated Constant (Legacy)**: Specify pre-computed `aquifer_constant`
-       - For history matching when physical properties are uncertain
-       - Must also provide dimensionless_radius_ratio
-       - Simplified dimensionless time calculation (t_D ≈ t / characteristic_time)
+    **Units**
 
-    **Example (Using Physical Properties):**
-    ```python
-    from bores.boundary_conditions import CarterTracyAquifer, GridBoundaryCondition
+    All flux values are in ft³/day. Internal pressure drops are in psi.
+    Time is in days (metadata carries seconds; conversion is applied internally).
 
-    # Edge water drive with known aquifer properties
-    edge_aquifer = CarterTracyAquifer(
-        aquifer_permeability=500.0,       # mD - from core/log data
-        aquifer_porosity=0.25,            # fraction - from logs
-        aquifer_compressibility=3e-6,     # psi⁻¹ - rock + water compressibility
-        water_viscosity=0.5,              # cP - at reservoir conditions
-        inner_radius=1000.0,              # ft - reservoir-aquifer contact radius
-        outer_radius=10000.0,             # ft - aquifer extent (seismic, geology)
-        aquifer_thickness=50.0,           # ft - from logs/seismic
-        initial_pressure=2500.0,          # psi - initial equilibrium pressure
-        angle=180.0,                      # degrees - half-circle (edge drive)
-    )
+    :param initial_pressure: Initial aquifer / reservoir pressure (psi).
+    :param aquifer_permeability: Aquifer horizontal permeability (mD).
+    :param aquifer_porosity: Aquifer porosity (fraction).
+    :param aquifer_compressibility: Total aquifer compressibility, rock + water (psi⁻¹).
+    :param water_viscosity: Water viscosity at reservoir conditions (cP).
+    :param inner_radius: Reservoir-aquifer contact radius (ft).
+    :param outer_radius: Aquifer outer extent (ft).
+    :param aquifer_thickness: Aquifer thickness (ft).
+    :param aquifer_constant: Pre-computed aquifer constant *B* (bbl/psi) for
+        calibrated-constant mode.
+    :param dimensionless_radius_ratio: r_outer / r_inner used in calibrated-constant mode. Default is *10.0*.
+    :param angle: Aquifer encroachment angle in degrees.  *360* = full contact;
+        *180* = half-circle edge drive.  Default is *360*.
 
-    # Bottom water drive (full contact)
-    bottom_aquifer = CarterTracyAquifer(
-        aquifer_permeability=800.0,
-        aquifer_porosity=0.28,
-        aquifer_compressibility=4e-6,
-        water_viscosity=0.4,
-        inner_radius=2000.0,
-        outer_radius=20000.0,
-        aquifer_thickness=100.0,
-        initial_pressure=3000.0,
-        angle=360.0,                      # Full contact
-    )
-    ```
+    **References**:
 
-    **Example (Using Calibrated Constant):**
-    ```python
-    # When physical properties are uncertain - use history-matched constant
-    aquifer = CarterTracyAquifer(
-        aquifer_constant=50.0,            # bbl/psi - from history match
-        initial_pressure=2500.0,          # psi
-        dimensionless_radius_ratio=10.0,  # r_e/r_w - from geology estimate
-        angle=180.0,                      # degrees
-    )
-    ```
+    Carter, R.D. and Tracy, G.W. (1960). *An Improved Method for Calculating
+    Water Influx.* JPT, 12(5), 415-417.
 
-    **Applications:**
-    - Edge water drive reservoirs (use on lateral boundaries)
-    - Bottom water drive (use on bottom boundary)
-    - Aquifer support during primary depletion
-    - History matching field production data
-    - Pressure transient analysis and aquifer characterization
-
-    **Comparison to Other Boundary Conditions:**
-    - **Constant Pressure BC**: Assumes infinite aquifer (over-optimistic, unrealistic)
-    - **No-Flow BC**: Assumes no aquifer support (conservative, pessimistic)
-    - **Carter-Tracy**: Realistic finite aquifer with time-dependent support
-    - **Fetkovich**: Simplified pseudo-steady-state (less accurate than Carter-Tracy)
-
-    **Physical Considerations:**
-    - Aquifer permeability typically lower than reservoir (10-1000 mD)
-    - Total compressibility = rock + water (typically 1e-6 to 10e-6 psi⁻¹)
-    - Inner radius = distance from well/reservoir center to aquifer contact
-    - Outer radius = aquifer extent (from seismic, geology, or pressure transient tests)
-    - Dimensionless radius r_D = r_e/r_w typically 5-50 (finite aquifer)
-    - Early time: infinite-acting behavior (W_D' ∝ √t_D)
-    - Late time: exponential decline (boundary effects dominant)
-
-    **References:**
-    - Carter, R.D., and Tracy, G.W. (1960). "An Improved Method for Calculating Water
-      Influx." Journal of Petroleum Technology, 12(5), 415-417.
-    - Van Everdingen, A.F., and Hurst, W. (1949). "The Application of the Laplace
-      Transformation to Flow Problems in Reservoirs." Transactions of the AIME, 186, 305-324.
-    - Chatas, A.T. (1953). "A Practical Treatment of Nonsteady-State Flow Problems in
-      Reservoir Systems." Petroleum Engineer, B-44 to B-56.
-    - Dake, L.P. (1978). "Fundamentals of Reservoir Engineering." Elsevier, Chapter 8.
-    - Havlena, D., and Odeh, A.S. (1963). "The Material Balance as an Equation of a
-      Straight Line." Journal of Petroleum Technology, 15(8), 896-900.
+    Van Everdingen, A.F. and Hurst, W. (1949). *The Application of the Laplace
+    Transformation to Flow Problems in Reservoirs.* Trans. AIME, 186, 305-324.
     """
 
     __type__ = "carter_tracy_aquifer"
 
     initial_pressure: float
-    """
-    Initial aquifer pressure (psi).
-
-    Aquifer pressure at t=0, typically equal to initial reservoir pressure.
-    Water influx is driven by the difference between current reservoir pressure
-    and this initial value (ΔP = initial pressure - current pressure).
-
-    Typical range: 1000-5000 psi (depends on reservoir depth and conditions)
-    """
+    """Initial aquifer / reservoir pressure (psi)."""
 
     aquifer_permeability: typing.Optional[float] = attrs.field(default=None)
-    """
-    Aquifer permeability (mD).
-
-    Horizontal permeability of the aquifer rock. Controls how quickly water can
-    flow from the aquifer into the reservoir. Typically lower than reservoir
-    permeability.
-
-    Typical range:
-        - Low permeability aquifer: 10-100 mD (weak support)
-        - Moderate permeability: 100-500 mD (typical)
-        - High permeability: 500-2000 mD (strong support)
-
-    Required if using physical properties mode.
-    """
+    """Aquifer horizontal permeability (mD)."""
 
     aquifer_porosity: typing.Optional[float] = attrs.field(default=None)
-    """
-    Aquifer porosity (fraction).
-
-    Pore volume fraction of the aquifer rock. Controls the storage capacity
-    of the aquifer. Higher porosity = more water available for influx.
-
-    Typical range:
-        - Tight aquifer: 0.10-0.20 (limited storage)
-        - Moderate aquifer: 0.20-0.30 (typical)
-        - High porosity aquifer: 0.30-0.40 (large storage)
-
-    Required if using physical properties mode.
-    """
+    """Aquifer porosity (fraction)."""
 
     aquifer_compressibility: typing.Optional[float] = attrs.field(default=None)
-    """
-    Total aquifer compressibility (psi⁻¹).
-
-    Combined compressibility of aquifer rock and water:
-        c_t = c_rock + c_water
-
-    Controls pressure response to fluid withdrawal. Higher compressibility
-    means more water released per psi pressure drop.
-
-    Typical values:
-        - Rock compressibility (c_rock): 3e-6 to 10e-6 psi⁻¹
-        - Water compressibility (c_water): 3e-6 psi⁻¹ at standard conditions
-        - Total (c_t): 5e-6 to 15e-6 psi⁻¹
-
-    Required if using physical properties mode.
-    """
+    """Total aquifer compressibility, rock + water (psi⁻¹)."""
 
     water_viscosity: typing.Optional[float] = attrs.field(default=None)
-    """
-    Water viscosity (cP).
-
-    Viscosity of water in the aquifer at reservoir temperature and pressure.
-    Controls flow resistance. Lower viscosity = faster influx.
-
-    Typical range:
-        - Cold water: 0.8-1.0 cP (shallow reservoirs)
-        - Warm water: 0.3-0.5 cP (deep hot reservoirs)
-        - Hot water: 0.2-0.3 cP (geothermal conditions)
-
-    Required if using physical properties mode.
-    """
+    """Water viscosity at reservoir conditions (cP)."""
 
     inner_radius: typing.Optional[float] = attrs.field(default=None)
-    """
-    Inner radius - reservoir-aquifer contact radius (ft).
-
-    Distance from reservoir center (or well) to the aquifer-reservoir interface.
-    For edge water drive, this is the reservoir radius. For bottom water drive,
-    this is the effective radial distance to the oil-water contact.
-
-    Typical range:
-        - Small reservoir: 500-2000 ft
-        - Medium reservoir: 2000-5000 ft
-        - Large reservoir: 5000-20000 ft
-
-    Required if using physical properties mode.
-    """
+    """Reservoir-aquifer contact radius (ft)."""
 
     outer_radius: typing.Optional[float] = attrs.field(default=None)
-    """
-    Outer radius - aquifer extent (ft).
-
-    Maximum extent of the aquifer from the reservoir center. Controls aquifer
-    volume and finite boundary effects. Can be estimated from seismic data,
-    geological models, or pressure transient analysis.
-
-    Typical range:
-        - Small finite aquifer: 2x to 5x inner radius
-        - Moderate aquifer: 5x to 20x inner radius
-        - Large aquifer: 20x to 100x inner radius
-        - Very large (approaches infinite): >100x inner radius
-
-    The ratio r_outer/r_inner determines aquifer strength and boundary effects.
-
-    Required if using physical properties mode.
-    """
+    """Aquifer outer extent (ft)."""
 
     aquifer_thickness: typing.Optional[float] = attrs.field(default=None)
-    """
-    Aquifer thickness (ft).
-
-    Vertical thickness of the aquifer. For edge water drive, this is typically
-    similar to reservoir thickness. For bottom water drive, this can be much
-    larger. Controls total aquifer pore volume.
-
-    Typical range:
-        - Thin aquifer: 10-50 ft (limited support)
-        - Moderate aquifer: 50-200 ft (typical)
-        - Thick aquifer: 200-1000 ft (strong support)
-
-    Required if using physical properties mode.
-    """
+    """Aquifer thickness (ft)."""
 
     aquifer_constant: typing.Optional[float] = attrs.field(default=None)
-    """
-    Pre-computed aquifer constant B (bbl/psi).
-
-    For legacy/history-matching workflows when physical aquifer properties
-    are uncertain. The aquifer constant lumps together all physical properties:
-
-        B = 1.119 * φ * c_t * (r_e² - r_w²) * h / μ_w
-
-    This can be calibrated by history matching observed reservoir pressure
-    decline or water influx rates.
-
-    Typical range:
-        - Weak aquifer: 10-50 bbl/psi
-        - Moderate aquifer: 50-200 bbl/psi
-        - Strong aquifer: 200-1000 bbl/psi
-        - Very strong aquifer: >1000 bbl/psi
-
-    If specified, physical properties are not required (Option B mode).
-    """
+    """Pre-computed aquifer constant *B* (bbl/psi) - calibrated-constant mode."""
 
     dimensionless_radius_ratio: float = attrs.field(default=10.0)
-    """
-    Dimensionless aquifer radius ratio (r_outer / r_inner).
-
-    Ratio of outer to inner aquifer radius. Controls aquifer size and
-    boundary effects on water influx behavior.
-
-    Physical interpretation:
-        - r_D = 2-5: Small finite aquifer (weak support, early boundary effects)
-        - r_D = 5-10: Moderate finite aquifer (typical field cases)
-        - r_D = 10-30: Large finite aquifer (strong support)
-        - r_D > 50: Very large aquifer (approaches infinite-acting)
-        - r_D → ∞: Infinite aquifer (equivalent to constant pressure BC)
-
-    Behavior:
-        - Early time (t_D < 0.5): All aquifers behave infinite-acting
-        - Late time (t_D > 2): Boundary effects dominate, smaller r_D = faster decline
-
-    Default: 10.0 (moderate finite aquifer - typical for many reservoirs)
-
-    Note: If using physical properties mode, this is automatically computed
-    as outer_radius/inner_radius. This parameter is only used in calibrated
-    constant mode (Option B).
-    """
+    """r_outer / r_inner - used only in calibrated-constant mode."""
 
     angle: float = attrs.field(default=360.0)
-    """
-    Aquifer encroachment angle (degrees).
-
-    Defines what fraction of the boundary has aquifer contact. For radial
-    aquifers, this is the angle of the aquifer sector.
-
-    Common values:
-        - 360°: Full circular encroachment (aquifer surrounds entire reservoir)
-                Example: Bottom water drive, full edge water drive
-        - 180°: Half-circle encroachment (aquifer on one side)
-                Example: Edge water drive on one flank
-        - 90°: Quarter-circle encroachment (aquifer at corner)
-        - 60°: One-sixth encroachment (limited aquifer contact)
-
-    The influx is scaled proportionally: Q_actual = Q_full * (θ/360°)
-
-    Default: 360.0 (full encroachment)
-    """
+    """Aquifer encroachment angle (degrees).  360 = full contact."""
 
     _pressure_history: typing.List[typing.Tuple[float, float]] = attrs.field(
         factory=list, init=False
     )
-    """
-    Internal state: List of (time, pressure_drop) tuples for convolution integral.
-
-    Used to compute water influx using Van Everdingen-Hurst superposition:
-        Q(t) = B * Σ[ΔP(t_i) * W_D'(t_D - t_Di)]
-    """
+    """History of (time_days, pressure_drop_psi) pairs for superposition."""
 
     _cumulative_influx: float = attrs.field(default=0.0, init=False)
-    """
-    Internal state: Cumulative water influx from aquifer (bbl or ft³).
-
-    Tracks total volume of water that has entered the reservoir from the
-    aquifer since simulation start. Used for material balance calculations.
-    """
+    """Cumulative water influx (ft³ or bbl, consistent with *B* units)."""
 
     _computed_aquifer_constant: typing.Optional[float] = attrs.field(
         default=None, init=False
     )
-    """
-    Internal state: Computed aquifer constant B (bbl/psi).
-
-    In physical properties mode, this is computed from k, φ, c_t, μ, radii, h.
-    In calibrated constant mode, this equals the user-provided aquifer_constant.
-    """
+    """Derived or user-supplied aquifer constant *B*."""
 
     _computed_dimensionless_radius_ratio: typing.Optional[float] = attrs.field(
         default=None, init=False
     )
-    """
-    Internal state: Computed dimensionless radius ratio r_D.
-
-    In physical properties mode, this is outer_radius / inner_radius.
-    In calibrated constant mode, this equals dimensionless_radius_ratio.
-    """
+    """Derived or user-supplied dimensionless radius ratio r_D."""
 
     _hydraulic_diffusivity: typing.Optional[float] = attrs.field(
         default=None, init=False
     )
-    """
-    Internal state: Hydraulic diffusivity η (ft²/day).
-
-    Only computed in physical properties mode:
-        η = 0.006328 * k / (φ * μ * c_t)
-
-    Used to convert real time to dimensionless time:
-        t_D = η * t / r_w²
-
-    In calibrated constant mode, this is None (simplified t_D calculation).
-    """
+    """Hydraulic diffusivity η (ft²/day) - *None* in calibrated-constant mode."""
 
     def __attrs_post_init__(self) -> None:
-        has_physical_properties = all(
+        has_physical = all(
             x is not None
-            for x in [
+            for x in (
                 self.aquifer_permeability,
                 self.aquifer_porosity,
                 self.aquifer_compressibility,
@@ -1869,21 +1019,20 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
                 self.inner_radius,
                 self.outer_radius,
                 self.aquifer_thickness,
-            ]
+            )
         )
-        has_calibrated_constant = self.aquifer_constant is not None
-        if not (has_physical_properties or has_calibrated_constant):
+        has_constant = self.aquifer_constant is not None
+
+        if not (has_physical or has_constant):
             raise ValidationError(
-                f"{self.__class__.__name__!r} requires either:\n"
-                "  Option A (recommended): Physical properties "
-                "(aquifer_permeability, aquifer_porosity, aquifer_compressibility, "
-                "water_viscosity, inner_radius, outer_radius, aquifer_thickness)\n"
-                "  Option B (legacy): Calibrated aquifer_constant\n"
-                "Please provide one complete set of parameters."
+                f"{type(self).__name__!r} requires either:\n"
+                "  Physical properties: aquifer_permeability, aquifer_porosity, "
+                "aquifer_compressibility, water_viscosity, inner_radius, "
+                "outer_radius, aquifer_thickness.\n"
+                "  Or a calibrated constant: aquifer_constant."
             )
 
-        if has_physical_properties:
-            # Compute from physical properties
+        if has_physical:
             assert self.inner_radius is not None and self.outer_radius is not None
             assert self.aquifer_permeability is not None
             assert self.aquifer_porosity is not None
@@ -1891,32 +1040,23 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
             assert self.water_viscosity is not None
             assert self.aquifer_thickness is not None
 
-            # Compute dimensionless radius ratio
             r_D = self.outer_radius / self.inner_radius
             object.__setattr__(self, "_computed_dimensionless_radius_ratio", r_D)
 
-            # Compute aquifer constant B (bbl/psi)
-            # B = 1.119 * φ * c_t * (r_e² - r_w²) * h * (θ/360°) / μ_w
-            # Note: angle factor applied in influx calculation, not here
             angle_fraction = self.angle / 360.0
-            r_squared_diff = self.outer_radius**2 - self.inner_radius**2
-            aquifer_constant_computed = (
+            r_sq_diff = self.outer_radius**2 - self.inner_radius**2
+            B = (
                 1.119
                 * self.aquifer_porosity
                 * self.aquifer_compressibility
                 * angle_fraction
-                * r_squared_diff
+                * r_sq_diff
                 * self.aquifer_thickness
                 / self.water_viscosity
             )
-            object.__setattr__(
-                self, "_computed_aquifer_constant", aquifer_constant_computed
-            )
+            object.__setattr__(self, "_computed_aquifer_constant", B)
 
-            # Compute hydraulic diffusivity η (ft²/day)
-            # η = 0.006328 * k / (φ * μ * c_t)
-            # Conversion factor 0.006328 = (1 mD * 1 day) / (1 ft² * 1 cP * 1 psi⁻¹)
-            hydraulic_diffusivity = (
+            eta = (
                 0.006328
                 * self.aquifer_permeability
                 / (
@@ -1925,10 +1065,9 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
                     * self.aquifer_compressibility
                 )
             )
-            object.__setattr__(self, "_hydraulic_diffusivity", hydraulic_diffusivity)
+            object.__setattr__(self, "_hydraulic_diffusivity", eta)
 
         else:
-            # Use calibrated constant
             object.__setattr__(
                 self, "_computed_aquifer_constant", self.aquifer_constant
             )
@@ -1937,137 +1076,86 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
                 "_computed_dimensionless_radius_ratio",
                 self.dimensionless_radius_ratio,
             )
-            # No hydraulic diffusivity in calibrated mode. We'll use simplified `t_D`
             object.__setattr__(self, "_hydraulic_diffusivity", None)
 
-    def apply(
+    def __call__(
         self,
-        *,
-        grid: NDimensionalGrid[NDimension],
-        boundary_indices: typing.Tuple[slice, ...],
+        boundary_slice: typing.Tuple[slice, ...],
         direction: Boundary,
-        metadata: typing.Optional[BoundaryMetadata] = None,
-    ) -> None:
+        metadata: BoundaryMetadata,
+    ) -> np.ndarray:
         """
-        Apply Carter-Tracy aquifer boundary condition.
+        Compute the aquifer water influx flux array.
 
-        Computes water influx based on pressure history using Van Everdingen-Hurst
-        convolution integral, then sets boundary pressure to maintain material
-        balance between reservoir and aquifer.
+        If `metadata.time` is *None* the aquifer falls back to a constant
+        influx rate of zero (no support) rather than raising an error,
+        which is the safest option when timing information is unavailable.
 
-        **Physical Process:**
-        1. Monitor pressure at reservoir-aquifer interface
-        2. Compute cumulative pressure drop history
-        3. Calculate water influx using superposition (convolution integral)
-        4. Update boundary pressure based on aquifer response
-
-        **Material Balance:**
-        The boundary pressure is set to reflect the aquifer's ability to support
-        reservoir pressure. Strong aquifers maintain pressure near initial value,
-        while weak aquifers allow more pressure decline.
-
-        :param grid: The grid to apply the boundary condition to (typically pressure grid).
-        :param boundary_indices: Tuple of slices defining the boundary region.
-        :param direction: Boundary direction (e.g., Boundary.RIGHT, Boundary.BOTTOM).
-        :param metadata: Optional metadata containing time, cell dimensions, etc.
+        :param boundary_slice: Ghost-cell layer slice.
+        :param direction: Face direction the aquifer is attached to.
+        :param metadata: Simulation context.  Must carry `fluid_properties`
+            so that boundary-face pressures can be read, and `time`
+            (seconds) for the superposition computation.
+        :return: Array of volumetric influx rates (ft³/day) shaped like the
+            boundary slice. Positive = water flows into the reservoir.
+        :raises ValidationError: If `metadata.fluid_properties` is *None*.
         """
-        if metadata is None or metadata.time is None:
-            # Can't apply time-dependent aquifer model without time information
-            # Fall back to constant pressure at initial value (infinite aquifer approximation)
-            grid[boundary_indices] = self.initial_pressure
-            return
-
-        current_time = metadata.time
-
-        # Get average boundary pressure from interior neighbor cells
-        # This represents the reservoir pressure at the aquifer interface
-        neighbor_indices = get_neighbor_indices(boundary_indices, direction)
-        avg_boundary_pressure = float(np.mean(grid[neighbor_indices]))
-
-        # Compute pressure drop from initial (ΔP = initial pressure - current pressure)
-        # Positive ΔP means reservoir pressure has declined → water influx
-        pressure_drop = self.initial_pressure - avg_boundary_pressure
-
-        # Update pressure history (append new pressure drop at current time)
-        # Only add if time has advanced (avoid duplicate entries at same timestep)
-        if not self._pressure_history or current_time > self._pressure_history[-1][0]:
-            self._pressure_history.append((current_time, pressure_drop))
-
-        # Compute water influx rate using Van Everdingen-Hurst convolution
-        water_influx_rate = self._compute_water_influx_rate(current_time)
-
-        # Update cumulative influx (integrate influx rate over timestep)
-        if len(self._pressure_history) > 1:
-            dt = current_time - self._pressure_history[-2][0]
-            self._cumulative_influx += water_influx_rate * dt
-
-        # Material Balance for Boundary Pressure
-        # The aquifer provides pressure support proportional to its strength
-        # and the water influx capacity.
-        #
-        # Physical interpretation:
-        # - Strong aquifer: Large influx capacity maintains pressure close to initial pressure
-        # - Weak aquifer: Limited influx allows more pressure decline
-        #
-        # We use a support factor based on the ratio of actual influx to
-        # maximum possible influx given the pressure drop.
-
-        assert self._computed_aquifer_constant is not None
-        if pressure_drop > 0:
-            # Maximum instantaneous influx capacity (pseudo-steady approximation)
-            # For finite aquifer: Q_max ≈ B * ΔP / (characteristic time factor)
-            # We use the W_D' value at current conditions as a proxy
-            max_influx_capacity = self._computed_aquifer_constant * pressure_drop
-
-            # Support factor: ratio of actual influx to maximum capacity
-            # if = 0: No influx (no support) because boundary pressure = reservoir pressure
-            # if = 1: Full capacity influx (strong support) because boundary pressure ≈ initial pressure
-            if max_influx_capacity > 0:
-                support_factor = min(
-                    1.0, water_influx_rate / (max_influx_capacity + 1e-10)
-                )
-            else:
-                support_factor = 0.0
-
-            # Boundary pressure interpolates between reservoir pressure and initial pressure
-            # based on aquifer support strength
-            boundary_pressure = self.initial_pressure - pressure_drop * (
-                1.0 - support_factor
+        if metadata.fluid_properties is None:
+            raise ValidationError(
+                f"{self.__class__.__name__} requires `metadata.fluid_properties`."
             )
-        else:
-            # No pressure drop or pressure increase (unusual) → maintain current pressure
-            boundary_pressure = avg_boundary_pressure
 
-        # Apply computed pressure to boundary cells
-        grid[boundary_indices] = boundary_pressure
+        shape = metadata.fluid_properties.pressure_grid[boundary_slice].shape
+        if metadata.time is None:
+            return np.zeros(shape, dtype=np.float64)
 
-    def _compute_water_influx_rate(self, current_time: float) -> float:
+        current_time_days = metadata.time * c.DAYS_PER_SECOND
+
+        nbr_slice = _neighbour_slice(boundary_slice, direction)
+        avg_pressure = float(
+            np.mean(metadata.fluid_properties.pressure_grid[nbr_slice])
+        )
+        pressure_drop = self.initial_pressure - avg_pressure
+
+        history = self._pressure_history
+        if not history or current_time_days > history[-1][0]:
+            history.append((current_time_days, pressure_drop))
+
+        influx_rate = self._compute_influx_rate(current_time_days)
+
+        if len(history) > 1:
+            dt = current_time_days - history[-2][0]
+            object.__setattr__(
+                self, "_cumulative_influx", self._cumulative_influx + influx_rate * dt
+            )
+
+        # Distribute the scalar influx uniformly across the boundary face cells.
+        n_cells = int(np.prod(shape)) if shape else 1
+        per_cell_flux = influx_rate / n_cells if n_cells > 0 else 0.0
+        return np.full(shape, per_cell_flux, dtype=np.float64)
+
+    def get_type(self) -> BoundaryType:
         """
-        Compute water influx rate using Van Everdingen-Hurst convolution integral.
+        Return `BoundaryType.FLUX`.
 
-        **Mathematical Formulation:**
-        The Carter-Tracy model uses superposition to compute total influx from
-        the history of pressure changes:
+        :return: `BoundaryType.FLUX`
+        """
+        return BoundaryType.FLUX
 
-            Q(t) = B * Σ[ΔP(t_i) * W_D'(t_D - t_Di)]
+    def is_static(self) -> bool:
+        """Return *False*; aquifer influx changes every time step.
 
-        where:
-            - Q(t) = water influx rate at current time (bbl/day or ft³/day)
-            - B = aquifer constant (bbl/psi or ft³/psi)
-            - ΔP(t_i) = pressure drop at historical time t_i (psi)
-            - W_D'(t_D) = dimensionless water influx derivative (dimensionless)
-            - t_D = dimensionless time since pressure change
+        :return: *False*
+        """
+        return False
 
-        **Dimensionless Time Calculation:**
-        - Physical properties mode: t_D = (η * Δt) / r_w²
-          where η = hydraulic diffusivity = 0.006328 * k / (φ * μ * c_t)
-        - Calibrated constant mode: t_D = Δt (simplified, dimensionally inconsistent)
+    def _compute_influx_rate(self, current_time_days: float) -> float:
+        """
+        Compute water influx rate using Van Everdingen-Hurst superposition.
 
-        The convolution integral accounts for the transient response of the aquifer
-        to each historical pressure change, properly superposing all effects.
-
-        :param current_time: Current simulation time (days)
-        :return: Water influx rate from aquifer (bbl/day or ft³/day)
+        :param current_time_days: Current simulation time (days).
+        :return: Total influx rate (bbl/day or ft³/day consistent with *B*
+            units).
         """
         if not self._pressure_history:
             return 0.0
@@ -2075,153 +1163,69 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
         assert self._computed_aquifer_constant is not None
         assert self._computed_dimensionless_radius_ratio is not None
 
-        influx_rate_sum = 0.0
-
-        # Convolution Integral
-        # Sum contributions from all past pressure changes using superposition
-        for time, pressure_drop in self._pressure_history:
-            if pressure_drop <= 0:
-                # No influx if no pressure drop (or pressure increase)
+        total = 0.0
+        for t_i, dp_i in self._pressure_history:
+            if dp_i <= 0.0:
+                continue
+            dt = current_time_days - t_i
+            if dt <= 0.0:
                 continue
 
-            # Time elapsed since this pressure change
-            time_difference = current_time - time
-            if time_difference <= 0:
-                continue
-
-            # Compute Dimensionless Time
             if self._hydraulic_diffusivity is not None:
-                # Physical properties mode: Dimensionally correct calculation
-                # t_D = (k / (φ * μ * c_t)) * (t / r_w²) = η * t / r_w²
                 assert self.inner_radius is not None
-                dimensionless_time = (
-                    self._hydraulic_diffusivity
-                    * time_difference
-                    / (self.inner_radius**2)
-                )
+                t_D = self._hydraulic_diffusivity * dt / (self.inner_radius**2)
             else:
-                # Calibrated constant mode: Simplified (dimensionally inconsistent)
-                # User should ensure time units are consistent with aquifer_constant calibration
-                dimensionless_time = time_difference
+                t_D = dt
 
-            # Van Everdingen-Hurst Function
-            # Compute dimensionless water influx derivative at this time
             W_D_prime = self._van_everdingen_hurst_derivative(
-                dimensionless_time=dimensionless_time,
-                dimensionless_radius_ratio=self._computed_dimensionless_radius_ratio,
+                t_D, self._computed_dimensionless_radius_ratio
             )
+            total += dp_i * W_D_prime
 
-            # Add contribution from this pressure change to total influx
-            influx_rate_sum += pressure_drop * W_D_prime
-
-        # Scale by Aquifer Constant
-        # B is already scaled by angle in `__attrs_post_init__` for physical properties mode
-        # For calibrated constant mode, we apply angle scaling here
         if self._hydraulic_diffusivity is not None:
-            # Physical properties mode: angle already in B
-            total_influx_rate = self._computed_aquifer_constant * influx_rate_sum
+            return self._computed_aquifer_constant * total
         else:
-            # Calibrated constant mode: apply angle fraction
-            angle_fraction = self.angle / 360.0
-            total_influx_rate = (
-                self._computed_aquifer_constant * angle_fraction * influx_rate_sum
-            )
-
-        return total_influx_rate
+            return self._computed_aquifer_constant * (self.angle / 360.0) * total
 
     @staticmethod
-    def _van_everdingen_hurst_derivative(
-        dimensionless_time: float, dimensionless_radius_ratio: float
-    ) -> float:
+    def _van_everdingen_hurst_derivative(t_D: float, r_D: float) -> float:
         """
-        Van Everdingen-Hurst dimensionless water influx derivative W_D'(t_D, r_D).
+        Evaluate the dimensionless water influx derivative W_D'(t_D, r_D).
 
-        **Improved approximation** using Chatas' formulation for finite radial aquifer.
+        Uses a Chatas-style approximation with a sigmoid blend between the
+        early-time (infinite-acting) and late-time (boundary-dominated)
+        regimes.
 
-        The Van Everdingen-Hurst functions describe transient pressure response
-        and water influx for finite radial aquifers. This function computes the
-        derivative W_D'(t_D, r_D), which appears in the Carter-Tracy convolution
-        integral.
-
-        **Asymptotic Behavior:**
-        - **Early time (t_D < 0.1)**: Infinite-acting behavior
-            W_D'(t_D) ≈ √(t_D/π)
-          All aquifers behave the same regardless of size (r_D).
-
-        - **Intermediate time (0.1 < t_D < 2.0)**: Transition regime
-          Smooth transition from infinite-acting to boundary-dominated flow.
-
-        - **Late time (t_D > 2.0)**: Boundary-dominated exponential decline
-            W_D'(t_D) ≈ (2*r_D²)/(r_D²-1) * exp(-β*t_D)
-          where β = π²/(r_D²-1) is the first eigenvalue.
-          Smaller aquifers (low r_D) decline faster.
-
-        **Physical Interpretation:**
-        - Early time: Aquifer appears infinite (pressure disturbance hasn't
-          reached outer boundary)
-        - Late time: Finite boundary effects dominate (outer boundary no-flow
-          condition limits influx)
-
-        **Approximation Quality:**
-        - Exact solution requires infinite series (Bessel functions)
-        - This approximation matches exact solution within ~5% for all t_D > 0.01
-        - Based on Chatas (1953) practical treatment
-
-        :param dimensionless_time: Dimensionless time t_D = (η * t) / r_w²
-            where η = hydraulic diffusivity = 0.006328 * k / (φ * μ * c_t)
-        :param dimensionless_radius_ratio: Dimensionless radius r_D = r_outer / r_inner
-            Typical range: 2-50 for finite aquifers
-        :return: Dimensionless water influx derivative W_D'(t_D, r_D)
-            Units: dimensionless (1/psi in dimensional form after scaling by B)
+        :param t_D: Dimensionless time.
+        :param r_D: Dimensionless radius ratio (r_outer / r_inner).
+        :return: W_D'(t_D, r_D) - dimensionless.
         """
-        if dimensionless_time <= 0:
+        if t_D <= 0.0:
             return 0.0
 
-        # Early Time: Infinite-Acting Approximation
-        # For small t_D, pressure disturbance hasn't reached outer boundary
-        # Solution is independent of r_D (same for all aquifer sizes)
-        if dimensionless_time < 0.1:
-            return float(np.sqrt(dimensionless_time / np.pi))
+        early = float(np.sqrt(t_D / np.pi))
 
-        # Transition and Late Time
-        # Use Chatas' approximation for finite radial aquifer
-        r_D_squared = dimensionless_radius_ratio * dimensionless_radius_ratio
-        denominator = r_D_squared - 1.0
+        if t_D < 0.1:
+            return early
 
-        if denominator < 1e-6:
-            # Nearly infinite aquifer (r_D → 1 or r_D very small)
-            # This shouldn't happen physically (r_D ≥ 1 always), but handle gracefully
-            return float(np.sqrt(dimensionless_time / np.pi))
+        r_D_sq = r_D * r_D
+        denom = r_D_sq - 1.0
+        if denom < 1e-6:
+            return early
 
-        # Late Time: Exponential Decline
-        # First eigenvalue for finite radial aquifer
-        beta = (np.pi**2) / denominator
+        beta = (np.pi**2) / denom
+        late = (2.0 * r_D_sq / denom) * np.exp(-beta * t_D)
 
-        # Late time exponential term
-        late_time_coefficient = 2.0 * r_D_squared / denominator
-        late_time_term = late_time_coefficient * np.exp(-beta * dimensionless_time)
-
-        # Smooth Transition
-        # Use sigmoid weighting to smoothly transition from early to late time
-        # Centers transition around t_D ≈ 0.5 with width controlled by factor 10
-        transition_weight = 1.0 / (1.0 + np.exp(-10.0 * (dimensionless_time - 0.5)))
-
-        # Weighted combination: early time at low t_D, late time at high t_D
-        early_time_term = np.sqrt(dimensionless_time / np.pi)
-        W_D_prime = (
-            1.0 - transition_weight
-        ) * early_time_term + transition_weight * late_time_term
-        return float(W_D_prime)
+        weight = 1.0 / (1.0 + np.exp(-10.0 * (t_D - 0.5)))
+        return float((1.0 - weight) * early + weight * late)
 
     def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
-        data = {
+        data: typing.Dict[str, typing.Any] = {
             "initial_pressure": self.initial_pressure,
             "angle": self.angle,
-            "pressure_history": self._pressure_history,
+            "pressure_history": list(self._pressure_history),
             "cumulative_influx": self._cumulative_influx,
         }
-
-        # Save either physical properties or calibrated constant
         if self._hydraulic_diffusivity is not None:
             data.update(
                 {
@@ -2247,6 +1251,7 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
     def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
         if "aquifer_permeability" in data:
             instance = cls(
+                initial_pressure=data["initial_pressure"],
                 aquifer_permeability=data["aquifer_permeability"],
                 aquifer_porosity=data["aquifer_porosity"],
                 aquifer_compressibility=data["aquifer_compressibility"],
@@ -2254,381 +1259,352 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
                 inner_radius=data["inner_radius"],
                 outer_radius=data["outer_radius"],
                 aquifer_thickness=data["aquifer_thickness"],
-                initial_pressure=data["initial_pressure"],
                 angle=data.get("angle", 360.0),
             )
         else:
             instance = cls(
+                initial_pressure=data["initial_pressure"],
                 aquifer_constant=data["aquifer_constant"],
                 dimensionless_radius_ratio=data.get("dimensionless_radius_ratio", 10.0),
-                initial_pressure=data["initial_pressure"],
                 angle=data.get("angle", 360.0),
             )
-
-        instance._pressure_history = data.get("pressure_history", [])
-        instance._cumulative_influx = data.get("cumulative_influx", 0.0)
+        # Restore mutable history
+        object.__setattr__(
+            instance, "_pressure_history", list(data.get("pressure_history", []))
+        )
+        object.__setattr__(
+            instance, "_cumulative_influx", float(data.get("cumulative_influx", 0.0))
+        )
         return instance
+
+
+NoFlowBoundary = NeumannBoundary
+"""Alias for `NeumannBoundary` with default zero flux - a sealed boundary."""
+
+
+# Face-descriptor helpers
+_FACE_SLICES_2D: typing.Dict[
+    Boundary, typing.Tuple[typing.Tuple[slice, ...], typing.Tuple[slice, ...]]
+] = {
+    Boundary.LEFT: (
+        (slice(0, 1), slice(None)),
+        (slice(1, 2), slice(None)),
+    ),
+    Boundary.RIGHT: (
+        (slice(-1, None), slice(None)),
+        (slice(-2, -1), slice(None)),
+    ),
+    Boundary.FRONT: (
+        (slice(None), slice(0, 1)),
+        (slice(None), slice(1, 2)),
+    ),
+    Boundary.BACK: (
+        (slice(None), slice(-1, None)),
+        (slice(None), slice(-2, -1)),
+    ),
+}
+
+_FACE_SLICES_3D: typing.Dict[
+    Boundary, typing.Tuple[typing.Tuple[slice, ...], typing.Tuple[slice, ...]]
+] = {
+    Boundary.LEFT: (
+        (slice(0, 1), slice(None), slice(None)),
+        (slice(1, 2), slice(None), slice(None)),
+    ),
+    Boundary.RIGHT: (
+        (slice(-1, None), slice(None), slice(None)),
+        (slice(-2, -1), slice(None), slice(None)),
+    ),
+    Boundary.FRONT: (
+        (slice(None), slice(0, 1), slice(None)),
+        (slice(None), slice(1, 2), slice(None)),
+    ),
+    Boundary.BACK: (
+        (slice(None), slice(-1, None), slice(None)),
+        (slice(None), slice(-2, -1), slice(None)),
+    ),
+    Boundary.BOTTOM: (
+        (slice(None), slice(None), slice(0, 1)),
+        (slice(None), slice(None), slice(1, 2)),
+    ),
+    Boundary.TOP: (
+        (slice(None), slice(None), slice(-1, None)),
+        (slice(None), slice(None), slice(-2, -1)),
+    ),
+}
+
+
+def _face_slices(
+    ndim: int,
+) -> typing.Dict[
+    Boundary, typing.Tuple[typing.Tuple[slice, ...], typing.Tuple[slice, ...]]
+]:
+    """
+    Return the ghost-slice / neighbour-slice pair dict for a given grid dimensionality.
+
+    :param ndim: Grid dimensionality (2 or 3).
+    :return: Dict mapping each `Boundary` face to a 2-tuple of
+        ``(ghost_slice, neighbour_slice)``.
+    :raises ValidationError: If *ndim* is not 2 or 3.
+    """
+    if ndim == 2:
+        return _FACE_SLICES_2D
+    if ndim == 3:
+        return _FACE_SLICES_3D
+    raise ValidationError(f"Grid must be 2-D or 3-D, got {ndim}-D.")
 
 
 @typing.final
 @attrs.frozen
-class GridBoundaryCondition(Serializable, typing.Generic[NDimension]):
+class BoundaryConditions(Serializable, typing.Generic[NDimension]):
     """
-    Container for defining boundary conditions for a grid.
-    Each face in a 3D or 2D grid (x-, x+, y-, y+, z-, z+) can have its own boundary condition.
+    Container that assigns a `BoundaryCondition` to every face of the grid.
 
-    In 2D:
-    - Only x- (left/west), x+ (right/east), y- (bottom/south), y+ (top/north) are applied.
+    For a 2-D grid the active faces are left, right, front, and back.
+    For a 3-D grid all six faces are active (bottom and top are added).
 
-    In 3D:
-    - All six faces are applied.
+    Defaults to `NeumannBoundary()` (zero flux, no-flow) on every face.
 
-    ```mermaid
-                            z-
-                ↑
-               ┌───────────────┐
-              /|              /|
-             / |             / |
-            /  |            /  |
-        y- /   |           /   |  x+
-          ┌───────────────┐    |
-          |   |           |    |
-          |   |           |    |
-          |   |           |    |
-          |   └───────────|────┘
-          |  /            |  /
-          | /             | /
-          |/              |/
-          └───────────────┘
-          ↑               ↑
-          z+              y+
-        (bottom)        (front)
-    ```
+    The central method is `get_boundaries`, which evaluates each face's
+    condition and assembles two flat-key `GhostCellMap` dicts. One for
+    `FLUX` ghost cells and one for `PRESSURE` ghost cells.
 
-    Left face  → x-
-    Right face → x+
-    Front face → y+
-    Back face  → y-
-    Bottom     → z+
-    Top        → z-
+    A per-face *static cache* avoids recomputing constant conditions
+    (e.g. `NeumannBoundary` or `DirichletBoundary`) on every time step.
+    Only faces whose condition returns `is_static() == False` are
+    re-evaluated on subsequent calls to `get_boundaries`.
 
-    Defaults to no-flow boundary for all sides if not specified.
-    """
+    :param left: Condition for the x- face (west).
+    :param right: Condition for the x+ face (east).
+    :param front: Condition for the y- face (south).
+    :param back: Condition for the y+ face (north).
+    :param bottom: Condition for the z- face (shallowest layer).
+    :param top: Condition for the z+ face (deepest layer).
 
-    left: BoundaryCondition = attrs.field(factory=NoFlowBoundary)
-    """Boundary condition for the left face (x-)."""
-    right: BoundaryCondition = attrs.field(factory=NoFlowBoundary)
-    """Boundary condition for the right face (x+)."""
-    front: BoundaryCondition = attrs.field(factory=NoFlowBoundary)
-    """Boundary condition for the front face (y-)."""
-    back: BoundaryCondition = attrs.field(factory=NoFlowBoundary)
-    """Boundary condition for the back face (y+)."""
-    bottom: BoundaryCondition = attrs.field(factory=NoFlowBoundary)
-    """Boundary condition for the bottom face (z-)."""
-    top: BoundaryCondition = attrs.field(factory=NoFlowBoundary)
-    """Boundary condition for the top face (z+)."""
+    Example:
 
-    def __attrs_post_init__(self) -> None:
-        """Validate boundary condition configuration."""
-        self._validate_periodic_boundaries()
-
-    def _validate_periodic_boundaries(self) -> None:
-        """
-        Validate that periodic boundary conditions are properly paired.
-
-        For proper periodic BCs, both opposite faces must use PeriodicBoundary.
-
-        :raises ValidationError: if one face is periodic but its opposite is not.
-        """
-        # Check x-direction (left-right) pairing
-        left_is_periodic = isinstance(self.left, PeriodicBoundary)
-        right_is_periodic = isinstance(self.right, PeriodicBoundary)
-        if left_is_periodic != right_is_periodic:
-            raise ValidationError(
-                "Periodic boundary conditions must be specified on both opposite faces. "
-                f"X-direction: left={'Periodic' if left_is_periodic else 'Non-periodic'}, "
-                f"right={'Periodic' if right_is_periodic else 'Non-periodic'}. "
-                "Both left and right boundaries must be PeriodicBoundary for proper periodic BC."
-            )
-
-        # Check y-direction (front-back) pairing
-        front_is_periodic = isinstance(self.front, PeriodicBoundary)
-        back_is_periodic = isinstance(self.back, PeriodicBoundary)
-        if front_is_periodic != back_is_periodic:
-            raise ValidationError(
-                "Periodic boundary conditions must be specified on both opposite faces. "
-                f"Y-direction: front={'Periodic' if front_is_periodic else 'Non-periodic'}, "
-                f"back={'Periodic' if back_is_periodic else 'Non-periodic'}. "
-                "Both front and back boundaries must be PeriodicBoundary for proper periodic BC."
-            )
-
-        # Check z-direction (bottom-top) pairing
-        bottom_is_periodic = isinstance(self.bottom, PeriodicBoundary)
-        top_is_periodic = isinstance(self.top, PeriodicBoundary)
-        if bottom_is_periodic != top_is_periodic:
-            raise ValidationError(
-                "Periodic boundary conditions must be specified on both opposite faces. "
-                f"Z-direction: bottom={'Periodic' if bottom_is_periodic else 'Non-periodic'}, "
-                f"top={'Periodic' if top_is_periodic else 'Non-periodic'}. "
-                "Both bottom and top boundaries must be PeriodicBoundary for proper periodic BC."
-            )
-
-    def apply(
-        self,
-        padded_grid: NDimensionalGrid[NDimension],
-        metadata: typing.Optional[BoundaryMetadata] = None,
-        pad_width: int = 1,
-    ) -> None:
-        """
-        Applies each defined boundary condition to the padded grid with ghost cells.
-
-        - For 2D grids (shape: [nx+2, ny+2]), x and y boundaries are applied.
-        - For 3D grids (shape: [nx+2, ny+2, nz+2]), x, y, and z boundaries are applied.
-
-        :param pad_width: Number of ghost cells used for grid padding.
-        :raises ValidationError: If grid dimensions are inconsistent with metadata.grid_shape
-        """
-        # Validate ghost cells if metadata provides grid_shape
-        if metadata is not None and metadata.grid_shape is not None:
-            ghost_cells_count = pad_width * 2
-            expected_shape = tuple((s + ghost_cells_count) for s in metadata.grid_shape)
-            if padded_grid.shape != expected_shape:
-                raise ValidationError(
-                    f"Grid shape {padded_grid.shape} does not match expected padded shape "
-                    f"{expected_shape} (grid_shape {metadata.grid_shape} + {ghost_cells_count} ghost cells per dimension). "
-                    "Ensure the grid has ghost cells before applying boundary conditions."
-                )
-
-        if padded_grid.ndim == 2:
-            self.left.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(0, pad_width), slice(None)),
-                direction=Boundary.LEFT,
-                metadata=metadata,
-            )
-            self.right.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(-pad_width, None), slice(None)),
-                direction=Boundary.RIGHT,
-                metadata=metadata,
-            )
-            self.front.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(None), slice(0, pad_width)),
-                direction=Boundary.FRONT,
-                metadata=metadata,
-            )
-            self.back.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(None), slice(-pad_width, None)),
-                direction=Boundary.BACK,
-                metadata=metadata,
-            )
-        elif padded_grid.ndim == 3:
-            self.left.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(0, pad_width), slice(None), slice(None)),
-                direction=Boundary.LEFT,
-                metadata=metadata,
-            )
-            self.right.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(-pad_width, None), slice(None), slice(None)),
-                direction=Boundary.RIGHT,
-                metadata=metadata,
-            )
-            self.front.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(None), slice(0, pad_width), slice(None)),
-                direction=Boundary.FRONT,
-                metadata=metadata,
-            )
-            self.back.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(None), slice(-pad_width, None), slice(None)),
-                direction=Boundary.BACK,
-                metadata=metadata,
-            )
-            self.bottom.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(None), slice(None), slice(0, pad_width)),
-                direction=Boundary.BOTTOM,
-                metadata=metadata,
-            )
-            self.top.apply(
-                grid=padded_grid,
-                boundary_indices=(slice(None), slice(None), slice(-pad_width, None)),
-                direction=Boundary.TOP,
-                metadata=metadata,
-            )
-        else:
-            raise ValidationError(
-                "`padded_grid` must be a 2D or 3D numpy array with ghost cells."
-            )
-
-
-@typing.final
-class BoundaryConditions(
-    defaultdict[str, GridBoundaryCondition[NDimension]], Serializable
-):
-    """
-    A container for managing reservoir model boundary conditions for different properties.
-
-    This class allows you to define boundary conditions for various properties
-    in a multi-dimensional grid, with a default factory to create conditions.
-
-    Example usage with the new enhanced boundary conditions:
     ```python
-    import numpy as np
-    from bores.boundary_conditions import *
-
-    # Create coordinate metadata for spatial boundaries
-    x_coords = np.linspace(0, 1000, 50)  # 1000 ft wide
-    y_coords = np.linspace(0, 500, 25)   # 500 ft long
-    coordinates = np.meshgrid(x_coords, y_coords, indexing='ij')
-
-    # Define separate boundary conditions for each property
-    boundary_conditions = BoundaryConditions(
-        conditions={
-            # Pressure boundary conditions
-            "pressure": GridBoundaryCondition(
-                left=ConstantBoundary(constant=2000.0),  # Fixed pressure inlet
-                right=NoFlowBoundary(),  # Sealed boundary
-                front=LinearGradientBoundary(  # Pressure gradient
-                    start=2000.0,
-                    end=1800.0,
-                    direction="x"
-                ),
-                back=FluxBoundary(flux=-100.0),  # Production
-            ),
-            # Temperature boundary conditions (separate from pressure)
-            "temperature": GridBoundaryCondition(
-                left=SpatialBoundary(
-                    func=lambda x, y: 60 + 0.025 * y  # Geothermal gradient
-                ),
-                right=NoFlowBoundary(),
-                front=TimeDependentBoundary(
-                    func=lambda t: 80 + 10 * np.sin(t / 3600)  # Daily cycle
-                ),
-                back=ConstantBoundary(constant=70.0),
-            )
-        },
-        factory=lambda: GridBoundaryCondition(  # Default: all no-flow
-            left=NoFlowBoundary(),
-            right=NoFlowBoundary(),
-            front=NoFlowBoundary(),
-            back=NoFlowBoundary(),
-        ),
+    from bores.boundary_conditions import (
+        BoundaryConditions, NeumannBoundary, DirichletBoundary,
+        RobinBoundary, ParameterizedBoundaryFunction,
     )
 
-    # Create separate padded grids for each property
-    pressure_grid = np.full((52, 27), 1500.0)  # +2 for ghost cells
-    temperature_grid = np.full((52, 27), 65.0)
-
-    # Option 1: Auto-generate coordinates from cell dimensions
-    pressure_metadata = BoundaryMetadata(
-        cell_dimension=(20.0, 20.0),        # 20x20 ft cells
-        thickness_grid=np.full((50, 25), 10.0),  # 10 ft thickness (no ghost cells)
-        time=0.0,
-        property_name="pressure",
-        grid_shape=(50, 25)                 # Coordinates auto-generated from this
+    alpha = ParameterizedBoundaryFunction(
+        func_name="constant_productivity_index",
+        params={"value": 5.0},
+    )
+    bc = BoundaryConditions(
+        left=DirichletBoundary(pressure=3000.0),
+        right=RobinBoundary(pressure=1500.0, alpha=alpha),
+        front=NeumannBoundary(),   # no-flow
+        back=NeumannBoundary(),    # no-flow
     )
 
-    # Option 2: Provide explicit coordinates
-    temperature_metadata = BoundaryMetadata(
-        cell_dimension=(20.0, 20.0),
-        coordinates=np.stack(coordinates, axis=-1),  # Explicit coordinates
-        thickness_grid=np.full((50, 25), 10.0),  # No ghost cells
-        time=0.0,
-        property_name="temperature",
-        grid_shape=(50, 25)
-    )    # Each property gets its own GridBoundaryCondition
-    pressure_bc = boundary_conditions["pressure"]
-    temperature_bc = boundary_conditions["temperature"]
-
-    pressure_bc.apply(pressure_grid, metadata=pressure_metadata)
-    temperature_bc.apply(temperature_grid, metadata=temperature_metadata)
+    flux_map, pressure_map = bc.get_boundaries(
+        grid_shape=model.grid_shape,
+        metadata=metadata,
+        pad_width=1,
+    )
     ```
-
     """
 
-    __abstract_serializable__ = True
+    left: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    """Condition for the x- face (west)."""
+    right: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    """Condition for the x+ face (east)."""
+    front: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    """Condition for the y- face (south)."""
+    back: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    """Condition for the y+ face (north)."""
+    bottom: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    """Condition for the z- face (shallowest layer)."""
+    top: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    """Condition for the z+ face (deepest layer)."""
 
-    def __init__(
+    _flux_cache: GhostCellMap = attrs.field(factory=dict, init=False, repr=False)
+    """Flat-key map of ghost-cell flat indices → flux values (ft³/day)."""
+
+    _pressure_cache: GhostCellMap = attrs.field(factory=dict, init=False, repr=False)
+    """Flat-key map of ghost-cell flat indices → pressure values (psi)."""
+
+    _cache_initialised: bool = attrs.field(default=False, init=False, repr=False)
+    """*True* once the first `get_boundaries` call has populated the caches."""
+
+    def _face_conditions(
+        self, ndim: int
+    ) -> typing.List[typing.Tuple[Boundary, BoundaryCondition]]:
+        """
+        Return the (direction, condition) pairs active for a grid of *ndim* dimensions.
+
+        :param ndim: Grid dimensionality (2 or 3).
+        :return: List of ``(Boundary, BoundaryCondition)`` pairs.
+        """
+        pairs: typing.List[typing.Tuple[Boundary, BoundaryCondition]] = [
+            (Boundary.LEFT, self.left),
+            (Boundary.RIGHT, self.right),
+            (Boundary.FRONT, self.front),
+            (Boundary.BACK, self.back),
+        ]
+        if ndim == 3:
+            pairs.extend(
+                [
+                    (Boundary.BOTTOM, self.bottom),
+                    (Boundary.TOP, self.top),
+                ]
+            )
+        return pairs
+
+    def get_boundaries(
         self,
-        conditions: typing.Optional[
-            typing.Mapping[str, GridBoundaryCondition[NDimension]]
-        ] = None,
-        factory: typing.Optional[
-            typing.Callable[[], GridBoundaryCondition[NDimension]]
-        ] = GridBoundaryCondition[NDimension],
-    ) -> None:
+        grid_shape: typing.Tuple[int, ...],
+        metadata: BoundaryMetadata,
+        pad_width: int = 1,
+    ) -> typing.Tuple[GhostCellMap, GhostCellMap]:
         """
-        Initializes the `BoundaryConditions`.
+        Evaluate all face boundary conditions and return two flat ghost-cell maps.
 
-        :param factory: Optional callable to provide default boundary conditions.
-            If not provided, defaults to `NoFlowBoundary` for all sides/axes.
+        On the *first* call every face is evaluated and the results are stored
+        in the internal caches. On *subsequent* calls only faces whose
+        condition reports `is_static() == False` are re-evaluated; static
+        faces reuse their cached values.  This means that for a model with
+        only no-flow or constant-pressure boundaries the boundary evaluation
+        cost after the first time step is essentially zero.
 
-        :param conditions: Optional mapping of property names to their respective boundary conditions.
+        The returned maps use a flat integer key:
+        ```
+        flat_index = i * ny_padded * nz_padded + j * nz_padded + k
+        ```
+
+        where ``(i, j, k)`` are the *padded* grid indices of the ghost cell.
+        Both dicts are the *same* Python objects that back the cache, so
+        callers must not mutate them; treat them as read-only views.
+
+        :param grid_shape: Un-padded grid shape ``(nx, ny)`` or ``(nx, ny, nz)``.
+        :param metadata: Simulation context bundle passed through to each
+            boundary condition.
+        :param pad_width: Ghost-cell layer width. Must match the padding used
+            when the grids were created. Default is *1*.
+        :return: A 2-tuple ``(flux_map, pressure_map)`` where each element is
+            a `GhostCellMap` (``Dict[int, float]``).
+            *flux_map* - ghost cells controlled by a FLUX-type condition,
+            values in ft³/day.
+            *pressure_map* - ghost cells controlled by a PRESSURE-type
+            condition, values in psi.
+        :raises ValidationError: If *grid_shape* has unsupported dimensionality
+            or required metadata fields are absent for a given condition.
         """
-        super().__init__(factory)
-        if conditions:
-            self.update(conditions)
-        self.factory = factory
+        ndim = len(grid_shape)
+        padded_shape = tuple(s + 2 * pad_width for s in grid_shape)
+        faces = _face_slices(ndim)
+        face_conditions = self._face_conditions(ndim)
 
-    def __reduce_ex__(self, protocol):
+        flux_cache = self._flux_cache
+        pressure_cache = self._pressure_cache
+        first_call = not self._cache_initialised
+
+        for direction, condition in face_conditions:
+            ghost_slice, _ = faces[direction]
+
+            # Skip static faces after the first initialisation pass.
+            if not first_call and condition.is_static():
+                continue
+
+            values = condition(ghost_slice, direction, metadata)
+            bc_type = condition.get_type()
+
+            # Determine which cache to write into.
+            if bc_type == BoundaryType.FLUX:
+                target_cache = flux_cache
+                other_cache = pressure_cache
+            else:
+                target_cache = pressure_cache
+                other_cache = flux_cache
+
+            # Materialise the ghost indices covered by this slice.
+            ghost_indices = self._materialise_ghost_indices(
+                ghost_slice=ghost_slice,
+                padded_shape=padded_shape,
+                ndim=ndim,
+            )
+            flat_values = values.ravel()
+
+            # Remove stale entries from the opposite cache (a face can only
+            # have one BC type at a time; if the type has changed between
+            # restarts we clean up).
+            for idx in ghost_indices:
+                other_cache.pop(idx, None)
+
+            # Write new values into the target cache using in-place update
+            # (preserving the dict identity so the frozen constraint holds).
+            target_cache.update(
+                {idx: float(v) for idx, v in zip(ghost_indices, flat_values)}
+            )
+
+        if first_call:
+            object.__setattr__(self, "_cache_initialised", True)
+
+        return flux_cache, pressure_cache
+
+    @staticmethod
+    def _materialise_ghost_indices(
+        ghost_slice: typing.Tuple[slice, ...],
+        padded_shape: typing.Tuple[int, ...],
+        ndim: int,
+    ) -> typing.List[int]:
         """
-        Support for pickling/copying.
+        Return a flat list of flat indices for every cell selected by *ghost_slice*.
 
-        :return tuple: (callable, args, state) for reconstruction
+        :param ghost_slice: Slice tuple selecting the ghost-cell layer.
+        :param padded_shape: Shape of the full padded grid.
+        :param ndim: Grid dimensionality.
+        :return: Ordered list of flat indices (same ordering as `np.ndarray.ravel`).
         """
-        return (self.__class__, (dict(self), self.factory), None, None, None)
+        # Build the concrete range for each dimension from the slice.
+        ranges: typing.List[range] = []
+        for dim_idx, sl in enumerate(ghost_slice):
+            dim_size = padded_shape[dim_idx]
+            start, stop, step = sl.indices(dim_size)
+            ranges.append(range(start, stop, step if step is not None else 1))
 
-    def __deepcopy__(self, memo):
-        """
-        Ensures the factory and all boundary conditions are properly copied.
-        """
-        # Create new instance without calling __init__ yet
-        cls = self.__class__
-        result = cls.__new__(cls)
-        memo[id(self)] = result
+        indices: typing.List[int] = []
 
-        # Try to deep copy the factory, fall back to shallow copy if not possible
-        try:
-            new_factory = copy.deepcopy(self.factory, memo)
-        except (TypeError, AttributeError):
-            # Factory might be a lambda or non-picklable function
-            new_factory = self.factory
-
-        # Deep copy all the boundary conditions
-        new_conditions = {k: copy.deepcopy(v, memo) for k, v in self.items()}
-
-        result.__init__(conditions=new_conditions, factory=new_factory)
-
-        # Deep copy any other instance attributes that might have been added
-        for k, v in self.__dict__.items():
-            if k not in ("factory", "default_factory"):
-                setattr(result, k, copy.deepcopy(v, memo))
-        return result
-
-    def __copy__(self):
-        return self.__class__(conditions=dict(self), factory=self.factory)
-
-    @classmethod
-    def __load__(
-        cls,
-        data: typing.Mapping[str, typing.Any],
-    ) -> Self:
-        conditions_data = data.get("conditions", {})
-        conditions: typing.Dict[str, GridBoundaryCondition[NDimension]] = {
-            prop: GridBoundaryCondition.load(cond_data)
-            for prop, cond_data in conditions_data.items()
-        }
-        return cls(conditions=conditions)
+        if ndim == 2:
+            ny_p = padded_shape[1]
+            for i in ranges[0]:
+                for j in ranges[1]:
+                    indices.append(i * ny_p + j)
+        else:
+            ny_p = padded_shape[1]
+            nz_p = padded_shape[2]
+            for i in ranges[0]:
+                for j in ranges[1]:
+                    for k in ranges[2]:
+                        indices.append(i * ny_p * nz_p + j * nz_p + k)
+        return indices
 
     def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
-        return {"conditions": {prop: cond.dump(recurse) for prop, cond in self.items()}}
+        return {
+            "left": self.left.dump(recurse),
+            "right": self.right.dump(recurse),
+            "front": self.front.dump(recurse),
+            "back": self.back.dump(recurse),
+            "bottom": self.bottom.dump(recurse),
+            "top": self.top.dump(recurse),
+        }
 
+    @classmethod
+    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
+        def _load_face(key: str) -> BoundaryCondition:
+            face_data = data.get(key)
+            if face_data is None:
+                return NeumannBoundary()
+            return BoundaryCondition.load(face_data)  # type: ignore[return-value]
 
-default_bc: GridBoundaryCondition[typing.Any] = BoundaryConditions()["__default__"]
-"""Default boundary conditions using `NoFlowBoundary` for all sides."""
+        return cls(
+            left=_load_face("left"),
+            right=_load_face("right"),
+            front=_load_face("front"),
+            back=_load_face("back"),
+            bottom=_load_face("bottom"),
+            top=_load_face("top"),
+        )

@@ -11,7 +11,7 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.boundary_conditions import BoundaryConditions, default_bc
+from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.datastructures import (
@@ -2826,9 +2826,6 @@ def run(
         logger.debug("Yielding initial model state")
         yield state
 
-        no_flow_pressure_bc = isinstance(
-            boundary_conditions["pressure"], type(default_bc)
-        )
         while not timer.done():
             # We first propose the time step size for the next step
             # `timer.step` is still the last accepted step
@@ -2863,22 +2860,7 @@ def run(
                         pad_width=pad_width,
                     )
                     logger.debug("Boundary conditions applied.")
-                    # If the pressure boundary condition is not no-flow, Then apply PVT update before next (pressure) evolution
-                    # since most PVT properties depend on pressure. This is skipped for no-flow BCs to save computation.
-                    # because mirroring neighbour values for PVT properties is sufficient for no-flow BCs.
-                    if no_flow_pressure_bc is False:
-                        logger.debug(
-                            "Updating PVT fluid properties due to boundary condition changes..."
-                        )
-                        padded_fluid_properties = update_fluid_properties(
-                            fluid_properties=padded_fluid_properties,
-                            wells=wells,
-                            miscibility_model=miscibility_model,
-                            pvt_tables=pvt_tables,
-                            freeze_saturation_pressure=freeze_saturation_pressure,
-                        )
-                        logger.debug("PVT fluid properties updated")
-
+                    
                     # Build relative permeability, relative mobility, and capillary pressure grids
                     logger.debug(
                         f"Rebuilding rock-fluid property grids for time step {new_step}..."

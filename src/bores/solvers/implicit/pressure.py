@@ -180,6 +180,7 @@ def evolve_pressure(
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
+            current_oil_pressure_grid=current_oil_pressure_grid,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
             gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -262,6 +263,7 @@ def evolve_pressure(
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
+            current_oil_pressure_grid=current_oil_pressure_grid,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
             gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -496,6 +498,7 @@ def compute_face_flux_contributions(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
+    current_oil_pressure_grid: ThreeDimensionalGrid,
     water_relative_mobility_grid: ThreeDimensionalGrid,
     oil_relative_mobility_grid: ThreeDimensionalGrid,
     gas_relative_mobility_grid: ThreeDimensionalGrid,
@@ -610,9 +613,9 @@ def compute_face_flux_contributions(
     # The bound is tight for all-interior cells; boundary-adjacent cells generate fewer.
     max_entries_per_i_slice = ny_interior * nz_interior * 3 * 2
 
-    # Thread-local 2D buffers — row ii is private to the thread handling
-    # i-slice ii. No two threads ever write the same row.
-    # Shaped (nx_interior, max_entries_per_i_slice) so that the inner
+    # We use thread-local 2D buffers. Row ii is private to the thread handling
+    # i-slice ii. So no two threads ever write the same row.
+    # These buffers are shaped (nx_interior, max_entries_per_i_slice) so that the inner
     # (slot) dimension is contiguous in memory which translates to cache-friendly writes.
 
     # Sparse COO entries for the off-diagonal part of A
@@ -636,15 +639,25 @@ def compute_face_flux_contributions(
         (nx_interior, max_entries_per_i_slice), dtype=dtype
     )
 
-    # RHS term — stored once per face pair, applied with opposite signs to
+    # RHS term is stored once per face pair, applied with opposite signs to
     # row-cell (+rhs_term) and col-cell (-rhs_term) during the pack step.
     thread_rhs_term = np.zeros((nx_interior, max_entries_per_i_slice), dtype=dtype)
 
-    # How many entries each i-slice wrote — needed to know how far to read
+    # We also track whether a slot is an interior-interior pair (False) or a
+    # ghost-boundary singleton (True). Singletons write diagonal/RHS but no sparse off-diagonal entry.
+    thread_is_ghost = np.zeros((nx_interior, max_entries_per_i_slice), dtype=np.bool_)
+    # For ghost faces we also need the ghost-cell pressure for the RHS.
+    thread_ghost_pressure = np.zeros(
+        (nx_interior, max_entries_per_i_slice), dtype=dtype
+    )
+    # 1D index of the interior cell that owns this ghost face (for diagonal/RHS scatter).
+    thread_owner_cell = np.zeros((nx_interior, max_entries_per_i_slice), dtype=np.int32)
+
+    # We need to know how many entries each i-slice wrote, to know how far to read
     # during the sequential pack step.
     entries_written_per_i_slice = np.zeros(nx_interior, dtype=np.int32)
 
-    # Parallel loop — each ii maps to grid index i = ii + 1.
+    # Now we run a parallel loop where each ii maps to grid index i = ii + 1.
     # All writes go to thread_*[ii, local_slot] which is private to this ii.
     for ii in numba.prange(nx_interior):  # type: ignore[attr-defined]
         i = ii + 1
@@ -661,120 +674,126 @@ def compute_face_flux_contributions(
                     cell_count_z=cell_count_z,
                 )
 
-                # EAST FACE (i+1, j, k) — x-direction flow
+                # EAST FACE (i+1, j, k)
                 east_i, east_j, east_k = i + 1, j, k
-                if east_i < cell_count_x - 1:
-                    east_cell_1d_index = to_1D_index_interior_only(
-                        i=east_i,
-                        j=east_j,
-                        k=east_k,
-                        cell_count_x=cell_count_x,
-                        cell_count_y=cell_count_y,
-                        cell_count_z=cell_count_z,
+                east_is_ghost = east_i == cell_count_x - 1
+                # Include face if neighbour is either interior OR a ghost cell
+                if east_i <= cell_count_x - 1:
+                    t, cap, grav = compute_fluxes_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(east_i, east_j, east_k),
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        face_transmissibility=face_transmissibilities_x[i, j, k],
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    east_transmissibility, east_capillary_flux, east_gravity_flux = (
-                        compute_fluxes_from_neighbour(
-                            cell_indices=(i, j, k),
-                            neighbour_indices=(east_i, east_j, east_k),
-                            water_relative_mobility_grid=water_relative_mobility_grid,
-                            oil_relative_mobility_grid=oil_relative_mobility_grid,
-                            gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_x[i, j, k],
-                            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-                            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-                            oil_density_grid=oil_density_grid,
-                            water_density_grid=water_density_grid,
-                            gas_density_grid=gas_density_grid,
-                            elevation_grid=elevation_grid,
-                            gravitational_constant=gravitational_constant,
-                            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    rhs_term = cap + grav
+
+                    if east_is_ghost:
+                        # Dirichlet: ghost pressure is known → singleton entry
+                        thread_is_ghost[ii, local_slot] = True
+                        thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                        thread_transmissibility[ii, local_slot] = t
+                        thread_rhs_term[ii, local_slot] = rhs_term
+                        thread_ghost_pressure[ii, local_slot] = (
+                            current_oil_pressure_grid[east_i, east_j, east_k]
                         )
-                    )
-                    east_rhs_term = east_capillary_flux + east_gravity_flux
+                        local_slot += 1
+                    else:
+                        east_cell_1d_index = to_1D_index_interior_only(
+                            i=east_i,
+                            j=east_j,
+                            k=east_k,
+                            cell_count_x=cell_count_x,
+                            cell_count_y=cell_count_y,
+                            cell_count_z=cell_count_z,
+                        )
+                        # Pair entry 0: A[this, east]
+                        thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
+                        thread_sparse_col_indices[ii, local_slot] = east_cell_1d_index
+                        thread_sparse_off_diag_vals[ii, local_slot] = -t
+                        thread_transmissibility[ii, local_slot] = t
+                        thread_rhs_term[ii, local_slot] = rhs_term
+                        thread_is_ghost[ii, local_slot] = False
+                        local_slot += 1
+                        # Pair entry 1: A[east, this]
+                        thread_sparse_row_indices[ii, local_slot] = east_cell_1d_index
+                        thread_sparse_col_indices[ii, local_slot] = this_cell_1d_index
+                        thread_sparse_off_diag_vals[ii, local_slot] = -t
+                        thread_transmissibility[ii, local_slot] = t
+                        thread_rhs_term[ii, local_slot] = rhs_term
+                        thread_is_ghost[ii, local_slot] = False
+                        local_slot += 1
 
-                    # Entry 0 of the pair: A[this_cell, east_cell]
-                    thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
-                    thread_sparse_col_indices[ii, local_slot] = east_cell_1d_index
-                    thread_sparse_off_diag_vals[ii, local_slot] = -east_transmissibility
-                    thread_transmissibility[ii, local_slot] = east_transmissibility
-                    thread_rhs_term[ii, local_slot] = east_rhs_term
-                    local_slot += 1
-
-                    # Entry 1 of the pair: A[east_cell, this_cell] (symmetric)
-                    # Transmissibility and rhs_term are identical in magnitude;
-                    # the sign flip for rhs is applied during the pack step.
-                    thread_sparse_row_indices[ii, local_slot] = east_cell_1d_index
-                    thread_sparse_col_indices[ii, local_slot] = this_cell_1d_index
-                    thread_sparse_off_diag_vals[ii, local_slot] = -east_transmissibility
-                    thread_transmissibility[ii, local_slot] = east_transmissibility
-                    thread_rhs_term[ii, local_slot] = east_rhs_term
-                    local_slot += 1
-
-                # SOUTH FACE (i, j+1, k) — y-direction flow
+                # SOUTH FACE (i, j+1, k)
                 south_i, south_j, south_k = i, j + 1, k
-                if south_j < cell_count_y - 1:
-                    south_cell_1d_index = to_1D_index_interior_only(
-                        i=south_i,
-                        j=south_j,
-                        k=south_k,
-                        cell_count_x=cell_count_x,
-                        cell_count_y=cell_count_y,
-                        cell_count_z=cell_count_z,
+                south_is_ghost = south_j == cell_count_y - 1
+                if south_j <= cell_count_y - 1:
+                    t, cap, grav = compute_fluxes_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(south_i, south_j, south_k),
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        face_transmissibility=face_transmissibilities_y[i, j, k],
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    south_transmissibility, south_capillary_flux, south_gravity_flux = (
-                        compute_fluxes_from_neighbour(
-                            cell_indices=(i, j, k),
-                            neighbour_indices=(south_i, south_j, south_k),
-                            water_relative_mobility_grid=water_relative_mobility_grid,
-                            oil_relative_mobility_grid=oil_relative_mobility_grid,
-                            gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_y[i, j, k],
-                            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-                            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-                            oil_density_grid=oil_density_grid,
-                            water_density_grid=water_density_grid,
-                            gas_density_grid=gas_density_grid,
-                            elevation_grid=elevation_grid,
-                            gravitational_constant=gravitational_constant,
-                            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    rhs_term = cap + grav
+
+                    if south_is_ghost:
+                        thread_is_ghost[ii, local_slot] = True
+                        thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                        thread_transmissibility[ii, local_slot] = t
+                        thread_rhs_term[ii, local_slot] = rhs_term
+                        thread_ghost_pressure[ii, local_slot] = (
+                            current_oil_pressure_grid[south_i, south_j, south_k]
                         )
-                    )
-                    south_rhs_term = south_capillary_flux + south_gravity_flux
+                        local_slot += 1
+                    else:
+                        south_cell_1d_index = to_1D_index_interior_only(
+                            i=south_i,
+                            j=south_j,
+                            k=south_k,
+                            cell_count_x=cell_count_x,
+                            cell_count_y=cell_count_y,
+                            cell_count_z=cell_count_z,
+                        )
+                        thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
+                        thread_sparse_col_indices[ii, local_slot] = south_cell_1d_index
+                        thread_sparse_off_diag_vals[ii, local_slot] = -t
+                        thread_transmissibility[ii, local_slot] = t
+                        thread_rhs_term[ii, local_slot] = rhs_term
+                        thread_is_ghost[ii, local_slot] = False
+                        local_slot += 1
 
-                    thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
-                    thread_sparse_col_indices[ii, local_slot] = south_cell_1d_index
-                    thread_sparse_off_diag_vals[
-                        ii, local_slot
-                    ] = -south_transmissibility
-                    thread_transmissibility[ii, local_slot] = south_transmissibility
-                    thread_rhs_term[ii, local_slot] = south_rhs_term
-                    local_slot += 1
+                        thread_sparse_row_indices[ii, local_slot] = south_cell_1d_index
+                        thread_sparse_col_indices[ii, local_slot] = this_cell_1d_index
+                        thread_sparse_off_diag_vals[ii, local_slot] = -t
+                        thread_transmissibility[ii, local_slot] = t
+                        thread_rhs_term[ii, local_slot] = rhs_term
+                        thread_is_ghost[ii, local_slot] = False
+                        local_slot += 1
 
-                    thread_sparse_row_indices[ii, local_slot] = south_cell_1d_index
-                    thread_sparse_col_indices[ii, local_slot] = this_cell_1d_index
-                    thread_sparse_off_diag_vals[
-                        ii, local_slot
-                    ] = -south_transmissibility
-                    thread_transmissibility[ii, local_slot] = south_transmissibility
-                    thread_rhs_term[ii, local_slot] = south_rhs_term
-                    local_slot += 1
-
-                # BOTTOM FACE (i, j, k+1) — z-direction flow
+                # BOTTOM FACE (i, j, k+1)
                 bottom_i, bottom_j, bottom_k = i, j, k + 1
-                if bottom_k < cell_count_z - 1:
-                    bottom_cell_1d_index = to_1D_index_interior_only(
-                        i=bottom_i,
-                        j=bottom_j,
-                        k=bottom_k,
-                        cell_count_x=cell_count_x,
-                        cell_count_y=cell_count_y,
-                        cell_count_z=cell_count_z,
-                    )
-                    (
-                        bottom_transmissibility,
-                        bottom_capillary_flux,
-                        bottom_gravity_flux,
-                    ) = compute_fluxes_from_neighbour(
+                bottom_is_ghost = bottom_k == cell_count_z - 1
+                if bottom_k <= cell_count_z - 1:
+                    t, cap, grav = compute_fluxes_from_neighbour(
                         cell_indices=(i, j, k),
                         neighbour_indices=(bottom_i, bottom_j, bottom_k),
                         water_relative_mobility_grid=water_relative_mobility_grid,
@@ -790,100 +809,192 @@ def compute_face_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    bottom_rhs_term = bottom_capillary_flux + bottom_gravity_flux
+                    rhs_term = cap + grav
 
-                    thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
-                    thread_sparse_col_indices[ii, local_slot] = bottom_cell_1d_index
-                    thread_sparse_off_diag_vals[
-                        ii, local_slot
-                    ] = -bottom_transmissibility
-                    thread_transmissibility[ii, local_slot] = bottom_transmissibility
-                    thread_rhs_term[ii, local_slot] = bottom_rhs_term
+                    if bottom_is_ghost:
+                        thread_is_ghost[ii, local_slot] = True
+                        thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                        thread_transmissibility[ii, local_slot] = t
+                        thread_rhs_term[ii, local_slot] = rhs_term
+                        thread_ghost_pressure[ii, local_slot] = (
+                            current_oil_pressure_grid[bottom_i, bottom_j, bottom_k]
+                        )
+                        local_slot += 1
+                    else:
+                        bottom_cell_1d_index = to_1D_index_interior_only(
+                            i=bottom_i,
+                            j=bottom_j,
+                            k=bottom_k,
+                            cell_count_x=cell_count_x,
+                            cell_count_y=cell_count_y,
+                            cell_count_z=cell_count_z,
+                        )
+                        thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
+                        thread_sparse_col_indices[ii, local_slot] = bottom_cell_1d_index
+                        thread_sparse_off_diag_vals[ii, local_slot] = -t
+                        thread_transmissibility[ii, local_slot] = t
+                        thread_rhs_term[ii, local_slot] = rhs_term
+                        thread_is_ghost[ii, local_slot] = False
+                        local_slot += 1
+
+                        thread_sparse_row_indices[ii, local_slot] = bottom_cell_1d_index
+                        thread_sparse_col_indices[ii, local_slot] = this_cell_1d_index
+                        thread_sparse_off_diag_vals[ii, local_slot] = -t
+                        thread_transmissibility[ii, local_slot] = t
+                        thread_rhs_term[ii, local_slot] = rhs_term
+                        thread_is_ghost[ii, local_slot] = False
+                        local_slot += 1
+
+                # LEFT GHOST FACE (i-1, j, k) — only for the leftmost interior slice
+                # The original forward-only loop handles east/south/bottom neighbour faces.
+                # But for i=1, the left neighbour (i=0) is a ghost cell and is never
+                # reached as a "forward" target. We handle all six ghost faces here by
+                # checking each of the six neighbours that could be a ghost.
+                # (The forward loop already covers east/south/bottom when they are ghost.
+                # We still need west/north/top ghost faces.)
+                west_i, west_j, west_k = i - 1, j, k
+                if west_i == 0:
+                    t, cap, grav = compute_fluxes_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(west_i, west_j, west_k),
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        face_transmissibility=face_transmissibilities_x[west_i, j, k],
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+                    thread_is_ghost[ii, local_slot] = True
+                    thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                    thread_transmissibility[ii, local_slot] = t
+                    thread_rhs_term[ii, local_slot] = cap + grav
+                    thread_ghost_pressure[ii, local_slot] = current_oil_pressure_grid[
+                        west_i, west_j, west_k
+                    ]
                     local_slot += 1
 
-                    thread_sparse_row_indices[ii, local_slot] = bottom_cell_1d_index
-                    thread_sparse_col_indices[ii, local_slot] = this_cell_1d_index
-                    thread_sparse_off_diag_vals[
-                        ii, local_slot
-                    ] = -bottom_transmissibility
-                    thread_transmissibility[ii, local_slot] = bottom_transmissibility
-                    thread_rhs_term[ii, local_slot] = bottom_rhs_term
+                north_i, north_j, north_k = i, j - 1, k
+                if north_j == 0:
+                    t, cap, grav = compute_fluxes_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(north_i, north_j, north_k),
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        face_transmissibility=face_transmissibilities_y[i, north_j, k],
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+                    thread_is_ghost[ii, local_slot] = True
+                    thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                    thread_transmissibility[ii, local_slot] = t
+                    thread_rhs_term[ii, local_slot] = cap + grav
+                    thread_ghost_pressure[ii, local_slot] = current_oil_pressure_grid[
+                        north_i, north_j, north_k
+                    ]
+                    local_slot += 1
+
+                top_i, top_j, top_k = i, j, k - 1
+                if top_k == 0:
+                    t, cap, grav = compute_fluxes_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(top_i, top_j, top_k),
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        face_transmissibility=face_transmissibilities_z[i, j, top_k],
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+                    thread_is_ghost[ii, local_slot] = True
+                    thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                    thread_transmissibility[ii, local_slot] = t
+                    thread_rhs_term[ii, local_slot] = cap + grav
+                    thread_ghost_pressure[ii, local_slot] = current_oil_pressure_grid[
+                        top_i, top_j, top_k
+                    ]
                     local_slot += 1
 
         entries_written_per_i_slice[ii] = local_slot
 
-    # Prefix-sum to find each i-slice's start offset in the flat output.
-    # Sequential, O(nx_interior), negligible cost.
+    # Prefix-sum over sparse (non-ghost) entries only.
+    # We need two passes, one to count sparse entries, and one to pack.
+    slice_sparse_counts = np.zeros(nx_interior, dtype=np.int32)
+    for ii in range(nx_interior):
+        count = 0
+        for slot in range(entries_written_per_i_slice[ii]):
+            if not thread_is_ghost[ii, slot]:
+                count += 1
+        slice_sparse_counts[ii] = count
+
     slice_start_offsets = np.zeros(nx_interior + 1, dtype=np.int32)
     for ii in range(nx_interior):
-        slice_start_offsets[ii + 1] = (
-            slice_start_offsets[ii] + entries_written_per_i_slice[ii]
-        )
+        slice_start_offsets[ii + 1] = slice_start_offsets[ii] + slice_sparse_counts[ii]
     total_sparse_entries = slice_start_offsets[nx_interior]
 
-    # Output arrays
     sparse_row_indices = np.empty(total_sparse_entries, dtype=np.int32)
     sparse_col_indices = np.empty(total_sparse_entries, dtype=np.int32)
     sparse_off_diagonal_values = np.empty(total_sparse_entries, dtype=dtype)
     diagonal_additions = np.zeros(interior_cell_count, dtype=dtype)
     rhs_additions = np.zeros(interior_cell_count, dtype=dtype)
 
-    # Single sequential pass: pack sparse arrays + scatter-add diagonal
-    # and RHS simultaneously.
-    #
-    # For each face pair stored at (ii, slot) and (ii, slot+1):
-    #   slot+0 → A[this_cell,      neighbour_cell]:  row=this,      col=neighbour
-    #   slot+1 → A[neighbour_cell, this_cell     ]:  row=neighbour, col=this
-    #
-    # Diagonal: both cells receive +transmissibility (stored identically in both slots)
-    # RHS:      row-cell receives +rhs_term, col-cell receives -rhs_term.
-    #           Since slot+0 has row=this and slot+1 has row=neighbour, we can
-    #           apply +rhs_term to row for both slots — the sign is already
-    #           encoded by whether the cell is the "owner" (slot+0) or "neighbour"
-    #           (slot+1) of the face.
-    #
-    # Wait — rhs_term has the same magnitude in both slots but opposite sign
-    # semantics. We apply:
-    #       diagonal_additions[row] += transmissibility   (same for both slots)
-    #       rhs_additions[row]      += rhs_term           (slot+0: this gets +)
-    #       rhs_additions[col]      -= rhs_term           (slot+0: neighbour gets -)
-    # We process pairs (step=2) so we only visit slot+0 and derive slot+1 from it.
     for ii in range(nx_interior):
-        out_start = slice_start_offsets[ii]
+        out = slice_start_offsets[ii]
         count = entries_written_per_i_slice[ii]
+        slot = 0
+        while slot < count:
+            if thread_is_ghost[ii, slot]:
+                # Ghost-cell (Dirichlet) contribution:
+                # diagonal += T,  rhs += T * p_ghost + rhs_term
+                owner = thread_owner_cell[ii, slot]
+                t = thread_transmissibility[ii, slot]
+                diagonal_additions[owner] += t
+                rhs_additions[owner] += (
+                    t * thread_ghost_pressure[ii, slot] + thread_rhs_term[ii, slot]
+                )
+                slot += 1
+            else:
+                # Interior-interior pair: process both entries together
+                this_cell = thread_sparse_row_indices[ii, slot]
+                neighbour_cell = thread_sparse_col_indices[ii, slot]
+                t = thread_transmissibility[ii, slot]
+                rhs_term = thread_rhs_term[ii, slot]
 
-        # Process face pairs — entries are always written in pairs (step=2)
-        pair = 0
-        while pair < count:
-            out = out_start + pair
+                sparse_row_indices[out] = this_cell
+                sparse_col_indices[out] = neighbour_cell
+                sparse_off_diagonal_values[out] = thread_sparse_off_diag_vals[ii, slot]
 
-            # Slot 0 of the pair: A[this_cell, neighbour_cell]
-            this_cell = thread_sparse_row_indices[ii, pair]
-            neighbour_cell = thread_sparse_col_indices[ii, pair]
-            transmissibility = thread_transmissibility[ii, pair]
-            rhs_term = thread_rhs_term[ii, pair]
+                sparse_row_indices[out + 1] = neighbour_cell
+                sparse_col_indices[out + 1] = this_cell
+                sparse_off_diagonal_values[out + 1] = thread_sparse_off_diag_vals[
+                    ii, slot + 1
+                ]
 
-            # Pack sparse entry for slot 0
-            sparse_row_indices[out] = this_cell
-            sparse_col_indices[out] = neighbour_cell
-            sparse_off_diagonal_values[out] = thread_sparse_off_diag_vals[ii, pair]
+                diagonal_additions[this_cell] += t
+                diagonal_additions[neighbour_cell] += t
+                rhs_additions[this_cell] += rhs_term
+                rhs_additions[neighbour_cell] -= rhs_term
 
-            # Pack sparse entry for slot 1 (symmetric)
-            sparse_row_indices[out + 1] = neighbour_cell
-            sparse_col_indices[out + 1] = this_cell
-            sparse_off_diagonal_values[out + 1] = thread_sparse_off_diag_vals[
-                ii, pair + 1
-            ]
-
-            # Diagonal: both cells accumulate +transmissibility
-            diagonal_additions[this_cell] += transmissibility
-            diagonal_additions[neighbour_cell] += transmissibility
-
-            # RHS: this_cell gets +rhs_term, neighbour_cell gets -rhs_term
-            rhs_additions[this_cell] += rhs_term
-            rhs_additions[neighbour_cell] -= rhs_term
-
-            pair += 2
+                out += 2
+                slot += 2
 
     return (
         sparse_row_indices,
