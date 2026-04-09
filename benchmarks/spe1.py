@@ -768,7 +768,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         maximum_saturation_change=0.05,
         maximum_pressure_change=300.0,
         use_pseudo_pressure=False,
-        # normalize_saturations=True,
+        normalize_saturations=True,
         phase_appearance_tolerance=1e-6,
         saturation_convergence_tolerance=1e-4,
     )
@@ -840,7 +840,7 @@ def setup_analysis(bores, np, states):
         avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid)
         avg_water_sat = np.mean(fluid_properties.water_saturation_grid)
         avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid[9, 9, 2])
-        avg_pressure = s.injection_bhps.gas[0,0,0]
+        avg_pressure = s.production_bhps.oil[9, 9, 2]
 
         oil_saturation_history.append((time_step, avg_oil_sat))
         water_saturation_history.append((time_step, avg_water_sat))
@@ -1203,7 +1203,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 @app.cell
 def _(analyst):
     mbe = analyst.material_balance_error()
-    print(mbe.total_mbe)
+    print(mbe.water_mbe)
     return
 
 
@@ -1239,9 +1239,9 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "oil-sat"
+    property = "gas-sat"
     figures = []
-    timesteps = [329]
+    timesteps = [609]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

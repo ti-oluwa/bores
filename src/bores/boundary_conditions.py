@@ -2284,13 +2284,13 @@ class GridBoundaryCondition(Serializable, typing.Generic[NDimension]):
     - All six faces are applied.
 
     ```mermaid
-                            z+
+                            z-
                 ↑
                ┌───────────────┐
               /|              /|
              / |             / |
             /  |            /  |
-        y+ /   |           /   |  x+
+        y- /   |           /   |  x+
           ┌───────────────┐    |
           |   |           |    |
           |   |           |    |
@@ -2301,16 +2301,16 @@ class GridBoundaryCondition(Serializable, typing.Generic[NDimension]):
           |/              |/
           └───────────────┘
           ↑               ↑
-          z-              y-
+          z+              y+
         (bottom)        (front)
     ```
 
     Left face  → x-
     Right face → x+
-    Front face → y-
-    Back face  → y+
-    Bottom     → z-
-    Top        → z+
+    Front face → y+
+    Back face  → y-
+    Bottom     → z+
+    Top        → z-
 
     Defaults to no-flow boundary for all sides if not specified.
     """
