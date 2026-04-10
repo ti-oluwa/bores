@@ -755,8 +755,8 @@ class PVTTable(StoreSerializable):
             return None
         self._warn_extrapolation(pressure, temperature)
 
-        is_scalar = isinstance(pressure, (int, float)) and isinstance(
-            temperature, (int, float)
+        is_scalar = isinstance(pressure, (int, float, np.floating)) and isinstance(
+            temperature, (int, float, np.floating)
         )
         if is_scalar:
             result: typing.Union[float, npt.NDArray] = float(
@@ -784,11 +784,13 @@ class PVTTable(StoreSerializable):
             else:
                 result = float(np.clip(result, lo, hi))
 
-        return (
-            float(result)
-            if isinstance(result, np.ndarray) and result.size == 1
-            else result
-        )
+        # Convert to float only if truly scalar
+        if isinstance(result, np.ndarray) and result.ndim == 0:
+            return float(result)
+        elif isinstance(result, np.ndarray) and result.size == 1:
+            return float(result.flat[0])
+        else:
+            return result
 
     def _pts_interpolate(
         self,
@@ -815,7 +817,13 @@ class PVTTable(StoreSerializable):
             lo, hi = clamps[name]
             np.clip(result, lo, hi, out=result)
 
-        return float(result) if result.size == 1 else result
+        # Convert to float only if truly scalar
+        if result.ndim == 0:
+            return float(result)
+        elif result.size == 1:
+            return float(result.flat[0])
+        else:
+            return result
 
     def _resolve_salinity(self, salinity: typing.Optional[QueryType]) -> QueryType:
         """Return salinity, falling back to default_salinity for water tables."""

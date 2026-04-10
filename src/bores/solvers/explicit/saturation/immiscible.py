@@ -426,7 +426,6 @@ def evolve_saturation(
 
     cfl_threshold = cfl_violation_info[5]
     maximum_cfl_encountered = cfl_violation_info[4]
-    # Convert padded index to unpadded index
     cfl_i, cfl_j, cfl_k = (
         int(cfl_violation_info[1]),
         int(cfl_violation_info[2]),

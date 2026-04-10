@@ -162,25 +162,21 @@ def build_rock_fluid_properties_grids(
                 ),
             )
 
-    padded_relperm_grids = RelPermGrids(
+    relperm_grids = RelPermGrids(
         oil_relative_permeability=kro_grid,
         water_relative_permeability=krw_grid,
         gas_relative_permeability=krg_grid,
     )
-    padded_relative_mobility_grids = RelativeMobilityGrids(
+    relative_mobility_grids = RelativeMobilityGrids(
         water_relative_mobility=water_relative_mobility_grid,
         oil_relative_mobility=oil_relative_mobility_grid,
         gas_relative_mobility=gas_relative_mobility_grid,
     )
-    padded_capillary_pressure_grids = CapillaryPressureGrids(
+    capillary_pressure_grids = CapillaryPressureGrids(
         oil_water_capillary_pressure=oil_water_capillary_pressure_grid,
         gas_oil_capillary_pressure=gas_oil_capillary_pressure_grid,
     )
-    return (
-        padded_relperm_grids,
-        padded_relative_mobility_grids,
-        padded_capillary_pressure_grids,
-    )
+    return (relperm_grids, relative_mobility_grids, capillary_pressure_grids)
 
 
 @numba.njit(parallel=True, cache=True)

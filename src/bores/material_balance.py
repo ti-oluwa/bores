@@ -124,7 +124,7 @@ def compute_material_balance_errors(
     :param current_fluid_properties: Fluid properties at end of time step.
     :param previous_fluid_properties: Fluid properties at start of time step.
     :param rock: Rock properties (porosity, NTG, etc.).
-    :param thickness_grid: Un-padded cell thickness grid (ft).
+    :param thickness_grid: Cell thickness grid (ft).
     :param cell_dimension: (dx, dy) in ft.
     :param injection_rates: Injection rate sparse tensors (ft³/day, res cond).
     :param production_rates: Production rate sparse tensors (ft³/day, res cond).

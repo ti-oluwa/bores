@@ -43,7 +43,7 @@ def build_face_transmissibilities(
     Precompute geometric face transmissibilities T_geo = k_harmonic * A / L for
     every forward-facing interface in x, y, and z on the grid.
 
-    Result arrays are shaped (nx, ny, nz) where (nx, ny, nz) = padded grid shape.
+    Result arrays are shaped (nx, ny, nz) where (nx, ny, nz) = grid shape.
     Entry [i, j, k] is the transmissibility of the face between (i,j,k) and:
         T_x: (i+1, j,   k  )
         T_y: (i,   j+1, k  )

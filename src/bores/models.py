@@ -8,7 +8,6 @@ from typing_extensions import Self
 
 from bores.errors import ValidationError
 from bores.grids.base import (
-    PadMixin,
     apply_structural_dip,
     build_depth_grid,
     build_elevation_grid,
@@ -27,7 +26,7 @@ __all__ = [
 
 @typing.final
 @attrs.frozen(slots=True)
-class FluidProperties(PadMixin[NDimension], StoreSerializable):
+class FluidProperties(StoreSerializable, typing.Generic[NDimension]):
     """
     Fluid properties of a reservoir model.
 
@@ -145,18 +144,10 @@ class FluidProperties(PadMixin[NDimension], StoreSerializable):
     reservoir_gas: str = "methane"
     """Name of the reservoir gas (e.g., Methane, Ethane, CO2, N2). Can also be the name of the gas injected into the reservoir."""
 
-    def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
-        excluded_fields = ("reservoir_gas",)
-        return (
-            field
-            for field in attrs.fields(type(self))
-            if field.name not in excluded_fields
-        )
-
 
 @typing.final
 @attrs.frozen(slots=True)
-class RockPermeability(PadMixin[NDimension], StoreSerializable):
+class RockPermeability(StoreSerializable, typing.Generic[NDimension]):
     """
     Rock permeability in the reservoir, in milliDarcy (mD).
 
@@ -187,13 +178,10 @@ class RockPermeability(PadMixin[NDimension], StoreSerializable):
                 mean = (self.x * self.y * self.z) ** 1 / 3
                 object.__setattr__(self, "mean", mean)
 
-    def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
-        return attrs.fields(type(self))
-
 
 @typing.final
 @attrs.frozen(slots=True)
-class RockProperties(PadMixin[NDimension], StoreSerializable):
+class RockProperties(StoreSerializable, typing.Generic[NDimension]):
     """
     Rock properties of a reservoir model.
 
@@ -219,47 +207,10 @@ class RockProperties(PadMixin[NDimension], StoreSerializable):
     residual_gas_saturation_grid: NDimensionalGrid[NDimension]
     """N-dimensional numpy array representing the residual gas saturation distribution (fraction). This assumes imbibition process."""
 
-    def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
-        excluded_fields = ("compressibility", "absolute_permeability")
-        return (
-            field
-            for field in attrs.fields(type(self))
-            if field.name not in excluded_fields
-        )
-
-    def pad(
-        self,
-        pad_width: int = 1,
-        hook: typing.Optional[
-            typing.Callable[
-                [NDimensionalGrid[NDimension]], NDimensionalGrid[NDimension]
-            ]
-        ] = None,
-        exclude: typing.Optional[typing.Iterable[str]] = None,
-    ) -> Self:
-        padded = super().pad(pad_width=pad_width, hook=hook, exclude=exclude)
-        padded_absolute_permeability = self.absolute_permeability.pad(
-            pad_width=pad_width, hook=hook, exclude=exclude
-        )
-        object.__setattr__(
-            padded, "absolute_permeability", padded_absolute_permeability
-        )
-        return padded
-
-    def unpad(self, pad_width: int = 1) -> Self:
-        unpadded = super().unpad(pad_width=pad_width)
-        unpadded_absolute_permeability = self.absolute_permeability.unpad(
-            pad_width=pad_width
-        )
-        object.__setattr__(
-            unpadded, "absolute_permeability", unpadded_absolute_permeability
-        )
-        return unpadded
-
 
 @typing.final
 @attrs.frozen(slots=True)
-class SaturationHistory(PadMixin[NDimension], StoreSerializable):
+class SaturationHistory(StoreSerializable, typing.Generic[NDimension]):
     """
     Tracks historical maximum saturations and displacement regimes in the reservoir.
     """
@@ -296,9 +247,6 @@ class SaturationHistory(PadMixin[NDimension], StoreSerializable):
             water_imbibition_flag_grid=water_imbibition_flag_grid,  # type: ignore[arg-type]
             gas_imbibition_flag_grid=gas_imbibition_flag_grid,  # type: ignore[arg-type]
         )
-
-    def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
-        return attrs.fields(type(self))
 
 
 class ReservoirModel(

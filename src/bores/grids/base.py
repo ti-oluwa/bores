@@ -7,7 +7,6 @@ import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.errors import ValidationError
-from bores.grids.utils import pad_grid, unpad_grid
 from bores.precision import get_dtype
 from bores.serialization import Serializable
 from bores.types import ArrayLike, NDimension, NDimensionalGrid, Orientation
@@ -479,129 +478,8 @@ def apply_structural_dip(
     )
 
 
-class PadMixin(typing.Generic[NDimension]):
-    """Mixin class to add padding functionality to attrs classes with numpy array fields."""
-
-    def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
-        """Return iterable of attrs fields that can be padded."""
-        raise NotImplementedError
-
-    def pad(
-        self,
-        pad_width: int = 1,
-        hook: typing.Optional[
-            typing.Callable[
-                [NDimensionalGrid[NDimension]], NDimensionalGrid[NDimension]
-            ]
-        ] = None,
-        exclude: typing.Optional[typing.Iterable[str]] = None,
-    ) -> Self:
-        """
-        Pad all numpy array fields in the attrs class.
-
-        :param pad_width: Number of cells to pad on each side of each dimension.
-        :param hook: Optional callable to apply additional processing to each padded grid.
-        :param exclude: Optional iterable of field names to exclude from hooking.
-        :return: New instance of the attrs class with padded numpy array fields.
-        """
-        if not attrs.has(type(self)):
-            raise TypeError(
-                f"{self.__class__.__name__} can only be used with attrs classes"
-            )
-
-        target_fields = self.get_paddable_fields()
-        padded_fields_values = {}
-        non_init_fields_values = {}
-        for field in target_fields:
-            value = getattr(self, field.name)
-            if not isinstance(value, np.ndarray):
-                raise TypeError(
-                    f"Field '{field.name}' is not a numpy array and cannot be padded"
-                )
-
-            padded_value = pad_grid(grid=value, pad_width=pad_width)
-            if hook and (not exclude or field.name not in exclude):
-                padded_value = hook(padded_value)
-
-            if not field.init:
-                non_init_fields_values[field.name] = padded_value
-            else:
-                padded_fields_values[field.name] = padded_value
-
-        instance = attrs.evolve(self, **padded_fields_values)  # type: ignore[misc]
-        for name, value in non_init_fields_values:
-            object.__setattr__(instance, name, value)
-        return instance
-
-    def unpad(self, pad_width: int = 1) -> Self:
-        """
-        Remove padding from all numpy array fields in the attrs class.
-
-        :param pad_width: Number of cells to remove from each side of each dimension.
-        :return: New instance of the attrs class with unpadded numpy array fields.
-        """
-        if not attrs.has(type(self)):
-            raise TypeError(
-                f"{self.__class__.__name__} can only be used with attrs classes"
-            )
-
-        target_fields = self.get_paddable_fields()
-        unpadded_fields_values = {}
-        non_init_fields_values = {}
-        for field in target_fields:
-            value = getattr(self, field.name)
-            if not isinstance(value, np.ndarray):
-                raise TypeError(
-                    f"Field '{field.name}' is not a numpy array and cannot be padded"
-                )
-
-            padded_value = unpad_grid(grid=value, pad_width=pad_width)
-            if not field.init:
-                non_init_fields_values[field.name] = padded_value
-            else:
-                unpadded_fields_values[field.name] = padded_value
-
-        instance = attrs.evolve(self, **unpadded_fields_values)  # type: ignore[misc]
-        for name, value in non_init_fields_values:
-            object.__setattr__(instance, name, value)
-        return instance
-
-    def apply_hook(
-        self,
-        hook: typing.Callable[
-            [NDimensionalGrid[NDimension]], NDimensionalGrid[NDimension]
-        ],
-        exclude: typing.Optional[typing.Iterable[str]] = None,
-    ) -> Self:
-        """
-        Apply a hook function to all numpy array fields in the attrs class.
-
-        :param hook: Callable to apply to each numpy array field.
-        :param exclude: Optional iterable of field names to exclude from hooking.
-        :return: New instance of the attrs class with hooked numpy array fields.
-        """
-        if not attrs.has(type(self)):
-            raise TypeError(
-                f"{self.__class__.__name__} can only be used with attrs classes"
-            )
-
-        target_fields = self.get_paddable_fields()
-        hooked_fields = {}
-        for field in target_fields:
-            if exclude and field.name in exclude:
-                continue
-            value = getattr(self, field.name)
-            if not isinstance(value, np.ndarray):
-                raise TypeError(
-                    f"Field '{field.name}' is not a numpy array and cannot be padded"
-                )
-            hooked_value = hook(value)
-            hooked_fields[field.name] = hooked_value
-        return attrs.evolve(self, **hooked_fields)  # type: ignore[misc]
-
-
 @attrs.frozen(slots=True)
-class RelPermGrids(PadMixin[NDimension], Serializable):  # type: ignore[override]
+class RelPermGrids(Serializable, typing.Generic[NDimension]):
     """
     Wrapper for n-dimensional grids representing relative permeabilities
     for different fluid phases (oil, water, gas).
@@ -635,12 +513,9 @@ class RelPermGrids(PadMixin[NDimension], Serializable):  # type: ignore[override
         yield self.oil_relative_permeability
         yield self.gas_relative_permeability
 
-    def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
-        return attrs.fields(self.__class__)
-
 
 @attrs.frozen(slots=True)
-class RelativeMobilityGrids(PadMixin[NDimension], Serializable):
+class RelativeMobilityGrids(Serializable, typing.Generic[NDimension]):
     """
     Wrapper for n-dimensional grids representing relative mobilities
     for different fluid phases (oil, water, gas).
@@ -670,12 +545,9 @@ class RelativeMobilityGrids(PadMixin[NDimension], Serializable):
         yield self.oil_relative_mobility
         yield self.gas_relative_mobility
 
-    def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
-        return attrs.fields(self.__class__)
-
 
 @attrs.frozen(slots=True)
-class CapillaryPressureGrids(PadMixin[NDimension], Serializable):
+class CapillaryPressureGrids(Serializable, typing.Generic[NDimension]):
     """
     Wrapper for n-dimensional grids representing capillary pressures
     for different fluid phases (oil-water, oil-gas).
@@ -700,6 +572,3 @@ class CapillaryPressureGrids(PadMixin[NDimension], Serializable):
     def __iter__(self) -> typing.Iterator[NDimensionalGrid[NDimension]]:
         yield self.oil_water_capillary_pressure
         yield self.gas_oil_capillary_pressure
-
-    def get_paddable_fields(self) -> typing.Iterable[typing.Any]:
-        return attrs.fields(self.__class__)

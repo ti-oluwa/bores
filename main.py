@@ -118,7 +118,7 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
         water_exponent=2.0,
-        oil_exponent=1.0,
+        oil_exponent=2.0,
         gas_exponent=1.5,
         wettability=bores.Wettability.WATER_WET,
         mixing_rule="eclipse_rule",

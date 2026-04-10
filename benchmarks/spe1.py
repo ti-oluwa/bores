@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.23.0"
 app = marimo.App(width="full")
 
 
@@ -766,7 +766,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         maximum_oil_saturation_change=0.05,
         maximum_water_saturation_change=0.05,
         maximum_saturation_change=0.05,
-        maximum_pressure_change=300.0,
+        maximum_pressure_change=1000.0,
         use_pseudo_pressure=False,
         normalize_saturations=True,
         phase_appearance_tolerance=1e-6,
@@ -1203,13 +1203,6 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 
 
 @app.cell
-def _(analyst):
-    mbe = analyst.material_balance_error()
-    print(mbe.water_mbe)
-    return
-
-
-@app.cell
 def _(bores):
     viz = bores.pyvista3d.DataVisualizer(bores.pyvista3d.PlotConfig(off_screen=False))
     return (viz,)
@@ -1241,9 +1234,9 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "gas-sat"
+    property = "oil-density"
     figures = []
-    timesteps = [609]
+    timesteps = [60]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],
