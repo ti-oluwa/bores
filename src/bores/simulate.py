@@ -11,7 +11,7 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.boundary_conditions import BoundaryConditions, BoundaryMetadata
+from bores.boundary_conditions import BoundaryConditions, build_boundary_metadata
 from bores.config import Config
 from bores.constants import c
 from bores.datastructures import (
@@ -128,54 +128,6 @@ class SaturationChangeCheckResult:
     max_phase_saturation_change: typing.Optional[float]
     max_allowed_phase_saturation_change: typing.Optional[float]
     message: typing.Optional[str] = None
-
-
-def build_boundary_metadata(
-    fluid_properties: FluidProperties[ThreeDimensions],
-    rock_properties: RockProperties[ThreeDimensions],
-    relperm_grids: typing.Any,
-    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
-    capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
-    face_transmissibilities: FaceTransmissibilities,
-    grid_shape: ThreeDimensions,
-    cell_dimension: typing.Tuple[float, float],
-    thickness_grid: NDimensionalGrid[ThreeDimensions],
-    time: float,
-    dtype: npt.DTypeLike = np.float64,
-) -> BoundaryMetadata:
-    """
-    Build a `BoundaryMetadata` bundle from the current simulation state.
-
-    All arguments are passed by reference — no data is copied. The resulting
-    object is cheap to construct and should be rebuilt (or evolved via
-    `attrs.evolve`) whenever the simulation time or any of the referenced
-    arrays change.
-
-    :param fluid_properties: Current fluid property object for the grid.
-    :param rock_properties: Current rock property object for the grid.
-    :param relperm_grids: Three-phase relative permeability grids (krw, kro, krg).
-    :param relative_mobility_grids: Three-phase relative mobility grids.
-    :param capillary_pressure_grids: Oil-water and gas-oil capillary pressure grids.
-    :param face_transmissibilities: Precomputed geometric face transmissibilities.
-    :param grid_shape: Un-padded grid shape `(nx, ny, nz)`.
-    :param cell_dimension: Physical cell dimensions `(dx, dy)` in feet.
-    :param thickness_grid: Un-padded cell thickness array (ft).
-    :param time: Current simulation time (seconds).
-    :return: Populated `BoundaryMetadata` instance.
-    """
-    return BoundaryMetadata(
-        fluid_properties=fluid_properties,
-        rock_properties=rock_properties,
-        relative_permeability_grids=relperm_grids,
-        relative_mobility_grids=relative_mobility_grids,
-        capillary_pressure_grids=capillary_pressure_grids,
-        face_transmissibilities=face_transmissibilities,
-        time=time,
-        grid_shape=grid_shape,
-        cell_dimension=cell_dimension,
-        thickness_grid=thickness_grid,
-        dtype=dtype,
-    )
 
 
 def _validate_pressure_range(
@@ -2559,8 +2511,7 @@ def run(
                                 boundary_conditions=boundary_conditions,
                             )
 
-                # Dispatch to the appropriate scheme.
-                step_kwargs = dict(
+                step_kwargs = dict(  # noqa
                     time_step=new_step,
                     grid_shape=grid_shape,
                     cell_dimension=cell_dimension,
@@ -2682,7 +2633,7 @@ def run(
 
                     # Rebuild grids for the snapshot so the yielded state is
                     # consistent with the accepted fluid properties.
-                    snap_relperm, snap_mobilities, snap_capillary = (
+                    relperm_snapshot, mobilities_snapshot, capillary_snapshot = (
                         _rebuild_rock_fluid_grids(
                             fluid_properties, rock_properties, config
                         )
@@ -2695,9 +2646,9 @@ def run(
                         time=timer.elapsed_time,
                         model=model_snapshot,
                         wells=wells_snapshot,
-                        relative_mobilities=snap_mobilities,
-                        relative_permeabilities=snap_relperm,
-                        capillary_pressures=snap_capillary,
+                        relative_mobilities=mobilities_snapshot,
+                        relative_permeabilities=relperm_snapshot,
+                        capillary_pressures=capillary_snapshot,
                         injection_rates=injection_rates,
                         production_rates=production_rates.abs(),
                         injection_formation_volume_factors=injection_fvfs,

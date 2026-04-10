@@ -185,7 +185,7 @@ def from_1D_index(
     This is the inverse of to_1D_index.
 
     For a grid with dimensions (Nx, Ny, Nz), interior cells are
-    indexed from (1, 1, 1) to (Nx-1, Ny-1, Nz-1).
+    indexed from (0, 0, 0) to (Nx-1, Ny-1, Nz-1).
 
     :param idx: 1D array index (0 to cell_count - 1)
     :param cell_count_x: Total number of cells in x-direction

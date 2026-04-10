@@ -39,7 +39,7 @@ from bores.models import FluidProperties, RockProperties
 from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
 from bores.transmissibility import FaceTransmissibilities
-from bores.types import NDimension, NDimensionalGrid
+from bores.types import NDimension, NDimensionalGrid, ThreeDimensions
 
 __all__ = [
     "Boundary",
@@ -474,6 +474,49 @@ class BoundaryMetadata:
 
     dtype: npt.DTypeLike = np.float64
     """Data type for any arrays returned by boundary conditions."""
+
+
+def build_boundary_metadata(
+    fluid_properties: FluidProperties[ThreeDimensions],
+    rock_properties: RockProperties[ThreeDimensions],
+    relperm_grids: RelPermGrids[ThreeDimensions],
+    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
+    capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
+    face_transmissibilities: FaceTransmissibilities,
+    grid_shape: ThreeDimensions,
+    cell_dimension: typing.Tuple[float, float],
+    thickness_grid: NDimensionalGrid[ThreeDimensions],
+    time: float,
+    dtype: npt.DTypeLike = np.float64,
+) -> BoundaryMetadata:
+    """
+    Build a `BoundaryMetadata` bundle from the current simulation state.
+
+    :param fluid_properties: Current fluid property object for the grid.
+    :param rock_properties: Current rock property object for the grid.
+    :param relperm_grids: Three-phase relative permeability grids (krw, kro, krg).
+    :param relative_mobility_grids: Three-phase relative mobility grids.
+    :param capillary_pressure_grids: Oil-water and gas-oil capillary pressure grids.
+    :param face_transmissibilities: Precomputed geometric face transmissibilities.
+    :param grid_shape: Un-padded grid shape `(nx, ny, nz)`.
+    :param cell_dimension: Physical cell dimensions `(dx, dy)` in feet.
+    :param thickness_grid: Un-padded cell thickness array (ft).
+    :param time: Current simulation time (seconds).
+    :return: Populated `BoundaryMetadata` instance.
+    """
+    return BoundaryMetadata(
+        fluid_properties=fluid_properties,
+        rock_properties=rock_properties,
+        relative_permeability_grids=relperm_grids,
+        relative_mobility_grids=relative_mobility_grids,
+        capillary_pressure_grids=capillary_pressure_grids,
+        face_transmissibilities=face_transmissibilities,
+        time=time,
+        grid_shape=grid_shape,
+        cell_dimension=cell_dimension,
+        thickness_grid=thickness_grid,
+        dtype=dtype,
+    )
 
 
 class BoundaryCondition(

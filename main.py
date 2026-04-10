@@ -131,7 +131,7 @@ timer = bores.Timer(
     initial_step_size=bores.Time(days=5),
     maximum_step_size=bores.Time(months=6),
     minimum_step_size=bores.Time(hours=1),
-    simulation_time=bores.Time(years=30),
+    simulation_time=bores.Time(years=50),
     maximum_rejections=20,
 )
 
@@ -140,12 +140,13 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="impes",
-    pressure_solver="direct",
-    saturation_solver="direct",
+    scheme="si",
+    pressure_solver="cg",
+    saturation_solver="gcrotmk",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     maximum_pressure_change=1800,
+    disable_capillary_effects=True
 )
 
 # Run and monitor the simulation and collect states

@@ -17,6 +17,7 @@ from bores.precision import get_dtype
 from bores.solvers.base import (
     EvolutionResult,
     compute_mobility_grids,
+    from_1D_index,
     solve_linear_system,
     to_1D_index,
 )
@@ -1066,12 +1067,12 @@ def assemble_numerical_jacobian(
     )
 
     for cell_1d_index in range(total_cell_count):
-        # Recover (i,j,k) from flat index using integer arithmetic
-        temp = cell_1d_index
-        k = temp % cell_count_z
-        temp //= cell_count_z
-        j = temp % cell_count_y
-        i = temp // cell_count_y
+        i, j, k = from_1D_index(
+            cell_1d_index,
+            cell_count_x,
+            cell_count_y,
+            cell_count_z,
+        )
 
         # Affected cells: this cell + all face neighbours (for sparsity)
         affected_cell_indices = [cell_1d_index]
@@ -1090,7 +1091,14 @@ def assemble_numerical_jacobian(
                 and 0 <= nk < cell_count_z
             ):
                 affected_cell_indices.append(
-                    to_1D_index(ni, nj, nk, cell_count_x, cell_count_y, cell_count_z)
+                    to_1D_index(
+                        i=ni,
+                        j=nj,
+                        k=nk,
+                        cell_count_x=cell_count_x,
+                        cell_count_y=cell_count_y,
+                        cell_count_z=cell_count_z,
+                    )
                 )
 
         cell_water_saturation = water_saturation_grid_f64[i, j, k]
@@ -1444,30 +1452,30 @@ def _assemble_analytical_jacobian(
                 # Six face neighbours — identify (ni, nj, nk) and transmissibility
                 for face in range(6):
                     if face == 0:  # East
-                        ni, nj, nk = int(i + 1), int(j), int(k)
+                        ni, nj, nk = np.int64(i + 1), np.int64(j), np.int64(k)
                         transmissibility = face_transmissibilities_x[i, j, k]
                     elif face == 1:  # West
-                        ni, nj, nk = int(i - 1), int(j), int(k)
+                        ni, nj, nk = np.int64(i - 1), np.int64(j), np.int64(k)
                         transmissibility = (
                             face_transmissibilities_x[i - 1, j, k]
                             if i > 0
                             else face_transmissibilities_x[i, j, k]
                         )
                     elif face == 2:  # South
-                        ni, nj, nk = int(i), int(j + 1), int(k)
+                        ni, nj, nk = np.int64(i), np.int64(j + 1), np.int64(k)
                         transmissibility = face_transmissibilities_y[i, j, k]
                     elif face == 3:  # North
-                        ni, nj, nk = int(i), int(j - 1), int(k)
+                        ni, nj, nk = np.int64(i), np.int64(j - 1), np.int64(k)
                         transmissibility = (
                             face_transmissibilities_y[i, j - 1, k]
                             if j > 0
                             else face_transmissibilities_y[i, j, k]
                         )
                     elif face == 4:  # Bottom
-                        ni, nj, nk = int(i), int(j), int(k + 1)
+                        ni, nj, nk = np.int64(i), np.int64(j), np.int64(k + 1)
                         transmissibility = face_transmissibilities_z[i, j, k]
                     else:  # Top (face == 5)
-                        ni, nj, nk = int(i), int(j), int(k - 1)
+                        ni, nj, nk = np.int64(i), np.int64(j), np.int64(k - 1)
                         transmissibility = (
                             face_transmissibilities_z[i, j, k - 1]
                             if k > 0
@@ -1538,7 +1546,12 @@ def _assemble_analytical_jacobian(
                     gas_neighbour_is_upwind = gas_potential > 0.0
 
                     neighbour_1d_index = to_1D_index(
-                        ni, nj, nk, cell_count_x, cell_count_y, cell_count_z
+                        i=ni,  # type: ignore[arg-type]
+                        j=nj,  # type: ignore[arg-type]
+                        k=nk,  # type: ignore[arg-type]
+                        cell_count_x=cell_count_x,
+                        cell_count_y=cell_count_y,
+                        cell_count_z=cell_count_z,
                     )
                     neighbour_water_saturation_column = 2 * neighbour_1d_index
                     neighbour_gas_saturation_column = 2 * neighbour_1d_index + 1
