@@ -6,7 +6,7 @@ import attrs
 from bores.boundary_conditions import BoundaryConditions
 from bores.datastructures import ContextFlag
 from bores.models import RockPermeability
-from bores.solvers.base import to_1D_index_interior_only
+from bores.solvers.base import to_1D_index
 from bores.types import NDimensionalGrid, ThreeDimensions
 from bores.wells.base import Well, Wells
 
@@ -15,10 +15,10 @@ from bores.wells.base import Well, Wells
 class PerforationIndex:
     """Well index for a single perforated cell."""
 
-    cell: typing.Tuple[int, int, int]  # padded (i, j, k)
-    """Perforated cell padded indices"""
+    cell: typing.Tuple[int, int, int]  # (i, j, k)
+    """Perforated cell indices"""
     cell_1d_index: int
-    """Perforated cell padded 1D index"""
+    """Perforated cell 1D index"""
     well_index: float
     """Perforated cell well index"""
 
@@ -54,16 +54,13 @@ class WellIndicesCache:
 
 
 def build_well_indices_cache(
-    wells: Wells[ThreeDimensions],
-    absolute_permeability: RockPermeability,
-    boundary_conditions: BoundaryConditions[ThreeDimensions],
+    grid_shape: ThreeDimensions,
     cell_size_x: float,
     cell_size_y: float,
     thickness_grid: NDimensionalGrid[ThreeDimensions],
-    cell_count_x: int,
-    cell_count_y: int,
-    cell_count_z: int,
-    pad_width: int = 1,
+    wells: Wells[ThreeDimensions],
+    absolute_permeability: RockPermeability,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
 ) -> WellIndicesCache:
     """
     Compute well indices for all perforated cells across all injection and production wells.
@@ -75,42 +72,33 @@ def build_well_indices_cache(
     The resulting cache eliminates redundant well index computations from the inner
     time-step loop in the pressure and saturation solvers.
 
-    :param wells: `Wells` container holding all injection and production wells.
-    :param thickness_grid: Padded 3D grid of cell thicknesses (ft). Must include ghost cells.
-    :param absolute_permeability: Padded absolute permeability object with x, y, z component grids (mD).
-    :param boundary_conditions: Model boundary conditions. Used to apply no-flow boundary
-        corrections to the Peaceman effective drainage radius for wells at grid boundaries.
+    :param grid_shape: 3D reservoir grid shape.
     :param cell_size_x: Cell size in the x-direction (ft).
     :param cell_size_y: Cell size in the y-direction (ft).
-    :param cell_count_x: Total number of cells in the x-direction, including ghost cells.
-    :param cell_count_y: Total number of cells in the y-direction, including ghost cells.
-    :param cell_count_z: Total number of cells in the z-direction, including ghost cells.
-    :param pad_width: Number of ghost cells used for grid padding. Well coordinates are
-        offset by this amount when indexing into padded grids. Defaults to 1.
+    :param wells: `Wells` container holding all injection and production wells.
+    :param thickness_grid:3D grid of cell thicknesses (ft). Must include ghost cells.
+    :param absolute_permeability:absolute permeability object with x, y, z component grids (mD).
+    :param boundary_conditions: Model boundary conditions. Used to apply no-flow boundary
+        corrections to the Peaceman effective drainage radius for wells at grid boundaries.
     :return: `WellIndicesCache` containing precomputed `WellIndices` for every injection
         and production well, keyed by well name.
     """
-    grid_dims = (
-        cell_count_x - 2 * pad_width,
-        cell_count_y - 2 * pad_width,
-        cell_count_z - 2 * pad_width,
-    )
-    pressure_bc = boundary_conditions["pressure"]
+    cell_count_x, cell_count_y, cell_count_z = grid_shape
 
     def _well_indices(well: Well) -> WellIndices:
         perforations = []
         total_well_index = 0.0
         for start, end in well.perforating_intervals:
             for i, j, k in itertools.product(
-                range(start[0] + pad_width, end[0] + pad_width + 1),
-                range(start[1] + pad_width, end[1] + pad_width + 1),
-                range(start[2] + pad_width, end[2] + pad_width + 1),
+                range(start[0], end[0] + 1),
+                range(start[1], end[1] + 1),
+                range(start[2], end[2] + 1),
             ):
                 well_index = well.get_well_index(
                     interval_thickness=(
                         cell_size_x,
                         cell_size_y,
-                        thickness_grid[i, j, k],  # type: ignore
+                        thickness_grid[i, j, k],
                     ),
                     permeability=(
                         absolute_permeability.x[i, j, k],
@@ -118,11 +106,11 @@ def build_well_indices_cache(
                         absolute_permeability.z[i, j, k],
                     ),
                     skin_factor=well.skin_factor,
-                    well_location=(i - pad_width, j - pad_width, k - pad_width),
-                    grid_dimensions=grid_dims,
-                    boundary_condition=pressure_bc,
+                    well_location=(i, j, k),
+                    grid_shape=grid_shape,
+                    boundary_conditions=boundary_conditions,
                 )
-                cell_1d_index = to_1D_index_interior_only(
+                cell_1d_index = to_1D_index(
                     i, j, k, cell_count_x, cell_count_y, cell_count_z
                 )
                 perforations.append(

@@ -12,7 +12,6 @@ from bores.datastructures import PhaseTensorsProxy
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
-from bores.precision import get_dtype
 from bores.solvers.base import (
     EvolutionResult,
     _warn_injection_rate,
@@ -45,6 +44,8 @@ def evolve_pressure(
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     face_transmissibilities: FaceTransmissibilities,
+    pressure_boundaries: ThreeDimensionalGrid,
+    flux_boundaries: ThreeDimensionalGrid,
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
@@ -56,7 +57,7 @@ def evolve_pressure(
     production_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    pad_width: int = 1,
+    dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ExplicitPressureSolution, None]:
     """
     Computes the pressure evolution (specifically, oil phase pressure P_oil) in the reservoir grid
@@ -104,7 +105,6 @@ def evolve_pressure(
     # Determine grid dimensions and cell sizes
     cell_count_x, cell_count_y, cell_count_z = current_oil_pressure_grid.shape
     cell_size_x, cell_size_y = cell_dimension
-    dtype = get_dtype()
 
     # Compute total fluid system compressibility for each cell
     total_fluid_compressibility_grid = build_total_fluid_compressibility_grid(
@@ -182,6 +182,8 @@ def evolve_pressure(
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
+            pressure_boundaries=pressure_boundaries,
+            flux_boundaries=flux_boundaries,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
             gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -223,7 +225,6 @@ def evolve_pressure(
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
             dtype=dtype,
-            pad_width=pad_width,
         )
         net_flux_grid = flux_future.result()
         well_rate_grid = well_rate_future.result()
@@ -234,6 +235,8 @@ def evolve_pressure(
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
+            pressure_boundaries=pressure_boundaries,
+            flux_boundaries=flux_boundaries,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
             gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -274,12 +277,11 @@ def evolve_pressure(
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
             dtype=dtype,
-            pad_width=pad_width,
         )
 
     # Apply pressure updates
     updated_oil_pressure_grid = apply_updates(
-        current_oil_pressure_grid=current_oil_pressure_grid,
+        updated_grid=current_oil_pressure_grid.copy(),
         net_flux_grid=net_flux_grid,
         well_rate_grid=well_rate_grid,
         cell_count_x=cell_count_x,
@@ -287,7 +289,7 @@ def evolve_pressure(
         cell_count_z=cell_count_z,
         thickness_grid=thickness_grid,
         porosity_grid=porosity_grid,
-        total_compressibility_grid=total_compressibility_grid,  # type: ignore
+        total_compressibility_grid=total_compressibility_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         time_step_size_in_days=time_step_size_in_days,
@@ -339,11 +341,16 @@ def compute_pressure_cfl_number(
     total relative mobilities as the face mobility estimate.
     """
     cell_count_x, cell_count_y, cell_count_z = porosity_grid.shape
+    total_relative_mobility_grid = (
+        water_relative_mobility_grid
+        + oil_relative_mobility_grid
+        + gas_relative_mobility_grid
+    )
     maximum_cfl = 0.0
 
-    for i in range(1, cell_count_x - 1):
-        for j in range(1, cell_count_y - 1):
-            for k in range(1, cell_count_z - 1):
+    for i in range(cell_count_x):
+        for j in range(cell_count_y):
+            for k in range(cell_count_z):
                 cell_thickness = thickness_grid[i, j, k]
                 cell_volume = cell_size_x * cell_size_y * cell_thickness
                 cell_porosity = porosity_grid[i, j, k]
@@ -352,20 +359,11 @@ def compute_pressure_cfl_number(
                 if cell_compressibility <= 0.0 or cell_porosity <= 0.0:
                     continue
 
-                cell_total_mobility = (
-                    water_relative_mobility_grid[i, j, k]
-                    + oil_relative_mobility_grid[i, j, k]
-                    + gas_relative_mobility_grid[i, j, k]
-                )
-
+                cell_total_mobility = total_relative_mobility_grid[i, j, k]
                 total_transmissibility = 0.0
 
                 # X: forward face (i→i+1) and backward face (i-1→i)
-                east_mobility = (
-                    water_relative_mobility_grid[i + 1, j, k]
-                    + oil_relative_mobility_grid[i + 1, j, k]
-                    + gas_relative_mobility_grid[i + 1, j, k]
-                )
+                east_mobility = total_relative_mobility_grid[i + 1, j, k]
                 east_face_mobility = compute_harmonic_mean(
                     cell_total_mobility, east_mobility
                 )
@@ -375,11 +373,7 @@ def compute_pressure_cfl_number(
                     * md_per_cp_to_ft2_per_psi_per_day
                 )
 
-                west_mobility = (
-                    water_relative_mobility_grid[i - 1, j, k]
-                    + oil_relative_mobility_grid[i - 1, j, k]
-                    + gas_relative_mobility_grid[i - 1, j, k]
-                )
+                west_mobility = total_relative_mobility_grid[i - 1, j, k]
                 west_face_mobility = compute_harmonic_mean(
                     cell_total_mobility, west_mobility
                 )
@@ -390,11 +384,7 @@ def compute_pressure_cfl_number(
                 )
 
                 # Y: forward face (j→j+1) and backward face (j-1→j)
-                south_mobility = (
-                    water_relative_mobility_grid[i, j + 1, k]
-                    + oil_relative_mobility_grid[i, j + 1, k]
-                    + gas_relative_mobility_grid[i, j + 1, k]
-                )
+                south_mobility = total_relative_mobility_grid[i, j + 1, k]
                 south_face_mobility = compute_harmonic_mean(
                     cell_total_mobility, south_mobility
                 )
@@ -404,11 +394,7 @@ def compute_pressure_cfl_number(
                     * md_per_cp_to_ft2_per_psi_per_day
                 )
 
-                north_mobility = (
-                    water_relative_mobility_grid[i, j - 1, k]
-                    + oil_relative_mobility_grid[i, j - 1, k]
-                    + gas_relative_mobility_grid[i, j - 1, k]
-                )
+                north_mobility = total_relative_mobility_grid[i, j - 1, k]
                 north_face_mobility = compute_harmonic_mean(
                     cell_total_mobility, north_mobility
                 )
@@ -419,11 +405,7 @@ def compute_pressure_cfl_number(
                 )
 
                 # Z: forward face (k→k+1) and backward face (k-1→k)
-                bottom_mobility = (
-                    water_relative_mobility_grid[i, j, k + 1]
-                    + oil_relative_mobility_grid[i, j, k + 1]
-                    + gas_relative_mobility_grid[i, j, k + 1]
-                )
+                bottom_mobility = total_relative_mobility_grid[i, j, k + 1]
                 bottom_face_mobility = compute_harmonic_mean(
                     cell_total_mobility, bottom_mobility
                 )
@@ -433,11 +415,7 @@ def compute_pressure_cfl_number(
                     * md_per_cp_to_ft2_per_psi_per_day
                 )
 
-                top_mobility = (
-                    water_relative_mobility_grid[i, j, k - 1]
-                    + oil_relative_mobility_grid[i, j, k - 1]
-                    + gas_relative_mobility_grid[i, j, k - 1]
-                )
+                top_mobility = total_relative_mobility_grid[i, j, k - 1]
                 top_face_mobility = compute_harmonic_mean(
                     cell_total_mobility, top_mobility
                 )
@@ -614,6 +592,8 @@ def compute_net_flux_contributions(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
+    pressure_boundaries: ThreeDimensionalGrid,
+    flux_boundaries: ThreeDimensionalGrid,
     water_relative_mobility_grid: ThreeDimensionalGrid,
     oil_relative_mobility_grid: ThreeDimensionalGrid,
     gas_relative_mobility_grid: ThreeDimensionalGrid,
@@ -631,158 +611,281 @@ def compute_net_flux_contributions(
     dtype: npt.DTypeLike,
 ) -> ThreeDimensionalGrid:
     """
-    Compute net volumetric flux into each interior cell from all 6 neighbors (excluding wells).
+    Compute net volumetric flux into each cell from all 6 neighbours (excluding wells).
 
-    This function implements the flux computation portion of the explicit pressure evolution.
-    For each interior cell, it computes fluxes from neighbors in all three directions (x, y, z),
-    considering capillary pressure effects and gravity.
+    For each cell, all six face neighbours are checked:
 
-    :param current_oil_pressure_grid: Current oil pressure grid (psi)
-    :param cell_count_x: Number of cells in x-direction (including boundaries)
-    :param cell_count_y: Number of cells in y-direction (including boundaries)
-    :param cell_count_z: Number of cells in z-direction (including boundaries)
-    :param thickness_grid: Cell thickness grid (ft)
-    :param cell_size_x: Cell size in x-direction (ft)
-    :param cell_size_y: Cell size in y-direction (ft)
-    :param water_mobility_grid_x: Water mobility grid in x-direction (ft²/psi·day)
-    :param oil_mobility_grid_x: Oil mobility grid in x-direction (ft²/psi·day)
-    :param gas_mobility_grid_x: Gas mobility grid in x-direction (ft²/psi·day)
-    :param water_mobility_grid_y: Water mobility grid in y-direction (ft²/psi·day)
-    :param oil_mobility_grid_y: Oil mobility grid in y-direction (ft²/psi·day)
-    :param gas_mobility_grid_y: Gas mobility grid in y-direction (ft²/psi·day)
-    :param water_mobility_grid_z: Water mobility grid in z-direction (ft²/psi·day)
-    :param oil_mobility_grid_z: Oil mobility grid in z-direction (ft²/psi·day)
-    :param gas_mobility_grid_z: Gas mobility grid in z-direction (ft²/psi·day)
-    :param oil_water_capillary_pressure_grid: Oil-water capillary pressure (psi)
-    :param gas_oil_capillary_pressure_grid: Gas-oil capillary pressure (psi)
+    1. **Interior neighbour** (indices in [0, cell_count_*)):
+       Full multi-phase flux via `compute_flux_from_neighbour` — pressure, capillary,
+       and gravity contributions using harmonic face mobilities from both cells.
+
+    2. **Out-of-bounds neighbour** — boundary face. Convert out-of-bounds indices
+       to padded ghost-cell coordinates (i+1, j+1, k+1) and look up directly in
+       the boundary grids:
+
+       a. **Dirichlet** (pressure value is not NaN in pressure_boundaries):
+          Known boundary pressure p_bc. One-sided flux using only the interior
+          cell's total mobility (no harmonic mean — ghost has no real mobility)
+          and only the oil pressure difference (ghost has no capillary or gravity
+          properties):
+
+              flux = T_geo * lambda_total[i,j,k] * md_per_cp * (p_bc - p_cell)
+
+       b. **Neumann** (pressure value is NaN in pressure_boundaries):
+          Known boundary flux q_bc in ft³/day from flux_boundaries. Added directly
+          to the cell's net flux with no further modification.
+
+    :param current_oil_pressure_grid: Current oil pressure grid (psi), shape (nx, ny, nz)
+    :param cell_count_x: Number of cells in x-direction (real grid, no ghost cells)
+    :param cell_count_y: Number of cells in y-direction (real grid, no ghost cells)
+    :param cell_count_z: Number of cells in z-direction (real grid, no ghost cells)
+    :param pressure_boundaries: 3D grid of boundary pressures, shape (nx+2, ny+2, nz+2).
+        Ghost-cell region indexed by [i+1, j+1, k+1] for out-of-bounds cell (i, j, k).
+        Contains pressure values for Dirichlet BCs; NaN indicates Neumann BC.
+    :param flux_boundaries: 3D grid of boundary fluxes, shape (nx+2, ny+2, nz+2).
+        Ghost-cell region indexed by [i+1, j+1, k+1] for out-of-bounds cell (i, j, k).
+        Contains flux values for Neumann BCs (read when pressure_boundaries[...] is NaN).
+    :param water_relative_mobility_grid: Water relative mobility grid (ft²/psi·day)
+    :param oil_relative_mobility_grid: Oil relative mobility grid (ft²/psi·day)
+    :param gas_relative_mobility_grid: Gas relative mobility grid (ft²/psi·day)
+    :param face_transmissibilities_x: Geometric face transmissibilities in x-direction (mD·ft)
+    :param face_transmissibilities_y: Geometric face transmissibilities in y-direction (mD·ft)
+    :param face_transmissibilities_z: Geometric face transmissibilities in z-direction (mD·ft)
+    :param oil_water_capillary_pressure_grid: Oil-water capillary pressure grid (psi)
+    :param gas_oil_capillary_pressure_grid: Gas-oil capillary pressure grid (psi)
     :param oil_density_grid: Oil density grid (lb/ft³)
     :param water_density_grid: Water density grid (lb/ft³)
     :param gas_density_grid: Gas density grid (lb/ft³)
-    :param elevation_grid: Elevation grid (ft)
+    :param elevation_grid: Cell elevation grid (ft)
     :param gravitational_constant: Gravitational constant conversion factor (lbf/lbm)
+    :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor
     :param dtype: NumPy dtype for array allocation (np.float32 or np.float64)
-    :return: 3D grid of net volumetric fluxes (ft³/day), positive = flow into cell
+    :return: 3D grid of net volumetric fluxes (ft³/day), positive = net flow into cell
     """
     flux_grid = np.zeros((cell_count_x, cell_count_y, cell_count_z), dtype=dtype)
 
-    for i in numba.prange(1, cell_count_x - 1):  # type: ignore
-        for j in range(1, cell_count_y - 1):
-            for k in range(1, cell_count_z - 1):
-                # X-direction neighbors (i+1 and i-1)
-                east_flux = compute_flux_from_neighbour(
-                    cell_indices=(i, j, k),
-                    neighbour_indices=(i + 1, j, k),
-                    oil_pressure_grid=current_oil_pressure_grid,
-                    water_relative_mobility_grid=water_relative_mobility_grid,
-                    oil_relative_mobility_grid=oil_relative_mobility_grid,
-                    gas_relative_mobility_grid=gas_relative_mobility_grid,
-                    face_transmissibility=face_transmissibilities_x[i, j, k],
-                    oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-                    gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-                    oil_density_grid=oil_density_grid,
-                    water_density_grid=water_density_grid,
-                    gas_density_grid=gas_density_grid,
-                    elevation_grid=elevation_grid,
-                    gravitational_constant=gravitational_constant,
-                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+    for i in numba.prange(cell_count_x):  # type: ignore
+        for j in range(cell_count_y):
+            for k in range(cell_count_z):
+                cell_pressure = current_oil_pressure_grid[i, j, k]
+                cell_total_mobility = (
+                    water_relative_mobility_grid[i, j, k]
+                    + oil_relative_mobility_grid[i, j, k]
+                    + gas_relative_mobility_grid[i, j, k]
                 )
-                west_flux = compute_flux_from_neighbour(
-                    cell_indices=(i, j, k),
-                    neighbour_indices=(i - 1, j, k),
-                    oil_pressure_grid=current_oil_pressure_grid,
-                    water_relative_mobility_grid=water_relative_mobility_grid,
-                    oil_relative_mobility_grid=oil_relative_mobility_grid,
-                    gas_relative_mobility_grid=gas_relative_mobility_grid,
-                    face_transmissibility=face_transmissibilities_x[i - 1, j, k],
-                    oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-                    gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-                    oil_density_grid=oil_density_grid,
-                    water_density_grid=water_density_grid,
-                    gas_density_grid=gas_density_grid,
-                    elevation_grid=elevation_grid,
-                    gravitational_constant=gravitational_constant,
-                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-                )
+                net_flux = 0.0
 
-                # Y-direction neighbors (j+1 and j-1)
-                south_flux = compute_flux_from_neighbour(
-                    cell_indices=(i, j, k),
-                    neighbour_indices=(i, j + 1, k),
-                    oil_pressure_grid=current_oil_pressure_grid,
-                    water_relative_mobility_grid=water_relative_mobility_grid,
-                    oil_relative_mobility_grid=oil_relative_mobility_grid,
-                    gas_relative_mobility_grid=gas_relative_mobility_grid,
-                    face_transmissibility=face_transmissibilities_y[i, j, k],
-                    oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-                    gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-                    oil_density_grid=oil_density_grid,
-                    water_density_grid=water_density_grid,
-                    gas_density_grid=gas_density_grid,
-                    elevation_grid=elevation_grid,
-                    gravitational_constant=gravitational_constant,
-                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-                )
-                north_flux = compute_flux_from_neighbour(
-                    cell_indices=(i, j, k),
-                    neighbour_indices=(i, j - 1, k),
-                    oil_pressure_grid=current_oil_pressure_grid,
-                    water_relative_mobility_grid=water_relative_mobility_grid,
-                    oil_relative_mobility_grid=oil_relative_mobility_grid,
-                    gas_relative_mobility_grid=gas_relative_mobility_grid,
-                    face_transmissibility=face_transmissibilities_y[i, j - 1, k],
-                    oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-                    gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-                    oil_density_grid=oil_density_grid,
-                    water_density_grid=water_density_grid,
-                    gas_density_grid=gas_density_grid,
-                    elevation_grid=elevation_grid,
-                    gravitational_constant=gravitational_constant,
-                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-                )
+                # Six neighbour directions with their associated geometric transmissibility.
+                # For x/y/z: the forward face transmissibility is stored at the current cell
+                # index, the backward face at the neighbour's index (one step back).
+                #
+                # Directions and their face transmissibility index:
+                #   east   (i+1, j,   k  ) → face_transmissibilities_x[i,   j, k]
+                #   west   (i-1, j,   k  ) → face_transmissibilities_x[i-1, j, k]
+                #   south  (i,   j+1, k  ) → face_transmissibilities_y[i, j,   k]
+                #   north  (i,   j-1, k  ) → face_transmissibilities_y[i, j-1, k]
+                #   bottom (i,   j,   k+1) → face_transmissibilities_z[i, j, k  ]
+                #   top    (i,   j,   k-1) → face_transmissibilities_z[i, j, k-1]
 
-                # Z-direction neighbors (k+1 and k-1)
-                bottom_flux = compute_flux_from_neighbour(
-                    cell_indices=(i, j, k),
-                    neighbour_indices=(i, j, k + 1),
-                    oil_pressure_grid=current_oil_pressure_grid,
-                    water_relative_mobility_grid=water_relative_mobility_grid,
-                    oil_relative_mobility_grid=oil_relative_mobility_grid,
-                    gas_relative_mobility_grid=gas_relative_mobility_grid,
-                    face_transmissibility=face_transmissibilities_z[i, j, k],
-                    oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-                    gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-                    oil_density_grid=oil_density_grid,
-                    water_density_grid=water_density_grid,
-                    gas_density_grid=gas_density_grid,
-                    elevation_grid=elevation_grid,
-                    gravitational_constant=gravitational_constant,
-                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-                )
-                top_flux = compute_flux_from_neighbour(
-                    cell_indices=(i, j, k),
-                    neighbour_indices=(i, j, k - 1),
-                    oil_pressure_grid=current_oil_pressure_grid,
-                    water_relative_mobility_grid=water_relative_mobility_grid,
-                    oil_relative_mobility_grid=oil_relative_mobility_grid,
-                    gas_relative_mobility_grid=gas_relative_mobility_grid,
-                    face_transmissibility=face_transmissibilities_z[i, j, k - 1],
-                    oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-                    gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-                    oil_density_grid=oil_density_grid,
-                    water_density_grid=water_density_grid,
-                    gas_density_grid=gas_density_grid,
-                    elevation_grid=elevation_grid,
-                    gravitational_constant=gravitational_constant,
-                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-                )
-                flux_grid[i, j, k] = (
-                    east_flux
-                    + west_flux
-                    + south_flux
-                    + north_flux
-                    + bottom_flux
-                    + top_flux
-                )
+                # EAST (i+1, j, k)
+                ei = i + 1
+                if ei < cell_count_x:
+                    net_flux += compute_flux_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(ei, j, k),
+                        oil_pressure_grid=current_oil_pressure_grid,
+                        face_transmissibility=face_transmissibilities_x[i, j, k],
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+                else:
+                    ni, nj, nk = ei + 1, j + 1, k + 1
+                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    if not np.isnan(pressure_boundary):
+                        net_flux += (
+                            face_transmissibilities_x[i, j, k]
+                            * cell_total_mobility
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * (pressure_boundary - cell_pressure)
+                        )
+                    else:
+                        net_flux += flux_boundaries[ni, nj, nk]
+
+                # WEST (i-1, j, k)
+                wi = i - 1
+                if wi >= 0:
+                    net_flux += compute_flux_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(wi, j, k),
+                        oil_pressure_grid=current_oil_pressure_grid,
+                        face_transmissibility=face_transmissibilities_x[wi, j, k],
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+                else:
+                    ni, nj, nk = wi + 1, j + 1, k + 1
+                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    if not np.isnan(pressure_boundary):
+                        net_flux += (
+                            face_transmissibilities_x[i, j, k]
+                            * cell_total_mobility
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * (pressure_boundary - cell_pressure)
+                        )
+                    else:
+                        net_flux += flux_boundaries[ni, nj, nk]
+
+                # SOUTH (i, j+1, k)
+                sj = j + 1
+                if sj < cell_count_y:
+                    net_flux += compute_flux_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(i, sj, k),
+                        oil_pressure_grid=current_oil_pressure_grid,
+                        face_transmissibility=face_transmissibilities_y[i, j, k],
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+                else:
+                    ni, nj, nk = i + 1, sj + 1, k + 1
+                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    if not np.isnan(pressure_boundary):
+                        net_flux += (
+                            face_transmissibilities_y[i, j, k]
+                            * cell_total_mobility
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * (pressure_boundary - cell_pressure)
+                        )
+                    else:
+                        net_flux += flux_boundaries[ni, nj, nk]
+
+                # NORTH (i, j-1, k)
+                nj = j - 1
+                if nj >= 0:
+                    net_flux += compute_flux_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(i, nj, k),
+                        oil_pressure_grid=current_oil_pressure_grid,
+                        face_transmissibility=face_transmissibilities_y[i, nj, k],
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+                else:
+                    ni, nj, nk = i + 1, nj + 1, k + 1
+                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    if not np.isnan(pressure_boundary):
+                        net_flux += (
+                            face_transmissibilities_y[i, j, k]
+                            * cell_total_mobility
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * (pressure_boundary - cell_pressure)
+                        )
+                    else:
+                        net_flux += flux_boundaries[ni, nj, nk]
+
+                # BOTTOM (i, j, k+1)
+                bk = k + 1
+                if bk < cell_count_z:
+                    net_flux += compute_flux_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(i, j, bk),
+                        oil_pressure_grid=current_oil_pressure_grid,
+                        face_transmissibility=face_transmissibilities_z[i, j, k],
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+                else:
+                    ni, nj, nk = i + 1, j + 1, bk + 1
+                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    if not np.isnan(pressure_boundary):
+                        net_flux += (
+                            face_transmissibilities_z[i, j, k]
+                            * cell_total_mobility
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * (pressure_boundary - cell_pressure)
+                        )
+                    else:
+                        net_flux += flux_boundaries[ni, nj, nk]
+
+                # TOP (i, j, k-1)
+                tk = k - 1
+                if tk >= 0:
+                    net_flux += compute_flux_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(i, j, tk),
+                        oil_pressure_grid=current_oil_pressure_grid,
+                        face_transmissibility=face_transmissibilities_z[i, j, tk],
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+                else:
+                    ni, nj, nk = i + 1, j + 1, tk + 1
+                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    if not np.isnan(pressure_boundary):
+                        net_flux += (
+                            face_transmissibilities_z[i, j, k]
+                            * cell_total_mobility
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * (pressure_boundary - cell_pressure)
+                        )
+                    else:
+                        net_flux += flux_boundaries[ni, nj, nk]
+
+                flux_grid[i, j, k] = net_flux
 
     return flux_grid
 
@@ -811,7 +914,6 @@ def compute_well_rate_grid(
     production_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    pad_width: int = 1,
 ) -> ThreeDimensionalGrid:
     """
     Compute well rates for all cells (injection + production).
@@ -931,7 +1033,7 @@ def compute_well_rate_grid(
                     injection_rate=flow_rate,
                     well_name=well.name,
                     time=time,
-                    cell=(i - pad_width, j - pad_width, k - pad_width),
+                    cell=(i, j, k),
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
                     else "bbls/day",
@@ -944,45 +1046,21 @@ def compute_well_rate_grid(
 
             if injection_rates is not None:
                 if injected_phase == FluidPhase.GAS:
-                    injection_rates[i - pad_width, j - pad_width, k - pad_width] = (
-                        0.0,
-                        0.0,
-                        flow_rate,
-                    )
+                    injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
                 else:
-                    injection_rates[i - pad_width, j - pad_width, k - pad_width] = (
-                        flow_rate,
-                        0.0,
-                        0.0,
-                    )
+                    injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
 
             if injection_fvfs is not None:
                 if injected_phase == FluidPhase.GAS:
-                    injection_fvfs[i - pad_width, j - pad_width, k - pad_width] = (
-                        0.0,
-                        0.0,
-                        phase_fvf,
-                    )
+                    injection_fvfs[i, j, k] = (0.0, 0.0, phase_fvf)
                 else:
-                    injection_fvfs[i - pad_width, j - pad_width, k - pad_width] = (
-                        phase_fvf,
-                        0.0,
-                        0.0,
-                    )
+                    injection_fvfs[i, j, k] = (phase_fvf, 0.0, 0.0)
 
             if injection_bhps is not None:
                 if injected_phase == FluidPhase.GAS:
-                    injection_bhps[i - pad_width, j - pad_width, k - pad_width] = (
-                        0.0,
-                        0.0,
-                        bhp,
-                    )
+                    injection_bhps[i, j, k] = (0.0, 0.0, bhp)
                 else:
-                    injection_bhps[i - pad_width, j - pad_width, k - pad_width] = (
-                        bhp,
-                        0.0,
-                        0.0,
-                    )
+                    injection_bhps[i, j, k] = (bhp, 0.0, 0.0)
 
     # Process production wells
     for well in wells.production_wells:
@@ -1111,7 +1189,7 @@ def compute_well_rate_grid(
                         production_rate=flow_rate,
                         well_name=well.name,
                         time=time,
-                        cell=(i - pad_width, j - pad_width, k - pad_width),
+                        cell=(i, j, k),
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS
                         else "bbls/day",
@@ -1138,32 +1216,20 @@ def compute_well_rate_grid(
                     oil_bhp = bhp
 
             if production_rates is not None:
-                production_rates[i - pad_width, j - pad_width, k - pad_width] = (
-                    water_rate,
-                    oil_rate,
-                    gas_rate,
-                )
+                production_rates[i, j, k] = (water_rate, oil_rate, gas_rate)
 
             if production_fvfs is not None:
-                production_fvfs[i - pad_width, j - pad_width, k - pad_width] = (
-                    water_fvf,
-                    oil_fvf,
-                    gas_fvf,
-                )
+                production_fvfs[i, j, k] = (water_fvf, oil_fvf, gas_fvf)
 
             if production_bhps is not None:
-                production_bhps[i - pad_width, j - pad_width, k - pad_width] = (
-                    water_bhp,
-                    oil_bhp,
-                    gas_bhp,
-                )
+                production_bhps[i, j, k] = (water_bhp, oil_bhp, gas_bhp)
 
     return well_rate_grid
 
 
 @numba.njit(parallel=True, cache=True)
 def apply_updates(
-    current_oil_pressure_grid: ThreeDimensionalGrid,
+    updated_grid: ThreeDimensionalGrid,
     net_flux_grid: ThreeDimensionalGrid,
     well_rate_grid: ThreeDimensionalGrid,
     cell_count_x: int,
@@ -1177,13 +1243,13 @@ def apply_updates(
     time_step_size_in_days: float,
 ) -> ThreeDimensionalGrid:
     """
-    Apply pressure updates to all interior cells using pre-computed flux and well contributions.
+    Apply pressure updates to all cells using pre-computed flux and well contributions.
 
     This function combines the net flux contributions (from neighbors) and well contributions
-    to compute and apply pressure changes to each interior cell. The computation is parallelized
-    across all interior cells using prange.
+    to compute and apply pressure changes to each cell. The computation is parallelized
+    across all cells using prange.
 
-    :param current_oil_pressure_grid: Current oil pressure grid (psi)
+    :param updated_grid: Current oil pressure grid to be updated (psi)
     :param net_flux_grid: Pre-computed net flux contributions (ft³/day)
     :param well_rate_grid: Pre-computed well rate contributions (ft³/day)
     :param cell_count_x: Number of cells in x-direction (including boundaries)
@@ -1197,11 +1263,9 @@ def apply_updates(
     :param time_step_size_in_days: Time step size (days)
     :return: Updated oil pressure grid (psi)
     """
-    updated_grid = current_oil_pressure_grid.copy()
-
-    for i in numba.prange(1, cell_count_x - 1):  # type: ignore
-        for j in range(1, cell_count_y - 1):
-            for k in range(1, cell_count_z - 1):
+    for i in numba.prange(cell_count_x):  # type: ignore
+        for j in range(cell_count_y):
+            for k in range(cell_count_z):
                 # Cell properties
                 cell_thickness = thickness_grid[i, j, k]
                 cell_volume = cell_size_x * cell_size_y * cell_thickness

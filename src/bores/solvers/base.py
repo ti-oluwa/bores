@@ -54,7 +54,7 @@ __all__ = [
     "build_diagonal_preconditioner",
     "build_ilu_preconditioner",
     "build_polynomial_preconditioner",
-    "from_1D_index_interior_only",
+    "from_1D_index",
     "get_preconditioner_factory",
     "get_solver_func",
     "list_preconditioner_factories",
@@ -62,7 +62,7 @@ __all__ = [
     "preconditioner_factory",
     "solve_linear_system",
     "solver_func",
-    "to_1D_index_interior_only",
+    "to_1D_index",
 ]
 
 
@@ -152,7 +152,7 @@ class EvolutionResult(typing.Generic[T, M]):
 
 
 @numba.njit(inline="always", cache=True)
-def to_1D_index_interior_only(
+def to_1D_index(
     i: int,
     j: int,
     k: int,
@@ -164,37 +164,16 @@ def to_1D_index_interior_only(
     Convert 3D interior cell indices to 1D array index.
 
     For a grid with dimensions (Nx, Ny, Nz), interior cells are
-    indexed from (1, 1, 1) to (Nx-2, Ny-2, Nz-2).
-
-    The 1D index starts at 0 for cell (1, 1, 1).
-
-    Padding cells (i=0, i=Nx-1, etc.) return -1.
-    Interior cells are mapped to [0, (Nx-2)*(Ny-2)*(Nz-2))
+    indexed from (0, 0, 0) to (Nx-1, Ny-1, Nz-1).
     """
-    if not (
-        0 < i < cell_count_x - 1
-        and 0 < j < cell_count_y - 1
-        and 0 < k < cell_count_z - 1
-    ):
+    if not (i < cell_count_x and j < cell_count_y and k < cell_count_z):
         return -1  # Padding cell
 
-    # Adjust indices to 0-based for interior grid
-    i_interior = i - 1
-    j_interior = j - 1
-    k_interior = k - 1
-
-    # Interior dimensions
-    ny_interior = cell_count_y - 2
-    nz_interior = cell_count_z - 2
-    return (
-        i_interior * (ny_interior * nz_interior)
-        + (j_interior * nz_interior)
-        + k_interior
-    )
+    return i * (cell_count_y * cell_count_z) + (j * cell_count_z) + k
 
 
 @numba.njit(cache=True, inline="always")
-def from_1D_index_interior_only(
+def from_1D_index(
     idx: int,
     cell_count_x: int,
     cell_count_y: int,
@@ -203,35 +182,23 @@ def from_1D_index_interior_only(
     """
     Convert 1D interior cell index back to 3D grid indices.
 
-    This is the inverse of to_1D_index_interior_only.
+    This is the inverse of to_1D_index.
 
     For a grid with dimensions (Nx, Ny, Nz), interior cells are
-    indexed from (1, 1, 1) to (Nx-2, Ny-2, Nz-2).
+    indexed from (1, 1, 1) to (Nx-1, Ny-1, Nz-1).
 
-    The 1D index starts at 0 for cell (1, 1, 1).
-
-    :param idx: 1D array index (0 to interior_cell_count - 1)
-    :param cell_count_x: Total number of cells in x-direction (including boundaries)
-    :param cell_count_y: Total number of cells in y-direction (including boundaries)
-    :param cell_count_z: Total number of cells in z-direction (including boundaries)
-    :return: Tuple of (i, j, k) indices in the full grid (interior cells only)
+    :param idx: 1D array index (0 to cell_count - 1)
+    :param cell_count_x: Total number of cells in x-direction
+    :param cell_count_y: Total number of cells in y-direction
+    :param cell_count_z: Total number of cells in z-direction
+    :return: Tuple of (i, j, k) indices in the full grid
     """
-    # Compute interior dimensions
-    interior_ny = cell_count_y - 2
-    interior_nz = cell_count_z - 2
-
     # Reverse the row-major ordering
     # idx = i_interior * (interior_ny * interior_nz) + j_interior * interior_nz + k_interior
-    i_interior = idx // (interior_ny * interior_nz)
-    remainder = idx % (interior_ny * interior_nz)
-    j_interior = remainder // interior_nz
-    k_interior = remainder % interior_nz
-
-    # Convert back to full grid coordinates (add 1 to shift from interior to full grid)
-    i = i_interior + 1
-    j = j_interior + 1
-    k = k_interior + 1
-
+    i = idx // (cell_count_y * cell_count_z)
+    remainder = idx % (cell_count_y * cell_count_z)
+    j = remainder // cell_count_z
+    k = remainder % cell_count_z
     return i, j, k
 
 

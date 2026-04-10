@@ -49,7 +49,6 @@ __all__ = [
     "CarterTracyAquifer",
     "DirichletBoundary",
     "GhostCellIndex",
-    "GhostCellMap",
     "NeumannBoundary",
     "ParameterizedBoundaryFunction",
     "RobinBoundary",
@@ -61,20 +60,6 @@ __all__ = [
 GhostCellIndex = typing.Tuple[int, int, int]
 """Padded-grid (i, j, k) index identifying a single ghost cell."""
 
-GhostCellMap = typing.Dict[int, float]
-"""
-Flat-key ghost-cell map used in `get_boundaries`.
-
-Keys are ghost-cell flat indices computed as ``i*ny*nz + j*nz + k`` over
-the *padded* grid shape.  Values are the ghost-cell quantities - either a
-pressure (psi) for PRESSURE-type BCs or a volumetric flux (ft³/day) for
-FLUX-type BCs.
-
-The flat-integer key makes the dict straightforwardly usable from Numba
-jitted functions when annotated as ``numba.typed.Dict(numba.int64, numba.float64)``.
-Regular Python dicts with ``int`` keys and ``float`` values are accepted by
-Numba when the function signature is typed explicitly.
-"""
 
 # Boundary-function registry
 _BOUNDARY_FUNCTIONS: typing.Dict[str, typing.Callable] = {}
@@ -682,6 +667,9 @@ class NeumannBoundary(BoundaryCondition[NDimension]):
         """
         return True
 
+    def is_noflow(self) -> bool:
+        return self.flux == 0
+
     def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
         return {"flux": self.flux}
 
@@ -1278,10 +1266,6 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
         return instance
 
 
-NoFlowBoundary = NeumannBoundary
-"""Alias for `NeumannBoundary` with default zero flux - a sealed boundary."""
-
-
 # Face-descriptor helpers
 _FACE_SLICES_2D: typing.Dict[
     Boundary, typing.Tuple[typing.Tuple[slice, ...], typing.Tuple[slice, ...]]
@@ -1366,7 +1350,7 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
     Defaults to `NeumannBoundary()` (zero flux, no-flow) on every face.
 
     The central method is `get_boundaries`, which evaluates each face's
-    condition and assembles two flat-key `GhostCellMap` dicts. One for
+    condition and assembles two sparse boundary grids. One for
     `FLUX` ghost cells and one for `PRESSURE` ghost cells.
 
     A per-face *static cache* avoids recomputing constant conditions
@@ -1400,7 +1384,7 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         back=NeumannBoundary(),    # no-flow
     )
 
-    flux_map, pressure_map = bc.get_boundaries(
+    flux_grid, pressure_grid = bc.get_boundaries(
         grid_shape=model.grid_shape,
         metadata=metadata,
         pad_width=1,
@@ -1421,11 +1405,15 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
     top: BoundaryCondition = attrs.field(factory=NeumannBoundary)
     """Condition for the z+ face (deepest layer)."""
 
-    _flux_cache: GhostCellMap = attrs.field(factory=dict, init=False, repr=False)
-    """Flat-key map of ghost-cell flat indices → flux values (ft³/day)."""
+    _flux_cache: typing.Optional[NDimensionalGrid] = attrs.field(
+        default=None, init=False, repr=False
+    )
+    """Cached sparse flux boundary grid (NaN where no flux BC)."""
 
-    _pressure_cache: GhostCellMap = attrs.field(factory=dict, init=False, repr=False)
-    """Flat-key map of ghost-cell flat indices → pressure values (psi)."""
+    _pressure_cache: typing.Optional[NDimensionalGrid] = attrs.field(
+        default=None, init=False, repr=False
+    )
+    """Cached sparse pressure boundary grid (NaN where no pressure BC)."""
 
     _cache_initialised: bool = attrs.field(default=False, init=False, repr=False)
     """*True* once the first `get_boundaries` call has populated the caches."""
@@ -1459,9 +1447,9 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         grid_shape: typing.Tuple[int, ...],
         metadata: BoundaryMetadata,
         pad_width: int = 1,
-    ) -> typing.Tuple[GhostCellMap, GhostCellMap]:
+    ) -> typing.Tuple[NDimensionalGrid, NDimensionalGrid]:
         """
-        Evaluate all face boundary conditions and return two flat ghost-cell maps.
+        Evaluate all face boundary conditions and return two sparse boundary grids.
 
         On the *first* call every face is evaluated and the results are stored
         in the internal caches. On *subsequent* calls only faces whose
@@ -1470,13 +1458,10 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         only no-flow or constant-pressure boundaries the boundary evaluation
         cost after the first time step is essentially zero.
 
-        The returned maps use a flat integer key:
-        ```
-        flat_index = i * ny_padded * nz_padded + j * nz_padded + k
-        ```
+        The returned grids are sparse arrays of shape `(nx+2*pad_width, ny+2*pad_width, nz+2*pad_width)`
+        where boundary cells contain the boundary value and all other cells are NaN.
 
-        where ``(i, j, k)`` are the *padded* grid indices of the ghost cell.
-        Both dicts are the *same* Python objects that back the cache, so
+        Both arrays are the *same* Python objects that back the cache, so
         callers must not mutate them; treat them as read-only views.
 
         :param grid_shape: Un-padded grid shape ``(nx, ny)`` or ``(nx, ny, nz)``.
@@ -1484,12 +1469,12 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
             boundary condition.
         :param pad_width: Ghost-cell layer width. Must match the padding used
             when the grids were created. Default is *1*.
-        :return: A 2-tuple ``(flux_map, pressure_map)`` where each element is
-            a `GhostCellMap` (``Dict[int, float]``).
-            *flux_map* - ghost cells controlled by a FLUX-type condition,
-            values in ft³/day.
-            *pressure_map* - ghost cells controlled by a PRESSURE-type
-            condition, values in psi.
+        :return: A 2-tuple ``(flux_grid, pressure_grid)`` where each element is
+            a sparse NDimensionalGrid with shape matching the padded grid.
+            *flux_grid* - boundary cells controlled by a FLUX-type condition,
+            values in ft³/day, NaN elsewhere.
+            *pressure_grid* - boundary cells controlled by a PRESSURE-type
+            condition, values in psi, NaN elsewhere.
         :raises ValidationError: If *grid_shape* has unsupported dimensionality
             or required metadata fields are absent for a given condition.
         """
@@ -1498,9 +1483,18 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         faces = _face_slices(ndim)
         face_conditions = self._face_conditions(ndim)
 
-        flux_cache = self._flux_cache
-        pressure_cache = self._pressure_cache
         first_call = not self._cache_initialised
+
+        # Initialize caches on first call
+        if first_call:
+            flux_cache = np.full(padded_shape, np.nan, dtype=np.float64)
+            pressure_cache = np.full(padded_shape, np.nan, dtype=np.float64)
+            object.__setattr__(self, "_flux_cache", flux_cache)
+            object.__setattr__(self, "_pressure_cache", pressure_cache)
+        else:
+            flux_cache = self._flux_cache
+            pressure_cache = self._pressure_cache
+            assert flux_cache is not None and pressure_cache is not None
 
         for direction, condition in face_conditions:
             ghost_slice, _ = faces[direction]
@@ -1512,75 +1506,18 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
             values = condition(ghost_slice, direction, metadata)
             bc_type = condition.get_type()
 
-            # Determine which cache to write into.
+            # Write values to the appropriate cache and clear the opposite cache
             if bc_type == BoundaryType.FLUX:
-                target_cache = flux_cache
-                other_cache = pressure_cache
+                flux_cache[ghost_slice] = values
+                pressure_cache[ghost_slice] = np.nan
             else:
-                target_cache = pressure_cache
-                other_cache = flux_cache
-
-            # Materialise the ghost indices covered by this slice.
-            ghost_indices = self._materialise_ghost_indices(
-                ghost_slice=ghost_slice,
-                padded_shape=padded_shape,
-                ndim=ndim,
-            )
-            flat_values = values.ravel()
-
-            # Remove stale entries from the opposite cache (a face can only
-            # have one BC type at a time; if the type has changed between
-            # restarts we clean up).
-            for idx in ghost_indices:
-                other_cache.pop(idx, None)
-
-            # Write new values into the target cache using in-place update
-            # (preserving the dict identity so the frozen constraint holds).
-            target_cache.update(
-                {idx: float(v) for idx, v in zip(ghost_indices, flat_values)}
-            )
+                pressure_cache[ghost_slice] = values
+                flux_cache[ghost_slice] = np.nan
 
         if first_call:
             object.__setattr__(self, "_cache_initialised", True)
 
         return flux_cache, pressure_cache
-
-    @staticmethod
-    def _materialise_ghost_indices(
-        ghost_slice: typing.Tuple[slice, ...],
-        padded_shape: typing.Tuple[int, ...],
-        ndim: int,
-    ) -> typing.List[int]:
-        """
-        Return a flat list of flat indices for every cell selected by *ghost_slice*.
-
-        :param ghost_slice: Slice tuple selecting the ghost-cell layer.
-        :param padded_shape: Shape of the full padded grid.
-        :param ndim: Grid dimensionality.
-        :return: Ordered list of flat indices (same ordering as `np.ndarray.ravel`).
-        """
-        # Build the concrete range for each dimension from the slice.
-        ranges: typing.List[range] = []
-        for dim_idx, sl in enumerate(ghost_slice):
-            dim_size = padded_shape[dim_idx]
-            start, stop, step = sl.indices(dim_size)
-            ranges.append(range(start, stop, step if step is not None else 1))
-
-        indices: typing.List[int] = []
-
-        if ndim == 2:
-            ny_p = padded_shape[1]
-            for i in ranges[0]:
-                for j in ranges[1]:
-                    indices.append(i * ny_p + j)
-        else:
-            ny_p = padded_shape[1]
-            nz_p = padded_shape[2]
-            for i in ranges[0]:
-                for j in ranges[1]:
-                    for k in ranges[2]:
-                        indices.append(i * ny_p * nz_p + j * nz_p + k)
-        return indices
 
     def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
         return {

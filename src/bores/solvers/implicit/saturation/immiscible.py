@@ -18,9 +18,9 @@ from bores.precision import get_dtype
 from bores.solvers.base import (
     EvolutionResult,
     compute_mobility_grids,
-    from_1D_index_interior_only,
+    from_1D_index,
     solve_linear_system,
-    to_1D_index_interior_only,
+    to_1D_index,
 )
 from bores.solvers.explicit.saturation.immiscible import (
     compute_fluxes_from_neighbour,
@@ -29,7 +29,8 @@ from bores.solvers.explicit.saturation.immiscible import (
 from bores.tables.rock_fluid import RockFluidTables
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
-from bores.updates import apply_saturation_boundary_conditions
+
+# from bores.updates import apply_saturation_boundary_conditions
 from bores.wells.indices import WellIndicesCache
 
 logger = logging.getLogger(__name__)
@@ -80,9 +81,7 @@ def saturation_grids_to_vector(
     interior_count = (cell_count_x - 2) * (cell_count_y - 2) * (cell_count_z - 2)
     vector = np.empty(2 * interior_count)
     for idx in numba.prange(interior_count):  # type: ignore
-        i, j, k = from_1D_index_interior_only(
-            idx, cell_count_x, cell_count_y, cell_count_z
-        )
+        i, j, k = from_1D_index(idx, cell_count_x, cell_count_y, cell_count_z)
         vector[2 * idx] = water_saturation_grid[i, j, k]
         vector[2 * idx + 1] = gas_saturation_grid[i, j, k]
     return vector
@@ -105,9 +104,7 @@ def vector_to_saturation_grids(
     """
     interior_count = (cell_count_x - 2) * (cell_count_y - 2) * (cell_count_z - 2)
     for idx in numba.prange(interior_count):  # type: ignore
-        i, j, k = from_1D_index_interior_only(
-            idx, cell_count_x, cell_count_y, cell_count_z
-        )
+        i, j, k = from_1D_index(idx, cell_count_x, cell_count_y, cell_count_z)
         water_saturation = saturation_vector[2 * idx]
         gas_saturation = saturation_vector[2 * idx + 1]
         water_saturation_grid[i, j, k] = water_saturation
@@ -374,9 +371,7 @@ def _compute_saturation_residual(
                     * accumulation_coefficient
                 )
 
-                idx = to_1D_index_interior_only(
-                    i, j, k, cell_count_x, cell_count_y, cell_count_z
-                )
+                idx = to_1D_index(i, j, k, cell_count_x, cell_count_y, cell_count_z)
                 water_residual[idx] = (
                     water_accumulation
                     - net_water_flux
@@ -730,9 +725,7 @@ def assemble_numerical_jacobian(
     )
 
     for cell_1d_idx in range(interior_cell_count):
-        i, j, k = from_1D_index_interior_only(
-            cell_1d_idx, cell_count_x, cell_count_y, cell_count_z
-        )
+        i, j, k = from_1D_index(cell_1d_idx, cell_count_x, cell_count_y, cell_count_z)
 
         affected_cell_indices = [cell_1d_idx]
         for ni, nj, nk in (
@@ -743,7 +736,7 @@ def assemble_numerical_jacobian(
             (i, j, k + 1),
             (i, j, k - 1),
         ):
-            neighbor_1d_idx = to_1D_index_interior_only(
+            neighbor_1d_idx = to_1D_index(
                 ni, nj, nk, cell_count_x, cell_count_y, cell_count_z
             )
             if neighbor_1d_idx >= 0:
@@ -1025,7 +1018,7 @@ def _assemble_analytical_jacobian(
 
         for j in range(1, cell_count_y - 1):
             for k in range(1, cell_count_z - 1):
-                cell_idx = to_1D_index_interior_only(
+                cell_idx = to_1D_index(
                     i, j, k, cell_count_x, cell_count_y, cell_count_z
                 )
                 water_row = 2 * cell_idx
@@ -1233,7 +1226,7 @@ def _assemble_analytical_jacobian(
                     gas_neighbour_is_upwind = gas_potential > 0.0
 
                     # Neighbour 1D index
-                    neighbour_idx = to_1D_index_interior_only(
+                    neighbour_idx = to_1D_index(
                         ni, nj, nk, cell_count_x, cell_count_y, cell_count_z
                     )
                     neighbour_water_saturation_column = 2 * neighbour_idx
@@ -1514,7 +1507,6 @@ def _assemble_jacobian_well_contributions(
     injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     md_per_cp_to_ft2_per_psi_per_day: float,
-    pad_width: int,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Compute the well contributions to the saturation Jacobian (dR/dS at perforated cells).
@@ -1561,9 +1553,7 @@ def _assemble_jacobian_well_contributions(
             well_index = perforation_index.well_index
             cell_1d_index = perforation_index.cell_1d_index
             cell_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
-            water_bhp, _, gas_bhp = injection_bhps[
-                i - pad_width, j - pad_width, k - pad_width
-            ]
+            water_bhp, _, gas_bhp = injection_bhps[i, j, k]
 
             # Injection only injects the injected phase; we differentiate the
             # injected-phase well rate w.r.t. Sw and Sg.
@@ -1630,9 +1620,7 @@ def _assemble_jacobian_well_contributions(
             cell_1d_index = perforation_index.cell_1d_index
             well_index = perforation_index.well_index
             cell_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
-            water_bhp, _, gas_bhp = production_bhps[
-                i - pad_width, j - pad_width, k - pad_width
-            ]
+            water_bhp, _, gas_bhp = production_bhps[i, j, k]
 
             if water_bhp:
                 drawdown = cell_pressure - water_bhp
@@ -1976,6 +1964,8 @@ def evolve_saturation(
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     face_transmissibilities: FaceTransmissibilities,
+    pressure_boundaries: ThreeDimensionalGrid,
+    flux_boundaries: ThreeDimensionalGrid,
     config: Config,
     well_indices_cache: WellIndicesCache,
     pressure_change_grid: ThreeDimensionalGrid,
@@ -1985,6 +1975,7 @@ def evolve_saturation(
     production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
+    dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
     Solves the implicit saturation equations for a three-phase system using Newton-Raphson iteration
