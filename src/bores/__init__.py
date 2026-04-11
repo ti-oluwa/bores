@@ -11,6 +11,7 @@ from .analyses import *
 from .boundary_conditions import *
 from .config import *
 from .constants import *
+from .datastructures import *
 from .errors import *
 from .factories import *
 from .fluids import *

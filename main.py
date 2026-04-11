@@ -72,7 +72,7 @@ injector = bores.injection_well(
     perforating_intervals=[((0, 0, 2), (0, 0, 2))],
     radius=0.25,
     control=bores.AdaptiveRateControl(
-        target_rate=3000,
+        target_rate=10000,
         bhp_limit=6000.0,
         clamp=bores.InjectionClamp(),
     ),
@@ -140,7 +140,7 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="impes",
+    scheme="si",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,

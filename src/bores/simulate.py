@@ -42,6 +42,7 @@ from bores.models import (
 from bores.precision import get_dtype
 from bores.solvers import explicit, implicit
 from bores.solvers.base import normalize_saturations
+from bores.solvers.rates import compute_well_rates
 from bores.states import ModelState
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTDataSet, PVTTables
@@ -443,10 +444,6 @@ def _run_impes_step(
         config=config,
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
-        injection_rates=_rates_proxy(injection_rates),
-        production_rates=_rates_proxy(production_rates),
-        injection_fvfs=_fvfs_proxy(injection_fvfs),
-        production_fvfs=_fvfs_proxy(production_fvfs),
         injection_bhps=_bhps_proxy(injection_bhps),
         production_bhps=_bhps_proxy(production_bhps),
         well_indices_cache=well_indices_cache,
@@ -508,6 +505,27 @@ def _run_impes_step(
 
     fluid_properties = attrs.evolve(fluid_properties, pressure_grid=pressure_grid)
     logger.debug("Pressure evolution completed.")
+
+    logger.debug("Computing well rates from new pressure and stored BHPs...")
+    compute_well_rates(
+        new_pressure_grid=pressure_grid,
+        temperature_grid=fluid_properties.temperature_grid,
+        water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
+        oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
+        gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+        water_compressibility_grid=fluid_properties.water_compressibility_grid,
+        oil_compressibility_grid=fluid_properties.oil_compressibility_grid,
+        fluid_properties=fluid_properties,
+        wells=wells,
+        config=config,
+        well_indices_cache=well_indices_cache,
+        injection_bhps=_bhps_proxy(injection_bhps),
+        production_bhps=_bhps_proxy(production_bhps),
+        injection_rates=_rates_proxy(injection_rates),
+        production_rates=_rates_proxy(production_rates),
+        injection_fvfs=_fvfs_proxy(injection_fvfs),
+        production_fvfs=_fvfs_proxy(production_fvfs),
+    )
 
     # Refresh boundary maps after pressure update so that dynamic BCs (Robin,
     # Carter-Tracy) see the new interior pressures before saturation evolves.
@@ -891,10 +909,6 @@ def _run_sequential_implicit_step(
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
         well_indices_cache=well_indices_cache,
-        injection_rates=_rates_proxy(injection_rates),
-        production_rates=_rates_proxy(production_rates),
-        injection_fvfs=_fvfs_proxy(injection_fvfs),
-        production_fvfs=_fvfs_proxy(production_fvfs),
         injection_bhps=_bhps_proxy(injection_bhps),
         production_bhps=_bhps_proxy(production_bhps),
         dtype=dtype,
@@ -953,6 +967,28 @@ def _run_sequential_implicit_step(
         out=pressure_grid,
     )
     fluid_properties = attrs.evolve(fluid_properties, pressure_grid=pressure_grid)
+    logger.debug("Pressure evolution completed.")
+
+    logger.debug("Computing well rates from new pressure and stored BHPs...")
+    compute_well_rates(
+        new_pressure_grid=pressure_grid,
+        temperature_grid=fluid_properties.temperature_grid,
+        water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
+        oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
+        gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+        water_compressibility_grid=fluid_properties.water_compressibility_grid,
+        oil_compressibility_grid=fluid_properties.oil_compressibility_grid,
+        fluid_properties=fluid_properties,
+        wells=wells,
+        config=config,
+        well_indices_cache=well_indices_cache,
+        injection_bhps=_bhps_proxy(injection_bhps),
+        production_bhps=_bhps_proxy(production_bhps),
+        injection_rates=_rates_proxy(injection_rates),
+        production_rates=_rates_proxy(production_rates),
+        injection_fvfs=_fvfs_proxy(injection_fvfs),
+        production_fvfs=_fvfs_proxy(production_fvfs),
+    )
 
     # Refresh boundary maps so the saturation solve sees post-pressure BC values.
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
@@ -1306,10 +1342,6 @@ def _run_full_sequential_implicit_step(
             well_indices_cache=well_indices_cache,
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
-            injection_rates=_rates_proxy(injection_rates),
-            production_rates=_rates_proxy(production_rates),
-            injection_fvfs=_fvfs_proxy(injection_fvfs),
-            production_fvfs=_fvfs_proxy(production_fvfs),
             injection_bhps=_bhps_proxy(injection_bhps),
             production_bhps=_bhps_proxy(production_bhps),
             dtype=dtype,
@@ -1381,6 +1413,29 @@ def _run_full_sequential_implicit_step(
         iter_fluid_properties = attrs.evolve(
             iter_fluid_properties, pressure_grid=pressure_grid
         )
+        logger.debug("Pressure updated in fluid properties for outer iteration saturation solve.")
+
+        logger.debug("Computing well rates from new pressure and stored BHPs for outer iteration saturation solve...")
+        compute_well_rates(
+            new_pressure_grid=pressure_grid,
+            temperature_grid=iter_fluid_properties.temperature_grid,
+            water_relative_mobility_grid=iter_relative_mobility_grids.water_relative_mobility,
+            oil_relative_mobility_grid=iter_relative_mobility_grids.oil_relative_mobility,
+            gas_relative_mobility_grid=iter_relative_mobility_grids.gas_relative_mobility,
+            water_compressibility_grid=iter_fluid_properties.water_compressibility_grid,
+            oil_compressibility_grid=iter_fluid_properties.oil_compressibility_grid,
+            fluid_properties=iter_fluid_properties,
+            wells=wells,
+            config=config,
+            well_indices_cache=well_indices_cache,
+            injection_bhps=_bhps_proxy(injection_bhps),
+            production_bhps=_bhps_proxy(production_bhps),
+            injection_rates=_rates_proxy(injection_rates),
+            production_rates=_rates_proxy(production_rates),
+            injection_fvfs=_fvfs_proxy(injection_fvfs),
+            production_fvfs=_fvfs_proxy(production_fvfs),
+        )
+
         iter_fluid_properties = update_fluid_properties(
             fluid_properties=iter_fluid_properties,
             wells=wells,
@@ -2533,13 +2588,13 @@ def run(
                 )
 
                 if scheme == "impes":
-                    result = _run_impes_step(**step_kwargs) # type: ignore[arg-type]
+                    result = _run_impes_step(**step_kwargs)  # type: ignore[arg-type]
                 elif scheme in {"sequential-implicit", "si"}:
-                    result = _run_sequential_implicit_step(**step_kwargs) # type: ignore[arg-type]
+                    result = _run_sequential_implicit_step(**step_kwargs)  # type: ignore[arg-type]
                 elif scheme in {"full-sequential-implicit", "full-si"}:
-                    result = _run_full_sequential_implicit_step(**step_kwargs) # type: ignore[arg-type]
+                    result = _run_full_sequential_implicit_step(**step_kwargs)  # type: ignore[arg-type]
                 elif scheme == "explicit":
-                    result = _run_explicit_step(**step_kwargs) # type: ignore[arg-type]
+                    result = _run_explicit_step(**step_kwargs)  # type: ignore[arg-type]
                 else:
                     raise ValidationError(
                         f"Invalid simulation scheme {scheme!r}. "

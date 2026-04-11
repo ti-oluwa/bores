@@ -983,12 +983,8 @@ def compute_well_rate_grid(
 
             # Get phase mobility
             if injected_phase == FluidPhase.GAS:
-                phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
                 compressibility_kwargs = {}
             else:  # Water injection
-                phase_mobility = typing.cast(
-                    float, water_relative_mobility_grid[i, j, k]
-                )
                 compressibility_kwargs = {
                     "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
                     "gas_formation_volume_factor": gas_formation_volume_factor_grid[
@@ -1014,7 +1010,7 @@ def compute_well_rate_grid(
             )
             effective_mobility = typing.cast(float, total_mobility)
 
-            flow_rate, bhp = well.get_control(
+            flow_rate, effective_bhp = well.get_control(
                 pressure=cell_oil_pressure,
                 temperature=cell_temperature,
                 well_index=well_index,
@@ -1058,9 +1054,9 @@ def compute_well_rate_grid(
 
             if injection_bhps is not None:
                 if injected_phase == FluidPhase.GAS:
-                    injection_bhps[i, j, k] = (0.0, 0.0, bhp)
+                    injection_bhps[i, j, k] = (0.0, 0.0, effective_bhp)
                 else:
-                    injection_bhps[i, j, k] = (bhp, 0.0, 0.0)
+                    injection_bhps[i, j, k] = (effective_bhp, 0.0, 0.0)
 
     # Process production wells
     for well in wells.production_wells:
@@ -1087,9 +1083,9 @@ def compute_well_rate_grid(
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
             cell_oil_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
 
-            primary_phase_context: dict = {}
+            context: dict = {}
             if is_couple_controlled:
-                primary_phase_context = well.control.build_primary_phase_context(  # type: ignore
+                context = well.control.build_primary_phase_context(  # type: ignore
                     produced_fluids=well.produced_fluids,
                     oil_mobility=typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]
@@ -1169,7 +1165,7 @@ def compute_well_rate_grid(
                 )
                 # Compute production rate (bbls/day for liquids, ft³/day for gas)
                 # Note: Production rates are negative by convention
-                flow_rate, bhp = well.get_control(
+                flow_rate, effective_bhp = well.get_control(
                     pressure=cell_oil_pressure,
                     temperature=cell_temperature,
                     well_index=well_index,
@@ -1180,7 +1176,7 @@ def compute_well_rate_grid(
                     formation_volume_factor=phase_fvf,
                     allocation_fraction=allocation_fraction,
                     pvt_tables=config.pvt_tables,
-                    **primary_phase_context,
+                    **context,
                 )
 
                 # Check for backflow (positive production = injection)
@@ -1205,15 +1201,15 @@ def compute_well_rate_grid(
                 if produced_phase == FluidPhase.GAS:
                     gas_rate += flow_rate
                     gas_fvf = phase_fvf
-                    gas_bhp = bhp
+                    gas_bhp = effective_bhp
                 elif produced_phase == FluidPhase.WATER:
                     water_rate += flow_rate
                     water_fvf = phase_fvf
-                    water_bhp = bhp
+                    water_bhp = effective_bhp
                 else:
                     oil_rate += flow_rate
                     oil_fvf = phase_fvf
-                    oil_bhp = bhp
+                    oil_bhp = effective_bhp
 
             if production_rates is not None:
                 production_rates[i, j, k] = (water_rate, oil_rate, gas_rate)

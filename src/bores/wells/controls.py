@@ -30,7 +30,6 @@ __all__ = [
     "ControlResult",
     "CoupledRateControl",
     "InjectionClamp",
-    "MultiPhaseControl",
     "ProductionClamp",
     "RateClamp",
     "RateControl",
@@ -253,13 +252,19 @@ class ProductionClamp(RateClamp):
 
     __type__ = "production_clamp"
 
-    value: typing.Optional[float] = None
+    rate: typing.Optional[float] = None
     """
     Clamped rate to return when the condition is met.
 
     Defaults to `None`, which causes the clamp to return `0.0` (well shut
-    in) when the rate condition fires, and `pressure` when the BHP condition
-    fires.  Set an explicit value to override both defaults.
+    in) when the rate condition fires. Set an explicit value to override both defaults.
+    """
+    bhp: typing.Optional[float] = None
+    """
+    Clamped BHP to return when the condition is met.
+
+    Defaults to `None`, which causes the clamp to return `pressure` (no drawdown)
+    when the BHP condition fires. Set an explicit value to override the default.
     """
 
     def clamp_rate(
@@ -267,7 +272,7 @@ class ProductionClamp(RateClamp):
     ) -> typing.Tuple[bool, float]:
         """Clamp if rate is positive (injection during production)."""
         if rate > 0.0:
-            clamped_value = self.value if self.value is not None else 0.0
+            clamped_value = self.rate if self.rate is not None else 0.0
             return True, clamped_value
         return False, rate
 
@@ -276,7 +281,7 @@ class ProductionClamp(RateClamp):
     ) -> typing.Tuple[bool, float]:
         """Clamp BHP if it exceeds reservoir pressure (injection-direction drawdown)."""
         if bottom_hole_pressure > pressure:
-            clamped_value = self.value if self.value is not None else pressure
+            clamped_value = self.bhp if self.bhp is not None else pressure
             return True, clamped_value
         return False, bottom_hole_pressure
 
@@ -288,13 +293,20 @@ class InjectionClamp(RateClamp):
 
     __type__ = "injection_clamp"
 
-    value: typing.Optional[float] = None
+    rate: typing.Optional[float] = None
     """
     Clamped rate to return when the condition is met.
 
     Defaults to None, which causes the clamp to return 0.0 (well shut
-    in) when the rate condition fires, and pressure when the BHP condition
-    fires.  Set an explicit value to override both defaults.
+    in) when the rate condition fires. Set an explicit value to override both defaults.
+    """
+
+    bhp: typing.Optional[float] = None
+    """
+    Clamped BHP to return when the condition is met.
+
+    Defaults to None, which causes the clamp to return pressure (no drawdown)
+    when the BHP condition fires. Set an explicit value to override the default.
     """
 
     def clamp_rate(
@@ -302,7 +314,7 @@ class InjectionClamp(RateClamp):
     ) -> typing.Tuple[bool, float]:
         """Clamp if rate is negative (production during injection)."""
         if rate < 0.0:
-            clamped_value = self.value if self.value is not None else 0.0
+            clamped_value = self.rate if self.rate is not None else 0.0
             return True, clamped_value
         return False, rate
 
@@ -311,7 +323,7 @@ class InjectionClamp(RateClamp):
     ) -> typing.Tuple[bool, float]:
         """Clamp BHP if it falls below reservoir pressure (production-direction drawdown)."""
         if bottom_hole_pressure < pressure:
-            clamped_value = self.value if self.value is not None else pressure
+            clamped_value = self.bhp if self.bhp is not None else pressure
             return True, clamped_value
         return False, bottom_hole_pressure
 
@@ -1431,7 +1443,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                         f"(adaptive control - rate mode, pressure={pressure:.3f} psi)"
                     )
                     final_rate = clamped_rate
-            
+
             assert required_bhp is not None
             logger.debug(
                 f"Using rate control at {final_rate:.6f} "
@@ -2407,268 +2419,3 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
 
     def __str__(self) -> str:
         return f"Coupled Rate Control:\nPrimary phase: {self.primary_phase!s}\nControl:\n\t{self.primary_control!s}"
-
-
-@well_control
-@attrs.frozen
-class MultiPhaseControl(WellControl):
-    """
-    Multi-phase well control for wells.
-
-    Defines separate well controls for oil, gas, and water phases.
-    """
-
-    __type__ = "multi_phase_rate_control"
-
-    oil_control: typing.Optional[WellControl] = None
-    """Oil phase well control. Ensure that this is intended for oil phase."""
-    gas_control: typing.Optional[WellControl] = None
-    """Gas phase well control. Ensure that this is intended for gas phase."""
-    water_control: typing.Optional[WellControl] = None
-    """Water phase well control. Ensure that this is intended for water phase."""
-
-    def get_type(self) -> WellControlType:
-        return "custom"
-
-    def get_phase_control_type(
-        self, phase: FluidPhase
-    ) -> typing.Optional[WellControlType]:
-        """Return the control type for a specific phase, or None if no control for that phase."""
-        if phase == FluidPhase.OIL and self.oil_control is not None:
-            return self.oil_control.get_type()
-        elif phase == FluidPhase.GAS and self.gas_control is not None:
-            return self.gas_control.get_type()
-        elif phase == FluidPhase.WATER and self.water_control is not None:
-            return self.water_control.get_type()
-        return None
-
-    def get_flow_rate(
-        self,
-        pressure: float,
-        temperature: float,
-        well_index: float,
-        fluid: WellFluid,
-        formation_volume_factor: float,
-        phase_mobility: typing.Optional[float] = None,
-        allocation_fraction: float = 1.0,
-        is_active: bool = True,
-        use_pseudo_pressure: bool = False,
-        fluid_compressibility: typing.Optional[float] = None,
-        pvt_tables: typing.Optional[PVTTables] = None,
-        **kwargs: typing.Any,
-    ) -> float:
-        """
-        Compute flow rate based on fluid phase.
-
-        :param pressure: Reservoir pressure at the well location (psi).
-        :param temperature: Reservoir temperature at the well location (°F).
-        :param phase_mobility: Relative mobility of the fluid phase.
-        :param well_index: Well index (md*ft).
-        :param fluid: Fluid being produced or injected.
-        :param is_active: Whether the well is active/open.
-        :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells.
-        :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
-        :param formation_volume_factor: Formation volume factor (bbl/STB or ft³/SCF).
-        :param pvt_tables: `PVTTables` object for fluid property lookups
-        :return: Flow rate in (bbl/day or ft³/day).
-        """
-        if fluid.phase == FluidPhase.OIL and self.oil_control is not None:
-            return self.oil_control.get_flow_rate(
-                pressure=pressure,
-                temperature=temperature,
-                phase_mobility=phase_mobility,
-                well_index=well_index,
-                fluid=fluid,
-                formation_volume_factor=formation_volume_factor,
-                allocation_fraction=allocation_fraction,
-                is_active=is_active,
-                use_pseudo_pressure=use_pseudo_pressure,
-                fluid_compressibility=fluid_compressibility,
-                pvt_tables=pvt_tables,
-                **kwargs,
-            )
-        elif fluid.phase == FluidPhase.GAS and self.gas_control is not None:
-            return self.gas_control.get_flow_rate(
-                pressure=pressure,
-                temperature=temperature,
-                phase_mobility=phase_mobility,
-                well_index=well_index,
-                fluid=fluid,
-                formation_volume_factor=formation_volume_factor,
-                allocation_fraction=allocation_fraction,
-                is_active=is_active,
-                use_pseudo_pressure=use_pseudo_pressure,
-                fluid_compressibility=fluid_compressibility,
-                pvt_tables=pvt_tables,
-                **kwargs,
-            )
-        elif fluid.phase == FluidPhase.WATER and self.water_control is not None:
-            return self.water_control.get_flow_rate(
-                pressure=pressure,
-                temperature=temperature,
-                phase_mobility=phase_mobility,
-                well_index=well_index,
-                fluid=fluid,
-                formation_volume_factor=formation_volume_factor,
-                allocation_fraction=allocation_fraction,
-                is_active=is_active,
-                use_pseudo_pressure=use_pseudo_pressure,
-                fluid_compressibility=fluid_compressibility,
-                pvt_tables=pvt_tables,
-                **kwargs,
-            )
-        return 0.0
-
-    def get_bottom_hole_pressure(
-        self,
-        pressure: float,
-        temperature: float,
-        well_index: float,
-        fluid: WellFluid,
-        formation_volume_factor: float,
-        phase_mobility: typing.Optional[float] = None,
-        allocation_fraction: float = 1.0,
-        is_active: bool = True,
-        use_pseudo_pressure: bool = False,
-        fluid_compressibility: typing.Optional[float] = None,
-        pvt_tables: typing.Optional[PVTTables] = None,
-        **kwargs: typing.Any,
-    ) -> float:
-        """Delegate to appropriate phase control."""
-        if fluid.phase == FluidPhase.OIL and self.oil_control is not None:
-            return self.oil_control.get_bottom_hole_pressure(
-                pressure=pressure,
-                temperature=temperature,
-                phase_mobility=phase_mobility,
-                well_index=well_index,
-                fluid=fluid,
-                formation_volume_factor=formation_volume_factor,
-                allocation_fraction=allocation_fraction,
-                is_active=is_active,
-                use_pseudo_pressure=use_pseudo_pressure,
-                fluid_compressibility=fluid_compressibility,
-                pvt_tables=pvt_tables,
-                **kwargs,
-            )
-        elif fluid.phase == FluidPhase.GAS and self.gas_control is not None:
-            return self.gas_control.get_bottom_hole_pressure(
-                pressure=pressure,
-                temperature=temperature,
-                phase_mobility=phase_mobility,
-                well_index=well_index,
-                fluid=fluid,
-                formation_volume_factor=formation_volume_factor,
-                allocation_fraction=allocation_fraction,
-                is_active=is_active,
-                use_pseudo_pressure=use_pseudo_pressure,
-                fluid_compressibility=fluid_compressibility,
-                pvt_tables=pvt_tables,
-                **kwargs,
-            )
-        elif fluid.phase == FluidPhase.WATER and self.water_control is not None:
-            return self.water_control.get_bottom_hole_pressure(
-                pressure=pressure,
-                temperature=temperature,
-                phase_mobility=phase_mobility,
-                well_index=well_index,
-                fluid=fluid,
-                formation_volume_factor=formation_volume_factor,
-                allocation_fraction=allocation_fraction,
-                is_active=is_active,
-                use_pseudo_pressure=use_pseudo_pressure,
-                fluid_compressibility=fluid_compressibility,
-                pvt_tables=pvt_tables,
-                **kwargs,
-            )
-        return pressure
-
-    def get_control(
-        self,
-        pressure: float,
-        temperature: float,
-        well_index: float,
-        fluid: WellFluid,
-        formation_volume_factor: float,
-        phase_mobility: typing.Optional[float] = None,
-        allocation_fraction: float = 1.0,
-        is_active: bool = True,
-        use_pseudo_pressure: bool = False,
-        fluid_compressibility: typing.Optional[float] = None,
-        pvt_tables: typing.Optional[PVTTables] = None,
-        **kwargs: typing.Any,
-    ) -> ControlResult:
-        """
-        Compute rate and effective BHP for the appropriate per-phase sub-control.
-
-        If no sub-control is registered for `fluid.phase` the result is the
-        no-flow / no-drawdown sentinel: `rate=0`, `bhp=pressure`.
-
-        All `**kwargs` are forwarded to the sub-control's `get_control`
-        unchanged, so phase-specific extras (e.g. primary-phase context for a
-        `CoupledRateControl` sub-control) are transparently supported.
-
-        :param pressure: Reservoir pressure at the well location (psi).
-        :param temperature: Reservoir temperature at the well location (°F).
-        :param phase_mobility: Relative mobility of the fluid phase (cP⁻¹).
-        :param well_index: Well index (md·ft).
-        :param fluid: Fluid being produced or injected.
-        :param formation_volume_factor: FVF of `fluid` (bbl/STB or ft³/SCF).
-        :param allocation_fraction: Fraction of total well rate allocated to this
-            cell. Default 1.0.
-        :param is_active: Whether the well is currently open.
-        :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells.
-        :param fluid_compressibility: Fluid compressibility (psi⁻¹).
-        :param pvt_tables: PVT look-up tables for fluid properties.
-        :param kwargs: Additional arguments forwarded to the sub-control's
-            `get_control` method.
-        :return: `ControlResult` from the matching sub-control, or
-            `ControlResult(rate=0.0, bhp=pressure)` if no sub-control exists
-            for this phase.
-        """
-        kwds = dict(  # noqa
-            pressure=pressure,
-            temperature=temperature,
-            well_index=well_index,
-            fluid=fluid,
-            formation_volume_factor=formation_volume_factor,
-            phase_mobility=phase_mobility,
-            allocation_fraction=allocation_fraction,
-            is_active=is_active,
-            use_pseudo_pressure=use_pseudo_pressure,
-            fluid_compressibility=fluid_compressibility,
-            pvt_tables=pvt_tables,
-            **kwargs,
-        )
-
-        if fluid.phase == FluidPhase.OIL and self.oil_control is not None:
-            return self.oil_control.get_control(**kwds)  # type: ignore[arg-type]
-        elif fluid.phase == FluidPhase.GAS and self.gas_control is not None:
-            return self.gas_control.get_control(**kwds)  # type: ignore[arg-type]
-        elif fluid.phase == FluidPhase.WATER and self.water_control is not None:
-            return self.water_control.get_control(**kwds)  # type: ignore[arg-type]
-
-        # No sub-control for this phase, hence no flow, no drawdown.
-        return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
-
-    def update(
-        self,
-        oil_control: typing.Optional[WellControl] = None,
-        gas_control: typing.Optional[WellControl] = None,
-        water_control: typing.Optional[WellControl] = None,
-    ) -> "MultiPhaseControl":
-        """
-        Create a new `MultiPhaseControl` with updated controls.
-
-        :param oil_control: New oil phase control. If None, retains existing.
-        :param gas_control: New gas phase control. If None, retains existing.
-        :param water_control: New water phase control. If None, retains existing.
-        :return: New `MultiPhaseControl` instance with updated controls.
-        """
-        return type(self)(
-            oil_control=oil_control or self.oil_control,
-            gas_control=gas_control or self.gas_control,
-            water_control=water_control or self.water_control,
-        )
-
-    def __str__(self) -> str:
-        return f"Multi-Phase Rate Control:\nOil Control: {self.oil_control!s}\nGas Control: {self.gas_control!s}\nWater Control: {self.water_control!s}"

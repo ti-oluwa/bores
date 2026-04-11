@@ -585,6 +585,18 @@ class ProductionWell(Well[Coordinates, ProducedFluid]):
     produced_fluids: typing.Sequence[ProducedFluid] = attrs.field(factory=list)
     """List of fluids produced by the well. This can include multiple phases (e.g., oil, gas, water)."""
 
+    def __attrs_post_init__(self) -> None:
+        # Ensure the only unique phases are stored in the `produced_fluids` list
+        unique_phases = []
+        for fluid in self.produced_fluids:
+            if fluid.phase not in unique_phases:
+                unique_phases.append(fluid.phase)
+            else:
+                raise ValidationError(
+                    "Duplicate fluid phase found in `produced_fluids`. Each phase should only be listed once."
+                )
+        super().__attrs_post_init__()
+
 
 InjectionWellT = typing.TypeVar("InjectionWellT", bound=InjectionWell)
 ProductionWellT = typing.TypeVar("ProductionWellT", bound=ProductionWell)

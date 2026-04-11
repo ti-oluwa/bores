@@ -762,12 +762,12 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         disable_capillary_effects=True,
         freeze_saturation_pressure=False,
         miscibility_model="immiscible",
-        maximum_gas_saturation_change=0.05,
-        maximum_oil_saturation_change=0.05,
-        maximum_water_saturation_change=0.05,
-        maximum_saturation_change=0.05,
-        maximum_pressure_change=1000.0,
-        use_pseudo_pressure=False,
+        # maximum_gas_saturation_change=0.05,
+        # maximum_oil_saturation_change=0.05,
+        # maximum_water_saturation_change=0.05,
+        # maximum_saturation_change=0.05,
+        # maximum_pressure_change=1000.0,
+        use_pseudo_pressure=True,
         normalize_saturations=True,
         phase_appearance_tolerance=1e-6,
         saturation_convergence_tolerance=1e-4,
@@ -842,7 +842,7 @@ def setup_analysis(bores, np, states):
         avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid)
         avg_water_sat = np.mean(fluid_properties.water_saturation_grid)
         avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid[9, 9, 2])
-        avg_pressure = s.production_bhps.oil[9, 9, 2]
+        avg_pressure = s.injection_bhps.gas[0, 0, 0]
 
         oil_saturation_history.append((time_step, avg_oil_sat))
         water_saturation_history.append((time_step, avg_water_sat))
@@ -1234,9 +1234,9 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "oil-density"
+    property = "oil-sat"
     figures = []
-    timesteps = [60]
+    timesteps = [100]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],
