@@ -162,6 +162,16 @@ def setup_grid():
             transition_curvature_exponent=1.0,
         )
     )
+    water_saturation_grid, oil_saturation_grid, gas_saturation_grid = (
+        bores.seed_phase_saturation(
+            oil_saturation_grid=oil_saturation_grid,
+            cells=[(0, 0, 0)],
+            phase="gas",
+            water_saturation_grid=water_saturation_grid,
+            gas_saturation_grid=gas_saturation_grid,
+            seed_saturation=0.2,
+        )
+    )
 
     # -------------------------------------------------------------------------
     # Fluid properties (initial estimates — overridden by PVT tables)
@@ -290,7 +300,9 @@ def setup_grid():
         ]
     )
     # Convert RB/MSCF → ft³/SCF
-    gas_fvf_values = gas_fvf_values_rb_mscf * (bores.c.BARRELS_TO_CUBIC_FEET / 1000.0)
+    gas_fvf_values = gas_fvf_values_rb_mscf * (
+        bores.c.BARRELS_TO_CUBIC_FEET / 1000.0
+    )
 
     # μg (cP): Table 2
     gas_viscosity_values = bores.array(
@@ -360,12 +372,14 @@ def setup_grid():
     # Gas solubility in water (Rsw): zero throughout per Table 2
     gas_solubility_in_water_values = bores.array([0.0] * 9)
 
+
     # -------------------------------------------------------------------------
     # Build 2-D tables (n_pressures × n_temperatures)
     # Broadcast each 1-D array across the temperature axis (isothermal)
     # -------------------------------------------------------------------------
     def make_2d(arr):
         return np.column_stack([arr, arr])
+
 
     solution_gor_table = typing.cast(
         bores.TwoDimensionalGrid, make_2d(solution_gor_values)
@@ -385,12 +399,16 @@ def setup_grid():
         bores.TwoDimensionalGrid, make_2d(gas_density_values)
     )
 
+
     # Water tables are 3-D: (n_pressures, n_temperatures, n_salinities)
     # SPE1 uses fresh water → salinity = 0 ppm → n_salinities = 1
     def make_3d(arr):
         return np.stack([make_2d(arr)], axis=2)
 
-    water_fvf_table = typing.cast(bores.ThreeDimensionalGrid, make_3d(water_fvf_values))
+
+    water_fvf_table = typing.cast(
+        bores.ThreeDimensionalGrid, make_3d(water_fvf_values)
+    )
     water_viscosity_table = typing.cast(
         bores.ThreeDimensionalGrid, make_3d(water_viscosity_values)
     )
@@ -762,10 +780,10 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         disable_capillary_effects=True,
         freeze_saturation_pressure=False,
         miscibility_model="immiscible",
-        maximum_gas_saturation_change=0.05,
-        maximum_oil_saturation_change=0.05,
-        maximum_water_saturation_change=0.05,
-        maximum_saturation_change=0.05,
+        # maximum_gas_saturation_change=0.05,
+        # maximum_oil_saturation_change=0.05,
+        # maximum_water_saturation_change=0.05,
+        # maximum_saturation_change=0.05,
         maximum_pressure_change=1000.0,
         use_pseudo_pressure=True,
         normalize_saturations=True,

@@ -166,16 +166,24 @@ class Config(
     with saturations below this threshold as absent from the system.
     """
 
-    residual_oil_drainage_ratio_water_flood: float = 0.6
+    residual_oil_drainage_ratio_water_flood: float = attrs.field(
+        default=0.6, validator=attrs.validators.ge(0)
+    )
     """Ratio to compute oil drainage residual from imbibition value during water flooding."""
 
-    residual_oil_drainage_ratio_gas_flood: float = 0.6
+    residual_oil_drainage_ratio_gas_flood: float = attrs.field(
+        default=0.6, validator=attrs.validators.ge(0)
+    )
     """Ratio to compute oil drainage residual from imbibition value during gas flooding."""
 
-    residual_gas_drainage_ratio: float = 0.5
+    residual_gas_drainage_ratio: float = attrs.field(
+        default=0.5, validator=attrs.validators.ge(0)
+    )
     """Ratio to compute gas drainage residual from imbibition value."""
 
-    maximum_oil_saturation_change: float = 0.6
+    maximum_oil_saturation_change: float = attrs.field(
+        default=0.6, validator=attrs.validators.ge(0)
+    )
     """
     Maximum allowable oil saturation change (absolute, fractional) per time step.
 
@@ -242,9 +250,45 @@ class Config(
 
     Note: Larger changes can cause density/viscosity jumps and well control issues.
     """
-    
-    minimum_injector_gas_saturation: typing.Optional[float] = 1e-4
-    minimum_injector_water_saturation: typing.Optional[float] = 1e-4 
+
+    minimum_injector_gas_saturation: typing.Optional[float] = attrs.field(
+        default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
+    )
+    """
+    Minimum gas saturation enforced in active gas injector wellblocks after
+    each pressure solve and rate computation.
+
+    When gas is injected into a cell with zero initial gas saturation, the
+    in-situ relative permeability to gas (krg) is zero, which prevents the
+    injected gas from being transported to neighbouring cells in the saturation
+    solve. This parameter seeds a small but non-zero gas saturation in those
+    cells so that krg > 0 and transport can proceed.
+
+    The value should be above ``phase_appearance_tolerance`` to guarantee that
+    the relative permeability model returns a non-zero krg. A value of 1e-4
+    (0.01% pore volume) is typically sufficient. Setting too large a value
+    introduces an artificial initial gas saturation that may affect early-time
+    results and MBE. Set to ``None`` to disable gas saturation seeding entirely,
+    which is appropriate when the initial gas saturation is already non-zero in
+    injector cells.
+    """
+    minimum_injector_water_saturation: typing.Optional[float] = attrs.field(
+        default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
+    )
+    """
+    Minimum water saturation enforced in active water injector wellblocks after
+    each pressure solve and rate computation.
+
+    Analogous to ``minimum_injector_gas_saturation`` but for water injectors.
+    In practice, connate water saturation is almost always non-zero so this
+    seeding is rarely needed for water injection. However, in synthetic models
+    or edge cases where initial water saturation is exactly zero in injector
+    cells, this parameter prevents krw from being zero in the transport step.
+
+    The value should be above ``phase_appearance_tolerance``. Set to ``None``
+    to disable water saturation seeding, which is the recommended setting for
+    most realistic models where connate water is already present.
+    """
 
     maximum_newton_iterations: int = attrs.field(  # type: ignore
         default=15,
@@ -578,6 +622,35 @@ class Config(
         factory=threading.Lock, init=False, repr=False, hash=False
     )
     """Internal lock for thread-safe operations."""
+
+    def __attrs_post_init__(self) -> None:
+        # Validate that the minimum injector saturations are
+        # greater than the phase appearance tolerance to avoid numerical issues.
+        if (
+            self.minimum_injector_gas_saturation is not None
+            and self.minimum_injector_gas_saturation <= self.phase_appearance_tolerance
+        ):
+            raise ValueError(
+                "`minimum_injector_gas_saturation` must be greater than `phase_appearance_tolerance` to avoid numerical issues with phase appearance."
+            )
+        if (
+            self.minimum_injector_water_saturation is not None
+            and self.minimum_injector_water_saturation
+            <= self.phase_appearance_tolerance
+        ):
+            raise ValueError(
+                "`minimum_injector_water_saturation` must be greater than `phase_appearance_tolerance` to avoid numerical issues with phase appearance."
+            )
+
+        # Validate that the provided task pool is not already shut down.
+        if self.task_pool is not None and self.task_pool._shutdown:
+            raise ValueError("Provided `task_pool` is already shut down.")
+
+        # Validate that the provided task pool has a positive number of workers.
+        if self.task_pool is not None and self.task_pool._max_workers <= 0:
+            raise ValueError(
+                "Provided `task_pool` must have a positive number of workers."
+            )
 
     def copy(self, **kwargs: typing.Any) -> Self:
         """Create a deep copy of the `Config` instance."""

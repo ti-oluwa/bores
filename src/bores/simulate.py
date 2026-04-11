@@ -345,6 +345,85 @@ def _rebuild_rock_fluid_grids(
     )
 
 
+def _apply_minimum_injector_saturations(
+    gas_saturation_grid: NDimensionalGrid[ThreeDimensions],
+    oil_saturation_grid: NDimensionalGrid[ThreeDimensions],
+    water_saturation_grid: NDimensionalGrid[ThreeDimensions],
+    injection_rates: Rates[float, ThreeDimensions],
+    minimum_gas_saturation: typing.Optional[float],
+    minimum_water_saturation: typing.Optional[float],
+    dtype: npt.DTypeLike,
+) -> typing.Tuple[
+    NDimensionalGrid[ThreeDimensions],
+    NDimensionalGrid[ThreeDimensions],
+    NDimensionalGrid[ThreeDimensions],
+]:
+    """
+    Seed (in-place) minimum saturation in active injector wellblocks to ensure non-zero
+    relative permeability for transport.
+
+    For gas injectors, gas saturation is raised to at least
+    `minimum_gas_saturation` and oil saturation is reduced by the same
+    amount to conserve total saturation. For water injectors, the same
+    logic applies between water and oil. `Sw + So + Sg = 1` is preserved
+    exactly. Cells with zero injection rate are not modified.
+
+    :param gas_saturation_grid: Current gas saturation grid.
+    :param oil_saturation_grid: Current oil saturation grid.
+    :param water_saturation_grid: Current water saturation grid.
+    :param injection_rates: Injection rates proxy — active gas injector cells
+        have `gas > 0`, active water injector cells have `water > 0`.
+    :param minimum_gas_saturation: Minimum gas saturation to enforce in active
+        gas injector wellblocks. Should be above `phase_appearance_tolerance`
+        to guarantee `krg > 0`. Pass `None` to disable gas seeding.
+    :param minimum_water_saturation: Minimum water saturation to enforce in
+        active water injector wellblocks. Should be above
+        `phase_appearance_tolerance` to guarantee `krw > 0`. Pass `None` to disable water seeding.
+    :param dtype: NumPy dtype used for all grid arrays.
+    :return: Updated `(gas_saturation_grid, oil_saturation_grid, water_saturation_grid)` 
+        with minimum saturations enforced.
+    """
+    sg = gas_saturation_grid
+    so = oil_saturation_grid
+    sw = water_saturation_grid
+
+    if minimum_gas_saturation is not None:
+        gas_injector_mask = injection_rates.gas.array(dtype=dtype) > 0
+        if gas_injector_mask.any():
+            sg_new = np.where(
+                gas_injector_mask,
+                np.maximum(sg, np.full_like(sg, minimum_gas_saturation, dtype=dtype)),
+                sg,
+            ).astype(dtype)
+
+            delta_sg = sg_new - sg
+            so = np.where(
+                gas_injector_mask,
+                np.maximum(so - delta_sg, np.zeros_like(so, dtype=dtype)),
+                so,
+            ).astype(dtype)
+            sg = sg_new
+
+    if minimum_water_saturation is not None:
+        water_injector_mask = injection_rates.water.array(dtype=dtype) > 0
+        if water_injector_mask.any():
+            sw_new = np.where(
+                water_injector_mask,
+                np.maximum(sw, np.full_like(sw, minimum_water_saturation, dtype=dtype)),
+                sw,
+            ).astype(dtype)
+            
+            delta_sw = sw_new - sw
+            so = np.where(
+                water_injector_mask,
+                np.maximum(so - delta_sw, np.zeros_like(so, dtype=dtype)),
+                so,
+            ).astype(dtype)
+            sw = sw_new
+
+    return sg, so, sw
+
+
 def _run_impes_step(
     time_step: int,
     grid_shape: ThreeDimensions,
@@ -523,6 +602,15 @@ def _run_impes_step(
         production_rates=_rates_proxy(production_rates),
         injection_fvfs=_fvfs_proxy(injection_fvfs),
         production_fvfs=_fvfs_proxy(production_fvfs),
+    )
+    _apply_minimum_injector_saturations(
+        gas_saturation_grid=fluid_properties.gas_saturation_grid,
+        oil_saturation_grid=fluid_properties.oil_saturation_grid,
+        water_saturation_grid=fluid_properties.water_saturation_grid,
+        injection_rates=injection_rates,
+        minimum_gas_saturation=config.minimum_injector_gas_saturation,
+        minimum_water_saturation=config.minimum_injector_water_saturation,
+        dtype=dtype,
     )
 
     # Refresh boundary maps after pressure update so that dynamic BCs (Robin,
