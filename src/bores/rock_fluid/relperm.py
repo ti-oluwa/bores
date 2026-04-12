@@ -28,7 +28,7 @@ from bores.types import (
 from bores.utils import piecewise_linear_slope
 
 __all__ = [
-    "BrooksCoreyThreePhaseRelPermModel",
+    "BrooksCoreyRelPermModel",
     "LETParameters",
     "LETThreePhaseRelPermModel",
     "ThreePhaseRelPermTable",
@@ -222,7 +222,7 @@ class MixingRule:
 
     def __hash__(self) -> int:
         def resolve_callable_identity(obj: typing.Any):
-            # unwrap nested MixingRule
+            # unwrap nested `MixingRule`
             if isinstance(obj, MixingRule):
                 return resolve_callable_identity(obj.func)
             return id(obj)
@@ -581,7 +581,7 @@ def get_mixing_rule(name: str) -> MixingRule:
 @numba.njit(cache=True, inline="always")
 def _zeros_like_kro(kro_w: FloatOrArray) -> FloatOrArray:
     """Return an array (or scalar) of zeros with the same shape as kro_w."""
-    return np.zeros_like(kro_w) if not np.isscalar(kro_w) else 0.0
+    return np.zeros_like(kro_w) if not np.isscalar(kro_w) else kro_w.dtype.type(0.0)
 
 
 @mixing_rule
@@ -595,6 +595,7 @@ def min_rule(
 ) -> FloatOrArray:
     """
     Conservative rule for 3-phase oil relative permeability.
+
     kro = min(kro_w, kro_g)
     """
     return np.minimum(kro_w, kro_g)
@@ -638,6 +639,7 @@ def stone_I_rule(
 ) -> FloatOrArray:
     """
     Stone I rule (1970) for 3-phase oil relative permeability.
+
     kro = (kro_w * kro_g) / (kro_w + kro_g - kro_w * kro_g)
     """
     denom = np.maximum(((kro_w + kro_g) - (kro_w * kro_g)), 1e-12)
@@ -662,8 +664,8 @@ def _(
         N = kro_w * kro_g
 
     ∂kro/∂kro_w = (kro_g * D - N * (1 - kro_g)) / D²
-                = kro_g² / D²           (after simplification)
-    ∂kro/∂kro_g = kro_w² / D²          (by symmetry)
+                = kro_g² / D² (after simplification)
+    ∂kro/∂kro_g = kro_w² / D² (by symmetry)
     """
     eps = 1e-12
     kw = np.asarray(kro_w, dtype=np.float64)
@@ -692,11 +694,11 @@ def stone_II_rule(
         kro = (krow + krw) * (krog + krg) - krw - krg
 
     where:
-        - krow = oil relperm from oil-water table at current Sw
-        - krog = oil relperm from oil-gas table at current Sg
-        - krw = water relperm at current Sw
-        - krg = gas relperm at current Sg
-        - krocw = oil relperm at connate water (typically 1.0 for normalized tables)
+    - krow = oil relperm from oil-water table at current Sw
+    - krog = oil relperm from oil-gas table at current Sg
+    - krw = water relperm at current Sw
+    - krg = gas relperm at current Sg
+    - krocw = oil relperm at connate water (typically 1.0 for normalized tables)
 
     **Approximation Used Here:**
     Since the mixing rule signature only provides kro_w and kro_g (not krw and krg),
@@ -786,9 +788,9 @@ def arithmetic_mean_rule(
     kro = (kro_w + kro_g) / 2
 
     Notes:
-        - Simple and conservative
-        - Does not account for saturation distribution
-        - Tends to overestimate kro compared to other methods
+    - Simple and conservative
+    - Does not account for saturation distribution
+    - Tends to overestimate kro compared to other methods
     """
     return (kro_w + kro_g) / 2.0
 
@@ -823,9 +825,9 @@ def geometric_mean_rule(
     kro = sqrt(kro_w * kro_g)
 
     Notes:
-        - More conservative than arithmetic mean
-        - If either kro_w or kro_g is zero, result is zero
-        - Smooth transition between two-phase limits
+    - More conservative than arithmetic mean
+    - If either kro_w or kro_g is zero, result is zero
+    - Smooth transition between two-phase limits
     """
     return np.sqrt(kro_w * kro_g)
 
@@ -930,7 +932,7 @@ def baker_linear_rule(
 
         kro = (Sw * kro_w + So * kro_ow_endpoint + Sg * kro_g) / (Sw + So + Sg)
 
-    where kro_ow_endpoint is approximated as max(kro_w, kro_g) (the oil kr
+    where `kro_ow_endpoint` is approximated as max(kro_w, kro_g) (the oil kr
     at the oil-water endpoint, i.e. in absence of gas), and kro_g is the
     oil kr from the gas-oil table.
 
@@ -1001,10 +1003,10 @@ def blunt_rule(
     kro = kro_w * kro_g * (2 - kro_w - kro_g)
 
     Notes:
-        - Developed for strongly water-wet systems
-        - Accounts for pore-level displacement mechanisms
-        - Generally gives conservative estimates
-        - Result is clamped to [0, ∞) to handle edge cases with non-normalized tables
+    - Developed for strongly water-wet systems
+    - Accounts for pore-level displacement mechanisms
+    - Generally gives conservative estimates
+    - Result is clamped to [0, ∞) to handle edge cases with non-normalized tables
     """
     result = kro_w * kro_g * (2.0 - kro_w - kro_g)
 
@@ -1111,9 +1113,9 @@ def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
     where a and b are empirical exponents (typically a=0.5, b=0.5).
 
     Notes:
-        - Empirical correlation from petroleum engineering textbook
-        - Can be tuned with different exponents
-        - Generally conservative
+    - Empirical correlation from petroleum engineering textbook
+    - Can be tuned with different exponents
+    - Generally conservative
 
     :param a: Exponent for oil-water system (default 0.5).
     :param b: Exponent for oil-gas system (default 0.5).
@@ -1163,7 +1165,7 @@ def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
         kro = kw^a * kg^b
 
         ∂kro/∂kw = a * kw^(a-1) * kg^b
-        ∂kro/∂kg = b * kw^a    * kg^(b-1)
+        ∂kro/∂kg = b * kw^a * kg^(b-1)
 
         Zero when either input is zero or non-positive.
         """
@@ -1199,9 +1201,9 @@ def eclipse_rule(
     where f_w and f_g are saturation-dependent factors.
 
     Notes:
-        - Used in commercial ECLIPSE simulator
-        - Provides smooth transition between phases
-        - Handles edge cases robustly
+    - Used in commercial ECLIPSE simulator
+    - Provides smooth transition between phases
+    - Handles edge cases robustly
     """
     total_mobile = oil_saturation + water_saturation + gas_saturation
 
@@ -1270,7 +1272,6 @@ def _(
         0.0,
     )
     d_sg = np.where(active & (Dw > 0.0), -kw * so / Dw_safe**2, 0.0)
-
     return (d_kro_d_kro_w, d_kro_d_kro_g, d_sw, d_so, d_sg)
 
 
@@ -1289,9 +1290,9 @@ def max_rule(
     kro = max(kro_w, kro_g)
 
     Notes:
-        - Upper bound for oil relative permeability
-        - Rarely used in practice (too optimistic)
-        - Useful for sensitivity analysis
+    - Upper bound for oil relative permeability
+    - Rarely used in practice (too optimistic)
+    - Useful for sensitivity analysis
     """
     return np.maximum(kro_w, kro_g)
 
@@ -1310,7 +1311,7 @@ def _(
 
     kw > kg → ∂/∂kw = 1, ∂/∂kg = 0
     kg > kw → ∂/∂kw = 0, ∂/∂kg = 1
-    Tie      → 0.5 each (subgradient).
+    Tie → 0.5 each (subgradient).
     """
     kw = np.asarray(kro_w, dtype=np.float64)
     kg = np.asarray(kro_g, dtype=np.float64)
@@ -2615,7 +2616,7 @@ def compute_corey_three_phase_relative_permeabilities(
 
 @relperm_table
 @attrs.frozen
-class BrooksCoreyThreePhaseRelPermModel(
+class BrooksCoreyRelPermModel(
     RelativePermeabilityTable,
     serializers={"mixing_rule": serialize_mixing_rule},
     deserializers={"mixing_rule": deserialize_mixing_rule},
@@ -2665,14 +2666,6 @@ class BrooksCoreyThreePhaseRelPermModel(
     mixing_rule: typing.Union[MixingRule, str] = eclipse_rule
     """
     Mixing rule function or name to compute oil relative permeability in three-phase system.
-
-    The function should take the following parameters in order:
-    - kro_w: Oil relative permeability from oil-water table
-    - kro_g: Oil relative permeability from oil-gas table
-    - Sw: Water saturation
-    - So: Oil saturation
-    - Sg: Gas saturation
-    and return the mixed oil relative permeability.
     """
     supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
@@ -2811,16 +2804,16 @@ class BrooksCoreyThreePhaseRelPermModel(
         :param oil_saturation: Oil saturation (fraction, 0 to 1).
         :param gas_saturation: Gas saturation (fraction, 0 to 1).
         :param irreducible_water_saturation: Optional override for the
-            irreducible (connate) water saturation.  Uses the model default
+            irreducible (connate) water saturation. Uses the model default
             when not provided.
         :param residual_oil_saturation_water: Optional override for the residual
-            oil saturation to water flooding.  Uses the model default when not
+            oil saturation to water flooding. Uses the model default when not
             provided.
         :param residual_oil_saturation_gas: Optional override for the residual
-            oil saturation to gas flooding.  Uses the model default when not
+            oil saturation to gas flooding. Uses the model default when not
             provided.
         :param residual_gas_saturation: Optional override for the residual gas
-            saturation.  Uses the model default when not provided.
+            saturation. Uses the model default when not provided.
         :return: `RelativePermeabilityDerivatives` dictionary containing the partial derivatives as described above.
         """
         Swc = (

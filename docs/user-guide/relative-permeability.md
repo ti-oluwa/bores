@@ -36,7 +36,7 @@ Before configuring any relative permeability model, you need to understand the f
 
 ## The Brooks-Corey Model
 
-The primary relative permeability model in BORES is `BrooksCoreyThreePhaseRelPermModel`. This is a power-law (Corey-type) model that computes two-phase relative permeability curves for each phase pair and then combines them into three-phase curves using a mixing rule.
+The primary relative permeability model in BORES is `BrooksCoreyRelPermModel`. This is a power-law (Corey-type) model that computes two-phase relative permeability curves for each phase pair and then combines them into three-phase curves using a mixing rule.
 
 The Brooks-Corey model expresses relative permeability as a power function of normalized saturation. For water in a water-oil system:
 
@@ -53,7 +53,7 @@ where $n_w$ and $n_o$ are the Corey exponents for water and oil respectively, an
 ```python
 import bores
 
-relperm = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
@@ -120,7 +120,7 @@ In an **oil-wet** rock, oil preferentially coats the grain surfaces and occupies
 import bores
 
 # Water-wet system (default)
-relperm_ww = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm_ww = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.30,
     residual_oil_saturation_gas=0.15,
@@ -132,7 +132,7 @@ relperm_ww = bores.BrooksCoreyThreePhaseRelPermModel(
 )
 
 # Oil-wet system
-relperm_ow = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm_ow = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.15,
     residual_oil_saturation_water=0.35,
     residual_oil_saturation_gas=0.20,
@@ -150,7 +150,7 @@ Most conventional sandstone reservoirs are water-wet or mixed-wet. Carbonate res
 
 Many real reservoirs exhibit mixed wettability, where some pore surfaces are water-wet and others are oil-wet. This occurs naturally when crude oil contacts the rock surface over geological time: the larger pores that were originally oil-filled become oil-wet, while smaller pores that retained water films remain water-wet. Mixed-wet rock typically produces distinctive relative permeability curves that fall between the pure water-wet and oil-wet end members, often with relatively high mobility for both phases at intermediate saturations.
 
-The `BrooksCoreyThreePhaseRelPermModel` in BORES currently supports `WATER_WET` and `OIL_WET` wettability settings. It does not have a direct `MIXED_WET` mode for relative permeability. However, you can approximate mixed-wet relative permeability behavior through careful selection of Corey exponents. Mixed-wet systems typically have characteristics that lie between the two end members:
+The `BrooksCoreyRelPermModel` in BORES currently supports `WATER_WET` and `OIL_WET` wettability settings. It does not have a direct `MIXED_WET` mode for relative permeability. However, you can approximate mixed-wet relative permeability behavior through careful selection of Corey exponents. Mixed-wet systems typically have characteristics that lie between the two end members:
 
 - **Lower water exponents** (1.5 to 2.5) compared to strongly water-wet systems, because oil-wet pores provide easier pathways for water
 - **Lower oil exponents** (1.5 to 2.0) compared to strongly oil-wet systems, because water-wet pores keep some oil mobile
@@ -160,7 +160,7 @@ The `BrooksCoreyThreePhaseRelPermModel` in BORES currently supports `WATER_WET` 
 import bores
 
 # Approximate mixed-wet behavior using tuned exponents
-relperm_mixed = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm_mixed = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.20,
     residual_oil_saturation_water=0.28,
     residual_oil_saturation_gas=0.18,
@@ -308,7 +308,7 @@ BORES provides several mixing rules, selectable by name or by passing the functi
 import bores
 
 # Using the default Eclipse rule
-relperm = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.30,
     residual_oil_saturation_gas=0.15,
@@ -320,7 +320,7 @@ relperm = bores.BrooksCoreyThreePhaseRelPermModel(
 )
 
 # Using Stone I for a water-wet carbonate
-relperm_stone = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm_stone = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.30,
     residual_oil_saturation_gas=0.15,
@@ -432,13 +432,13 @@ You do not need to run a full simulation to evaluate relative permeability model
 
 ### Calling the Brooks-Corey Model Directly
 
-The `BrooksCoreyThreePhaseRelPermModel` can be called directly with `get_relative_permeabilities()` or using the `__call__` interface. Both accept water, oil, and gas saturations and return a dictionary with `"water"`, `"oil"`, and `"gas"` keys containing the computed relative permeabilities.
+The `BrooksCoreyRelPermModel` can be called directly with `get_relative_permeabilities()` or using the `__call__` interface. Both accept water, oil, and gas saturations and return a dictionary with `"water"`, `"oil"`, and `"gas"` keys containing the computed relative permeabilities.
 
 ```python
 import bores
 import numpy as np
 
-relperm = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
@@ -525,7 +525,7 @@ Relative permeability is passed to the simulation through the `RockFluidTables` 
 ```python
 import bores
 
-relperm = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
@@ -573,7 +573,7 @@ import bores
 import numpy as np
 
 # Create the model
-relperm = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
@@ -649,7 +649,7 @@ If you have both a tabular model from lab data and an analytical model, you can 
 
 ```python
 # Analytical model
-relperm_bc = bores.BrooksCoreyThreePhaseRelPermModel(
+relperm_bc = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.20,
     residual_oil_saturation_water=0.25,
     residual_oil_saturation_gas=0.15,
@@ -829,7 +829,7 @@ Choosing relative permeability parameters is one of the most important decisions
     === "Water-Wet Sandstone"
 
         ```python
-        relperm = bores.BrooksCoreyThreePhaseRelPermModel(
+        relperm = bores.BrooksCoreyRelPermModel(
             irreducible_water_saturation=0.25,
             residual_oil_saturation_water=0.25,
             residual_oil_saturation_gas=0.15,
@@ -844,7 +844,7 @@ Choosing relative permeability parameters is one of the most important decisions
     === "Oil-Wet Carbonate"
 
         ```python
-        relperm = bores.BrooksCoreyThreePhaseRelPermModel(
+        relperm = bores.BrooksCoreyRelPermModel(
             irreducible_water_saturation=0.15,
             residual_oil_saturation_water=0.35,
             residual_oil_saturation_gas=0.20,
@@ -859,7 +859,7 @@ Choosing relative permeability parameters is one of the most important decisions
     === "Unconsolidated Sand"
 
         ```python
-        relperm = bores.BrooksCoreyThreePhaseRelPermModel(
+        relperm = bores.BrooksCoreyRelPermModel(
             irreducible_water_saturation=0.30,
             residual_oil_saturation_water=0.20,
             residual_oil_saturation_gas=0.12,

@@ -263,7 +263,7 @@ Models for relative permeability and capillary pressure.
 
 | Name | Type | Description |
 | --- | --- | --- |
-| `BrooksCoreyThreePhaseRelPermModel` | class | Three-phase relative permeability using Brooks-Corey (Corey) exponents for oil, water, and gas. |
+| `BrooksCoreyRelPermModel` | class | Three-phase relative permeability using Brooks-Corey (Corey) exponents for oil, water, and gas. |
 | `LETThreePhaseRelPermModel` | class | Three-phase relative permeability using LET (Lomeland-Ebeltoft-Thomas) three-parameter correlation. More flexible than Brooks-Corey for matching laboratory data. |
 | `LETParameters` | class | Frozen container for a single set of LET parameters (L, E, T). Used to group the three parameters when constructing `LETThreePhaseRelPermModel`. |
 | `TwoPhaseRelPermTable` | class | Tabular two-phase relative permeability (oil-water or gas-oil). |

@@ -227,7 +227,7 @@ The `wells_()` factory groups wells into a `Wells` container. Since this is a de
 
 ```python
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+    relative_permeability_table=bores.BrooksCoreyRelPermModel(
         irreducible_water_saturation=0.25,
         residual_oil_saturation_water=0.30,
         residual_oil_saturation_gas=0.15,
@@ -245,7 +245,7 @@ rock_fluid_tables = bores.RockFluidTables(
 )
 ```
 
-The `BrooksCoreyThreePhaseRelPermModel` defines how relative permeability varies with saturation using the Corey power-law model. The exponents control curve shape: an exponent of 2.0 produces moderately curved functions that are a reasonable starting point for sandstone. Higher exponents (3-4) would make the curves steeper, meaning phases need higher saturation before they can flow significantly.
+The `BrooksCoreyRelPermModel` defines how relative permeability varies with saturation using the Corey power-law model. The exponents control curve shape: an exponent of 2.0 produces moderately curved functions that are a reasonable starting point for sandstone. Higher exponents (3-4) would make the curves steeper, meaning phases need higher saturation before they can flow significantly.
 
 The `BrooksCoreyCapillaryPressureModel` uses default parameters suitable for a first approximation. Capillary pressure represents the pressure difference between phases at the pore scale due to surface tension. For this tutorial, the defaults are adequate. In the [Building Reservoir Models](02-building-models.md) tutorial, you will see how to customize these parameters.
 

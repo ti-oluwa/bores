@@ -148,7 +148,7 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 
 # Rock-fluid tables (Brooks-Corey relative permeability + capillary pressure)
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+    relative_permeability_table=bores.BrooksCoreyRelPermModel(
         water_exponent=2.0,
         oil_exponent=1.0,
         gas_exponent=1.0,

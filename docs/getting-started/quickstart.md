@@ -186,7 +186,7 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 # Brooks-Corey relative permeability model with Corey exponents of 2.0.
 # The capillary pressure model uses default Brooks-Corey parameters.
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+    relative_permeability_table=bores.BrooksCoreyRelPermModel(
         water_exponent=2.0,
         oil_exponent=2.0,
         gas_exponent=2.0,
@@ -281,7 +281,7 @@ The `CoupledRateControl` on the producer is the standard approach in reservoir s
 
 ### Rock-Fluid Properties
 
-The `BrooksCoreyThreePhaseRelPermModel` defines how easily each phase flows through the rock as a function of saturation. The Corey exponents control the curvature of the relative permeability curves: higher exponents produce steeper curves, meaning a phase needs higher saturation before it can flow significantly. An exponent of 2.0 is a common starting point for sandstone reservoirs.
+The `BrooksCoreyRelPermModel` defines how easily each phase flows through the rock as a function of saturation. The Corey exponents control the curvature of the relative permeability curves: higher exponents produce steeper curves, meaning a phase needs higher saturation before it can flow significantly. An exponent of 2.0 is a common starting point for sandstone reservoirs.
 
 The capillary pressure model (`BrooksCoreyCapillaryPressureModel`) accounts for the pressure difference between phases at the pore scale. Capillary forces are especially important in fine-grained rocks and at saturation fronts. The default parameters are reasonable for an initial study, but you should calibrate them against core flood data for any serious analysis.
 

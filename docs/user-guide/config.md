@@ -18,7 +18,7 @@ At minimum, a `Config` requires a `Timer` and a `RockFluidTables`:
 import bores
 
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+    relative_permeability_table=bores.BrooksCoreyRelPermModel(
         irreducible_water_saturation=0.25,
         residual_oil_saturation_water=0.30,
         residual_oil_saturation_gas=0.15,

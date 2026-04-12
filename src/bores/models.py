@@ -12,6 +12,7 @@ from bores.grids.base import (
     build_depth_grid,
     build_elevation_grid,
 )
+from bores.precision import get_dtype
 from bores.stores import StoreSerializable
 from bores.types import NDimension, NDimensionalGrid
 
@@ -157,11 +158,11 @@ class RockPermeability(StoreSerializable, typing.Generic[NDimension]):
 
     x: NDimensionalGrid[NDimension]
     """N-dimensional numpy array representing the permeability distribution in the x-direction (mD)."""
-    y: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0)))  # type: ignore[assignment]
+    y: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0), dtype=get_dtype()))  # type: ignore[assignment]
     """N-dimensional numpy array representing the permeability distribution in the y-direction (mD)."""
-    z: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0)))  # type: ignore[assignment]
+    z: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0), dtype=get_dtype()))  # type: ignore[assignment]
     """N-dimensional numpy array representing the permeability distribution in the z-direction (mD)."""
-    mean: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0)))  # type: ignore[assignment]
+    mean: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0), dtype=get_dtype()))  # type: ignore[assignment]
     """N-dimensional numpy array representing the mean (geometric by default) of permeability distribution (mD)."""
 
     def __attrs_post_init__(self) -> None:

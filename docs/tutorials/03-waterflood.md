@@ -176,7 +176,7 @@ Notice that the `produced_fluids` list includes both oil and water. Before water
 wells = bores.wells_(injectors=[injector], producers=[producer])
 
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+    relative_permeability_table=bores.BrooksCoreyRelPermModel(
         irreducible_water_saturation=0.25,
         residual_oil_saturation_water=0.30,
         residual_oil_saturation_gas=0.15,
@@ -206,7 +206,7 @@ config = bores.Config(
 )
 ```
 
-We set the water Corey exponent to 2.5 (slightly higher than oil's 2.0), which makes the water relative permeability curve steeper. This is physically reasonable because water in a water-wet rock (`BrooksCoreyThreePhaseRelPermModel` assumes wettability as water wet by default) needs to occupy more pore space before it can flow efficiently.
+We set the water Corey exponent to 2.5 (slightly higher than oil's 2.0), which makes the water relative permeability curve steeper. This is physically reasonable because water in a water-wet rock (`BrooksCoreyRelPermModel` assumes wettability as water wet by default) needs to occupy more pore space before it can flow efficiently.
 
 The simulation runs for 3 years (1,095 days), which is enough time to observe water breakthrough, the transition to high water cut, and the plateau in recovery factor.
 

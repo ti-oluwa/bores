@@ -301,7 +301,7 @@ config = bores.Config(
 
     # Rock-fluid properties
     rock_fluid_tables=bores.RockFluidTables(
-        relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+        relative_permeability_table=bores.BrooksCoreyRelPermModel(
             water_exponent=2.0, oil_exponent=2.0, gas_exponent=2.0,
         ),
         capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(),
