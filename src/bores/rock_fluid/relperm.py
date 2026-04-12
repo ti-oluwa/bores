@@ -88,7 +88,7 @@ def _resolve_relperm_floor(floor: RelPermFloor) -> typing.Optional[float]:
         raise ValidationError(
             f"`min_*_relperm` must be 'auto', None, or a float. Got {floor!r}."
         )
-        
+
     if floor < 0.0:
         raise ValidationError(
             f"`min_*_relperm` floor must be non-negative. Got {floor}."
@@ -794,7 +794,7 @@ def get_mixing_rule(name: str) -> MixingRule:
     )
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True)
 def _zeros_like_kro(kro_w: FloatOrArray) -> FloatOrArray:
     """Return an array (or scalar) of zeros with the same shape as kro_w."""
     return np.zeros_like(kro_w) if not np.isscalar(kro_w) else kro_w.dtype.type(0.0)
