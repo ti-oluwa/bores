@@ -208,7 +208,7 @@ def reservoir_model(
     water_formation_volume_factor_grid: typing.Optional[
         NDimensionalGrid[NDimension]
     ] = None,
-    net_to_gross_ratio_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
+    net_to_gross_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
     water_salinity_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
     solvent_concentration_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
     oil_effective_viscosity_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
@@ -272,7 +272,7 @@ def reservoir_model(
     :param oil_formation_volume_factor_grid: Oil formation volume factor grid (bbl/scf), optional.
     :param gas_formation_volume_factor_grid: Gas formation volume factor grid (bbl/scf), optional.
     :param water_formation_volume_factor_grid: Water formation volume factor grid (bbl/scf), optional.
-    :param net_to_gross_ratio_grid: Net-to-gross ratio grid (fraction), optional.
+    :param net_to_gross_grid: Net-to-gross ratio grid (fraction), optional.
     :param water_salinity_grid: Water salinity grid (ppm), optional.
     :param solvent_concentration_grid: Solvent concentration in oil phase (0=pure oil, 1=pure solvent), optional.
     :param oil_effective_viscosity_grid: Effective oil-solvent mixture viscosity using miscible model (e.g Todd Longstaff) (cP), optional.
@@ -305,9 +305,9 @@ def reservoir_model(
             value=c.DEFAULT_WATER_SALINITY_PPM,
         )
 
-    if net_to_gross_ratio_grid is None:
+    if net_to_gross_grid is None:
         # Assume uniform net-to-gross ratio of 1.0 (fully net)
-        net_to_gross_ratio_grid = build_uniform_grid(
+        net_to_gross_grid = build_uniform_grid(
             grid_shape=grid_shape,
             value=1.0,
         )
@@ -890,7 +890,7 @@ def reservoir_model(
     rock_properties = RockProperties(
         compressibility=rock_compressibility,
         absolute_permeability=absolute_permeability,
-        net_to_gross_ratio_grid=net_to_gross_ratio_grid,
+        net_to_gross_grid=net_to_gross_grid,
         porosity_grid=porosity_grid,
         residual_oil_saturation_water_grid=residual_oil_saturation_water_grid,
         residual_oil_saturation_gas_grid=residual_oil_saturation_gas_grid,

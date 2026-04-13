@@ -231,7 +231,7 @@ def setup_3d_model():
         irreducible_water_saturation_grid=irreducible_water_saturation_grid,
         connate_water_saturation_grid=connate_water_saturation_grid,
         residual_gas_saturation_grid=residual_gas_saturation_grid,
-        net_to_gross_ratio_grid=net_to_gross_grid,
+        net_to_gross_grid=net_to_gross_grid,
         reservoir_gas="methane",
         dip_angle=dip_angle,
         dip_azimuth=dip_azimuth,
@@ -288,7 +288,7 @@ def setup_config(Path, bores, pvt_tables):
     )
 
     # RelPerm table
-    relative_permeability_table = bores.BrooksCoreyThreePhaseRelPermModel(
+    relative_permeability_table = bores.BrooksCoreyRelPermModel(
         irreducible_water_saturation=0.15,
         residual_oil_saturation_gas=0.15,
         residual_oil_saturation_water=0.25,

@@ -473,7 +473,7 @@ def setup_grid():
         irreducible_water_saturation_grid=irreducible_water_saturation_grid,
         connate_water_saturation_grid=connate_water_saturation_grid,
         residual_gas_saturation_grid=residual_gas_saturation_grid,
-        net_to_gross_ratio_grid=net_to_gross_grid,
+        net_to_gross_grid=net_to_gross_grid,
         water_salinity_grid=bores.array(np.zeros(grid_shape)),
         dip_angle=0.0,
         dip_azimuth=0.0,

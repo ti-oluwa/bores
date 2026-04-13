@@ -932,7 +932,7 @@ def compute_residual(
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=rock_properties.porosity_grid,
-        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
+        net_to_gross_grid=rock_properties.net_to_gross_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
@@ -1045,7 +1045,7 @@ def assemble_numerical_jacobian(
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=rock_properties.porosity_grid,
-        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
+        net_to_gross_grid=rock_properties.net_to_gross_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
@@ -2134,7 +2134,7 @@ def assemble_analytical_jacobian(
         water_viscosity_grid=water_viscosity_grid,
         gas_viscosity_grid=gas_viscosity_grid,
         porosity_grid=rock_properties.porosity_grid,
-        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
+        net_to_gross_grid=rock_properties.net_to_gross_grid,
         time_step_in_days=time_step_in_days,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
@@ -2376,7 +2376,7 @@ def evolve_saturation(
     """
     oil_pressure_grid = fluid_properties.pressure_grid
     porosity_grid = rock_properties.porosity_grid
-    net_to_gross_grid = rock_properties.net_to_gross_ratio_grid
+    net_to_gross_grid = rock_properties.net_to_gross_grid
     rock_compressibility = rock_properties.compressibility
     cell_count_x, cell_count_y, cell_count_z = oil_pressure_grid.shape
     cell_size_x, cell_size_y = cell_dimension

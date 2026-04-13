@@ -2586,7 +2586,7 @@ def run(
         saturation_history = model.saturation_history if enable_hysteresis else None
         thickness_grid = model.thickness_grid
         absolute_permeability = rock_properties.absolute_permeability
-        net_to_gross_grid = rock_properties.net_to_gross_ratio_grid
+        net_to_gross_grid = rock_properties.net_to_gross_grid
 
         logger.debug("Building well indices cache")
         well_indices_cache = build_well_indices_cache(
@@ -2604,15 +2604,8 @@ def run(
             apply_dip=not config.disable_structural_dip
         )
 
-        logger.debug("Building face transmissibilities")
-        face_transmissibilities = build_face_transmissibilities(
-            absolute_permeability=absolute_permeability,
-            thickness_grid=thickness_grid,
-            net_to_gross_grid=net_to_gross_grid,
-            cell_size_x=cell_dimension[0],
-            cell_size_y=cell_dimension[1],
-            dtype=dtype,
-        )
+        logger.debug("Building face transmissibilities...")
+        face_transmissibilities = model.build_face_transmissibilities(dtype=dtype)
 
         logger.debug("Initializing PVT fluid properties...")
         fluid_properties = update_fluid_properties(

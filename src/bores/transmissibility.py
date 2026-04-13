@@ -7,8 +7,8 @@ import numpy as np
 import numpy.typing as npt
 
 from bores.correlations.core import compute_harmonic_mean
-from bores.models import RockPermeability
-from bores.types import ThreeDimensionalGrid, ThreeDimensions
+from bores.precision import get_dtype
+from bores.types import ThreeDimensionalGrid
 
 __all__ = ["FaceTransmissibilities", "build_face_transmissibilities"]
 
@@ -33,12 +33,14 @@ class FaceTransmissibilities(typing.NamedTuple):
 
 
 def build_face_transmissibilities(
-    absolute_permeability: RockPermeability[ThreeDimensions],
+    permeability_x: ThreeDimensionalGrid,
+    permeability_y: ThreeDimensionalGrid,
+    permeability_z: ThreeDimensionalGrid,
     thickness_grid: ThreeDimensionalGrid,
     net_to_gross_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
-    dtype: npt.DTypeLike = np.float64,
+    dtype: typing.Optional[npt.DTypeLike] = None,
 ) -> FaceTransmissibilities:
     """
     Precompute geometric face transmissibilities T_geo = k_harmonic * A / L for
@@ -52,7 +54,9 @@ def build_face_transmissibilities(
 
     The last row/col/layer in each direction is set to zero (no forward neighbour).
 
-    :param absolute_permeability: Absolute permeability object with x, y, z arrays (mD).
+    :param permeability_x: Permeability grid for flow in x-direction (mD).
+    :param permeability_y: Permeability grid for flow in y-direction (mD).
+    :param permeability_z: Permeability grid for flow in z-direction (mD).
     :param thickness_grid: Cell thickness grid (ft).
     :param net_to_gross_grid: Net-to-gross ratio grid (fraction).
     :param cell_size_x: Cell size in x-direction (ft).
@@ -61,14 +65,14 @@ def build_face_transmissibilities(
     :return: `FaceTransmissibilities` named tuple with x, y, z arrays (mD·ft).
     """
     Tx, Ty, Tz = _compute_face_transmissibilities(
-        Kx=absolute_permeability.x,
-        Ky=absolute_permeability.y,
-        Kz=absolute_permeability.z,
+        Kx=permeability_x,
+        Ky=permeability_y,
+        Kz=permeability_z,
         thickness_grid=thickness_grid,
         net_to_gross_grid=net_to_gross_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
-        dtype=dtype,
+        dtype=dtype if dtype is not None else get_dtype(),
     )
     return FaceTransmissibilities(x=Tx, y=Ty, z=Tz)
 

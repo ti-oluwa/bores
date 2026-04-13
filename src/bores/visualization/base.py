@@ -424,7 +424,7 @@ class PropertyRegistry:
             color_scheme=ColorScheme.CIVIDIS,
         ),
         net_to_gross_ratio=PropertyMeta(
-            name="model.rock_properties.net_to_gross_ratio_grid",
+            name="model.rock_properties.net_to_gross_grid",
             display_name="Net to Gross Ratio",
             unit="fraction",
             color_scheme=ColorScheme.VIRIDIS,

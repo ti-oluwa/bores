@@ -135,7 +135,7 @@ def compute_material_balance_errors(
     # Cell pore volume in ft³
     pore_volume = (
         rock.porosity_grid
-        * rock.net_to_gross_ratio_grid
+        * rock.net_to_gross_grid
         * thickness_grid
         * cell_size_x
         * cell_size_y

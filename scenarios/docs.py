@@ -160,7 +160,7 @@ def _():
     # Brooks-Corey relative permeability model with Corey exponents of 2.0.
     # The capillary pressure model uses default Brooks-Corey parameters.
     rock_fluid = bores.RockFluidTables(
-        relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+        relative_permeability_table=bores.BrooksCoreyRelPermModel(
             water_exponent=2.0,
             oil_exponent=2.0,
             gas_exponent=2.0,

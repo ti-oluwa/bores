@@ -781,7 +781,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                     porosity=model.rock_properties.porosity_grid,
                     phase_saturation=model.fluid_properties.oil_saturation_grid,
                     formation_volume_factor=model.fluid_properties.oil_formation_volume_factor_grid,
-                    net_to_gross_ratio=model.rock_properties.net_to_gross_ratio_grid,
+                    net_to_gross_ratio=model.rock_properties.net_to_gross_grid,
                     hydrocarbon_type="oil",
                     acre_ft_to_bbl=c.ACRE_FOOT_TO_BARRELS,
                     acre_ft_to_ft3=c.ACRE_FOOT_TO_CUBIC_FEET,
@@ -831,7 +831,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                     porosity=model.rock_properties.porosity_grid,
                     phase_saturation=model.fluid_properties.gas_saturation_grid,
                     formation_volume_factor=model.fluid_properties.gas_formation_volume_factor_grid,
-                    net_to_gross_ratio=model.rock_properties.net_to_gross_ratio_grid,
+                    net_to_gross_ratio=model.rock_properties.net_to_gross_grid,
                     hydrocarbon_type="gas",
                     acre_ft_to_bbl=c.ACRE_FOOT_TO_BARRELS,
                     acre_ft_to_ft3=c.ACRE_FOOT_TO_CUBIC_FEET,
@@ -887,7 +887,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                     porosity=model.rock_properties.porosity_grid,
                     phase_saturation=model.fluid_properties.gas_saturation_grid,
                     formation_volume_factor=model.fluid_properties.gas_formation_volume_factor_grid,
-                    net_to_gross_ratio=model.rock_properties.net_to_gross_ratio_grid,
+                    net_to_gross_ratio=model.rock_properties.net_to_gross_grid,
                     hydrocarbon_type="gas",
                     acre_ft_to_bbl=acre_ft_to_bbl,
                     acre_ft_to_ft3=acre_ft_to_ft3,
@@ -898,7 +898,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                     porosity=model.rock_properties.porosity_grid,
                     phase_saturation=model.fluid_properties.oil_saturation_grid,
                     formation_volume_factor=model.fluid_properties.oil_formation_volume_factor_grid,
-                    net_to_gross_ratio=model.rock_properties.net_to_gross_ratio_grid,
+                    net_to_gross_ratio=model.rock_properties.net_to_gross_grid,
                     hydrocarbon_type="oil",
                     acre_ft_to_bbl=acre_ft_to_bbl,
                     acre_ft_to_ft3=acre_ft_to_ft3,
@@ -909,7 +909,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                     porosity=model.rock_properties.porosity_grid,
                     phase_saturation=model.fluid_properties.water_saturation_grid,
                     formation_volume_factor=model.fluid_properties.water_formation_volume_factor_grid,
-                    net_to_gross_ratio=model.rock_properties.net_to_gross_ratio_grid,
+                    net_to_gross_ratio=model.rock_properties.net_to_gross_grid,
                     hydrocarbon_type="water",
                     acre_ft_to_bbl=acre_ft_to_bbl,
                     acre_ft_to_ft3=acre_ft_to_ft3,
@@ -1011,7 +1011,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                     porosity=model.rock_properties.porosity_grid,
                     phase_saturation=model.fluid_properties.water_saturation_grid,
                     formation_volume_factor=model.fluid_properties.water_formation_volume_factor_grid,
-                    net_to_gross_ratio=model.rock_properties.net_to_gross_ratio_grid,
+                    net_to_gross_ratio=model.rock_properties.net_to_gross_grid,
                     hydrocarbon_type="water",
                     acre_ft_to_bbl=c.ACRE_FOOT_TO_BARRELS,
                     acre_ft_to_ft3=c.ACRE_FOOT_TO_CUBIC_FEET,
@@ -1966,7 +1966,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             oil_saturation = model.fluid_properties.oil_saturation_grid
             oil_fvf = model.fluid_properties.oil_formation_volume_factor_grid
             porosity = model.rock_properties.porosity_grid
-            net_to_gross = model.rock_properties.net_to_gross_ratio_grid
+            net_to_gross = model.rock_properties.net_to_gross_grid
             thickness = model.thickness_grid
             cell_area_in_acres = self.compute_cell_area(*model.cell_dimension[:2])
             cell_area_grid = uniform_grid(
@@ -2058,7 +2058,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             gas_saturation = model.fluid_properties.gas_saturation_grid
             gas_fvf = model.fluid_properties.gas_formation_volume_factor_grid
             porosity = model.rock_properties.porosity_grid
-            net_to_gross = model.rock_properties.net_to_gross_ratio_grid
+            net_to_gross = model.rock_properties.net_to_gross_grid
             thickness = model.thickness_grid
             cell_area_in_acres = self.compute_cell_area(*model.cell_dimension[:2])
             cell_area_grid = uniform_grid(
@@ -2205,7 +2205,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             cell_area_grid
             * model.thickness_grid
             * model.rock_properties.porosity_grid
-            * model.rock_properties.net_to_gross_ratio_grid
+            * model.rock_properties.net_to_gross_grid
             * c.ACRE_FOOT_TO_CUBIC_FEET  # Convert acre-ft to ft³
         )
         total_pore_volume = np.nansum(pore_volume_grid)
@@ -2856,7 +2856,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
         cell_area_ft2 = cell_dimension_x * cell_dimension_y
         thickness_grid = current_model.thickness_grid
         porosity_grid = current_model.rock_properties.porosity_grid
-        net_to_gross_grid = current_model.rock_properties.net_to_gross_ratio_grid
+        net_to_gross_grid = current_model.rock_properties.net_to_gross_grid
 
         oil_formation_volume_factor_initial_grid = (
             initial_model.fluid_properties.oil_formation_volume_factor_grid
@@ -3082,7 +3082,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             cell_area_ft2
             * model.thickness_grid
             * model.rock_properties.porosity_grid
-            * model.rock_properties.net_to_gross_ratio_grid
+            * model.rock_properties.net_to_gross_grid
         )
         total_pore_volume = float(np.nansum(pore_volume_grid))
         front_volume_fraction = (

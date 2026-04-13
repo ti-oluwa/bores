@@ -94,7 +94,7 @@ def evolve_pressure(
     :return: `EvolutionResult` containing the new pressure grid and scheme used
     """
     porosity_grid = rock_properties.porosity_grid
-    net_to_gross_grid = rock_properties.net_to_gross_ratio_grid
+    net_to_gross_grid = rock_properties.net_to_gross_grid
     rock_compressibility = rock_properties.compressibility
     oil_density_grid = fluid_properties.oil_effective_density_grid
     water_density_grid = fluid_properties.water_density_grid

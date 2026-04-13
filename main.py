@@ -2,7 +2,7 @@ import typing
 
 import bores
 
-# Set precision (32-bit is the default)
+# Set precision
 bores.use_32bit_precision()
 
 # Grid dimensions: 10x10x3 cells, each 1000 ft x 1000 ft, 100 ft thick

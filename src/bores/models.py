@@ -4,6 +4,7 @@ import typing
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.errors import ValidationError
@@ -14,6 +15,7 @@ from bores.grids.base import (
 )
 from bores.precision import get_dtype
 from bores.stores import StoreSerializable
+from bores.transmissibility import FaceTransmissibilities, build_face_transmissibilities
 from bores.types import NDimension, NDimensionalGrid
 
 __all__ = [
@@ -158,11 +160,17 @@ class RockPermeability(StoreSerializable, typing.Generic[NDimension]):
 
     x: NDimensionalGrid[NDimension]
     """N-dimensional numpy array representing the permeability distribution in the x-direction (mD)."""
-    y: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0), dtype=get_dtype()))  # type: ignore[assignment]
+    y: NDimensionalGrid[NDimension] = attrs.field(
+        factory=lambda: np.empty((0, 0), dtype=get_dtype())
+    )  # type: ignore[assignment]
     """N-dimensional numpy array representing the permeability distribution in the y-direction (mD)."""
-    z: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0), dtype=get_dtype()))  # type: ignore[assignment]
+    z: NDimensionalGrid[NDimension] = attrs.field(
+        factory=lambda: np.empty((0, 0), dtype=get_dtype())
+    )  # type: ignore[assignment]
     """N-dimensional numpy array representing the permeability distribution in the z-direction (mD)."""
-    mean: NDimensionalGrid[NDimension] = attrs.field(factory=lambda: np.empty((0, 0), dtype=get_dtype()))  # type: ignore[assignment]
+    mean: NDimensionalGrid[NDimension] = attrs.field(
+        factory=lambda: np.empty((0, 0), dtype=get_dtype())
+    )  # type: ignore[assignment]
     """N-dimensional numpy array representing the mean (geometric by default) of permeability distribution (mD)."""
 
     def __attrs_post_init__(self) -> None:
@@ -193,7 +201,7 @@ class RockProperties(StoreSerializable, typing.Generic[NDimension]):
     """Reservoir rock compressibility in (psi⁻¹)"""
     absolute_permeability: RockPermeability[NDimension]
     """Rock permeability in the reservoir, in milliDarcy (mD)."""
-    net_to_gross_ratio_grid: NDimensionalGrid[NDimension]
+    net_to_gross_grid: NDimensionalGrid[NDimension]
     """N-dimensional numpy array representing the net-to-gross ratio distribution across the reservoir rock (fraction)."""
     porosity_grid: NDimensionalGrid[NDimension]
     """N-dimensional numpy array representing the porosity distribution across the reservoir rock (fraction)."""
@@ -260,6 +268,7 @@ class ReservoirModel(
         "fluid_properties": FluidProperties,
         "rock_properties": RockProperties,
         "saturation_history": SaturationHistory,
+        "face_transmissibilities": typing.Optional[FaceTransmissibilities],
         "dip_angle": float,
         "dip_azimuth": float,
         "datum_depth": typing.Optional[float],
@@ -275,6 +284,7 @@ class ReservoirModel(
         fluid_properties: FluidProperties[NDimension],
         rock_properties: RockProperties[NDimension],
         saturation_history: SaturationHistory[NDimension],
+        face_transmissibilities: typing.Optional[FaceTransmissibilities] = None,
         dip_angle: float = 0.0,
         dip_azimuth: float = 0.0,
         datum_depth: typing.Optional[float] = 0.0,
@@ -310,6 +320,7 @@ class ReservoirModel(
         self.fluid_properties = fluid_properties
         self.rock_properties = rock_properties
         self.saturation_history = saturation_history
+        self.face_transmissibilities = face_transmissibilities
         self.dip_angle = dip_angle
         self.dip_azimuth = dip_azimuth
         self.datum_depth = datum_depth
@@ -342,6 +353,7 @@ class ReservoirModel(
             "fluid_properties": self.fluid_properties,
             "rock_properties": self.rock_properties,
             "saturation_history": self.saturation_history,
+            "face_transmissibilities": self.face_transmissibilities,
             "dip_angle": self.dip_angle,
             "dip_azimuth": self.dip_azimuth,
         }
@@ -428,3 +440,33 @@ class ReservoirModel(
             dip_angle=self.dip_angle,
             dip_azimuth=self.dip_azimuth,
         )
+
+    def build_face_transmissibilities(
+        self, dtype: typing.Optional[npt.DTypeLike] = None
+    ) -> FaceTransmissibilities:
+        """
+        Retrieve or build face transmissibilities for the reservoir model.
+
+        If face transmissibilities were provided during initialization, they are returned.
+        Otherwise, they are computed from the rock properties and grid parameters,
+        cached in the model, and then returned.
+
+        :return: `FaceTransmissibilities` object containing x, y, z face transmissibilities.
+        """
+        if self.face_transmissibilities is not None:
+            return self.face_transmissibilities
+
+        assert len(self.grid_shape) == 3
+        face_transmissibilities = build_face_transmissibilities(
+            permeability_x=self.rock_properties.absolute_permeability.x,  # type: ignore[arg-type]
+            permeability_y=self.rock_properties.absolute_permeability.y,  # type: ignore[arg-type]
+            permeability_z=self.rock_properties.absolute_permeability.z,  # type: ignore[arg-type]
+            thickness_grid=self.thickness_grid,  # type: ignore[arg-type]
+            net_to_gross_grid=self.rock_properties.net_to_gross_grid,  # type: ignore[arg-type]
+            cell_size_x=self.cell_dimension[0],
+            cell_size_y=self.cell_dimension[1],
+            dtype=dtype,
+        )
+        # Set the computed face transmissibilities on the model
+        self.face_transmissibilities = face_transmissibilities
+        return self.face_transmissibilities

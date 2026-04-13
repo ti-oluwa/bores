@@ -114,7 +114,7 @@ def evolve_saturation(
     """
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
     porosity_grid = rock_properties.porosity_grid
-    net_to_gross_grid = rock_properties.net_to_gross_ratio_grid
+    net_to_gross_grid = rock_properties.net_to_gross_grid
     oil_density_grid = fluid_properties.oil_effective_density_grid
     water_density_grid = fluid_properties.water_density_grid
     gas_density_grid = fluid_properties.gas_density_grid
