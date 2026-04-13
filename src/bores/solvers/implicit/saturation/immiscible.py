@@ -5,7 +5,7 @@ import attrs
 import numba
 import numpy as np
 import numpy.typing as npt
-from scipy.sparse import coo_matrix, csr_matrix
+from scipy.sparse import coo_matrix
 
 from bores.config import Config
 from bores.constants import c
@@ -60,7 +60,7 @@ class NewtonConvergenceInfo:
 
 
 @numba.njit(cache=True, parallel=True)
-def saturation_grids_to_vector(
+def pack_saturation_grids_to_vector(
     water_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
     cell_count_x: int,
@@ -70,15 +70,15 @@ def saturation_grids_to_vector(
     """
     Pack Sw and Sg from 3-D grids into a 1-D vector.
 
-    Layout: ``[Sw_0, Sg_0, Sw_1, Sg_1, ..., Sw_{N-1}, Sg_{N-1}]``
-    where ``N = cell_count_x * cell_count_y * cell_count_z``.
+    Layout: `[Sw_0, Sg_0, Sw_1, Sg_1, ..., Sw_{N-1}, Sg_{N-1}]`
+    where `N = cell_count_x * cell_count_y * cell_count_z`.
 
-    :param water_saturation_grid: Water saturation grid, shape ``(nx, ny, nz)``.
-    :param gas_saturation_grid: Gas saturation grid, shape ``(nx, ny, nz)``.
+    :param water_saturation_grid: Water saturation grid, shape `(nx, ny, nz)`.
+    :param gas_saturation_grid: Gas saturation grid, shape `(nx, ny, nz)`.
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
     :param cell_count_z: Number of cells in z-direction.
-    :return: 1-D array of length ``2 * nx * ny * nz``.
+    :return: 1-D array of length `2 * nx * ny * nz`.
     """
     total_cell_count = cell_count_x * cell_count_y * cell_count_z
     saturation_vector = np.empty(2 * total_cell_count)
@@ -99,7 +99,7 @@ def saturation_grids_to_vector(
 
 
 @numba.njit(cache=True, parallel=True)
-def vector_to_saturation_grids(
+def unpack_vector_to_saturation_grids(
     saturation_vector: npt.NDArray,
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
@@ -111,9 +111,9 @@ def vector_to_saturation_grids(
     """
     Unpack a 1-D saturation vector back into 3-D grids in-place.
 
-    Computes oil saturation as ``So = 1 - Sw - Sg``.
+    Computes oil saturation as `So = 1 - Sw - Sg`.
 
-    :param saturation_vector: 1-D array of length ``2 * nx * ny * nz``.
+    :param saturation_vector: 1-D array of length `2 * nx * ny * nz`.
     :param water_saturation_grid: Output water saturation grid (modified in-place).
     :param oil_saturation_grid: Output oil saturation grid (modified in-place).
     :param gas_saturation_grid: Output gas saturation grid (modified in-place).
@@ -146,10 +146,10 @@ def project_to_feasible(saturation_vector: npt.NDArray) -> npt.NDArray:
     """
     Project a saturation vector onto the feasible set.
 
-    Enforces ``Sw >= 0``, ``Sg >= 0``, ``Sw + Sg <= 1`` by proportional
+    Enforces `Sw >= 0`, `Sg >= 0`, `Sw + Sg <= 1` by proportional
     scaling when the sum exceeds unity.
 
-    :param saturation_vector: 1-D vector ``[Sw_0, Sg_0, ...]`` modified in-place.
+    :param saturation_vector: 1-D vector `[Sw_0, Sg_0, ...]` modified in-place.
     :return: The same vector after projection.
     """
     total_cell_count = len(saturation_vector) // 2
@@ -173,7 +173,7 @@ def interleave_residuals(
     """
     Interleave water and gas residual arrays into a single vector.
 
-    Layout: ``[R_w_0, R_g_0, R_w_1, R_g_1, ..., R_w_{N-1}, R_g_{N-1}]``.
+    Layout: `[R_w_0, R_g_0, R_w_1, R_g_1, ..., R_w_{N-1}, R_g_{N-1}]`.
 
     :param water_residual: 1-D water residual array of length N.
     :param gas_residual: 1-D gas residual array of length N.
@@ -229,7 +229,7 @@ def _compute_saturation_residual(
     """
     Compute the residual vector R(S) for the implicit saturation equations.
 
-    For each cell ``(i, j, k)`` the residual equations are:
+    For each cell `(i, j, k)` the residual equations are:
 
     ```
     R_w[i,j,k] = (phi * V / dt) * (Sw_new - Sw_old)
@@ -245,15 +245,15 @@ def _compute_saturation_residual(
 
     All six faces are examined per cell.  Interior faces use
     `compute_fluxes_from_neighbour` with full upwinding.
-    Boundary faces read from the padded ``pressure_boundaries`` /
-    ``flux_boundaries`` arrays using the ``i_ghost = i_oob + 1`` offset
+    Boundary faces read from the padded `pressure_boundaries` /
+    `flux_boundaries` arrays using the `i_ghost = i_oob + 1` offset
     convention, identical to the explicit saturation solver.
 
-    :param oil_pressure_grid: Current oil pressure grid (psi), shape ``(nx, ny, nz)``.
+    :param oil_pressure_grid: Current oil pressure grid (psi), shape `(nx, ny, nz)`.
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
     :param cell_count_z: Number of cells in z-direction.
-    :param thickness_grid: Cell thickness grid (ft), shape ``(nx, ny, nz)``.
+    :param thickness_grid: Cell thickness grid (ft), shape `(nx, ny, nz)`.
     :param cell_size_x: Cell size in x-direction (ft).
     :param cell_size_y: Cell size in y-direction (ft).
     :param water_relative_mobility_grid: Water relative mobility (ft²/psi·day).
@@ -278,22 +278,22 @@ def _compute_saturation_residual(
     :param time_step_in_days: Time step size (days).
     :param net_water_well_rate_grid: Net water well rate per cell (ft³/day).
     :param net_gas_well_rate_grid: Net gas well rate per cell (ft³/day).
-    :param pressure_change_grid: ``P_new - P_old`` (psi) for PVT volume correction.
+    :param pressure_change_grid: `P_new - P_old` (psi) for PVT volume correction.
     :param water_compressibility_grid: Water compressibility (psi⁻¹).
     :param gas_compressibility_grid: Gas compressibility (psi⁻¹).
     :param rock_compressibility: Scalar rock compressibility (psi⁻¹).
-    :param pressure_boundaries: Padded pressure boundary grid, shape ``(nx+2, ny+2, nz+2)``.
-        Ghost cell for out-of-bounds neighbour at ``(i_oob, j, k)`` is accessed at
-        ``pressure_boundaries[i_oob + 1, j + 1, k + 1]``.  NaN → Neumann BC.
-    :param flux_boundaries: Padded flux boundary grid, shape ``(nx+2, ny+2, nz+2)``.
-        Read when ``pressure_boundaries[...]`` is NaN.
+    :param pressure_boundaries: Padded pressure boundary grid, shape `(nx+2, ny+2, nz+2)`.
+        Ghost cell for out-of-bounds neighbour at `(i_oob, j, k)` is accessed at
+        `pressure_boundaries[i_oob + 1, j + 1, k + 1]`.  NaN → Neumann BC.
+    :param flux_boundaries: Padded flux boundary grid, shape `(nx+2, ny+2, nz+2)`.
+        Read when `pressure_boundaries[...]` is NaN.
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
-    :return: Tuple ``(water_residual, gas_residual)``, each a 1-D array of length
-        ``nx * ny * nz``.
+    :return: Tuple `(water_residual, gas_residual)`, each a 1-D array of length
+        `nx * ny * nz`.
     """
     total_cell_count = cell_count_x * cell_count_y * cell_count_z
-    water_residual = np.zeros(total_cell_count)
-    gas_residual = np.zeros(total_cell_count)
+    water_residual = np.zeros(total_cell_count, dtype=np.float64)
+    gas_residual = np.zeros(total_cell_count, dtype=np.float64)
 
     for i in numba.prange(cell_count_x):  # type: ignore[attr-defined]
         for j in range(cell_count_y):
@@ -656,7 +656,7 @@ def compute_rock_fluid_properties(
     :param config: Simulation configuration.
     :param normalize_saturations: If *True*, saturations are clamped and normalised before
         computing rock-fluid properties (used for numerical Jacobian perturbations).
-    :return: 3-tuple of ``(relative_mobility_grids, capillary_pressure_grids, mobility_grids)``.
+    :return: 3-tuple of `(relative_mobility_grids, capillary_pressure_grids, mobility_grids)`.
     """
     if normalize_saturations:
         water_sat_grid = np.clip(water_saturation_grid, 0.0, 1.0)
@@ -743,7 +743,6 @@ def _compute_residual(
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
-    dtype: npt.DTypeLike,
     md_per_cp_to_ft2_per_psi_per_day: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
@@ -754,10 +753,10 @@ def _compute_residual(
     :param old_water_saturation_grid: Water saturation at start of time step.
     :param old_gas_saturation_grid: Gas saturation at start of time step.
     :param oil_pressure_grid: Oil pressure grid (psi), fixed during Newton loop.
-    :param pressure_change_grid: ``P_new - P_old`` (psi) for PVT correction.
+    :param pressure_change_grid: `P_new - P_old` (psi) for PVT correction.
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
-    :param capillary_pressure_grids: ``(Pcow, Pcgo)`` at current iterate.
-    :param relative_mobility_grids: ``(lam_w, lam_o, lam_g)`` at current iterate.
+    :param capillary_pressure_grids: `(Pcow, Pcgo)` at current iterate.
+    :param relative_mobility_grids: `(lam_w, lam_o, lam_g)` at current iterate.
     :param fluid_properties: Fluid properties (density, compressibility grids, etc.).
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
@@ -776,11 +775,10 @@ def _compute_residual(
     :param well_indices_cache: Cache of well indices.
     :param injection_rates: Injection rates proxy.
     :param production_rates: Production rates proxy.
-    :param pressure_boundaries: Padded pressure boundary grid, shape ``(nx+2, ny+2, nz+2)``.
-    :param flux_boundaries: Padded flux boundary grid, shape ``(nx+2, ny+2, nz+2)``.
-    :param dtype: NumPy dtype for array allocation.
+    :param pressure_boundaries: Padded pressure boundary grid, shape `(nx+2, ny+2, nz+2)`.
+    :param flux_boundaries: Padded flux boundary grid, shape `(nx+2, ny+2, nz+2)`.
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
-    :return: ``(water_residual, gas_residual)`` as 1-D arrays of length ``nx*ny*nz``.
+    :return: `(water_residual, gas_residual)` as 1-D arrays of length `nx*ny*nz`.
     """
     oil_water_capillary_pressure_grid, gas_oil_capillary_pressure_grid = (
         capillary_pressure_grids
@@ -798,9 +796,8 @@ def _compute_residual(
         well_indices_cache=well_indices_cache,
         injection_rates=injection_rates,
         production_rates=production_rates,
-        dtype=dtype,
+        dtype=np.float64,
     )
-
     return _compute_saturation_residual(
         oil_pressure_grid=oil_pressure_grid,
         cell_count_x=cell_count_x,
@@ -869,7 +866,6 @@ def compute_residual(
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
-    dtype: npt.DTypeLike,
     md_per_cp_to_ft2_per_psi_per_day: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
@@ -881,7 +877,7 @@ def compute_residual(
     :param old_water_saturation_grid: Water saturation at start of time step.
     :param old_gas_saturation_grid: Gas saturation at start of time step.
     :param oil_pressure_grid: Oil pressure grid (psi), fixed during Newton loop.
-    :param pressure_change_grid: ``P_new - P_old`` (psi) for PVT correction.
+    :param pressure_change_grid: `P_new - P_old` (psi) for PVT correction.
     :param rock_properties: Rock properties.
     :param fluid_properties: Fluid properties.
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
@@ -900,11 +896,10 @@ def compute_residual(
     :param well_indices_cache: Cache of well indices.
     :param injection_rates: Injection rates proxy.
     :param production_rates: Production rates proxy.
-    :param pressure_boundaries: Padded pressure boundary grid, shape ``(nx+2, ny+2, nz+2)``.
-    :param flux_boundaries: Padded flux boundary grid, shape ``(nx+2, ny+2, nz+2)``.
-    :param dtype: NumPy dtype for array allocation.
+    :param pressure_boundaries: Padded pressure boundary grid, shape `(nx+2, ny+2, nz+2)`.
+    :param flux_boundaries: Padded flux boundary grid, shape `(nx+2, ny+2, nz+2)`.
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
-    :return: ``(water_residual, gas_residual)`` as 1-D arrays of length ``nx*ny*nz``.
+    :return: `(water_residual, gas_residual)` as 1-D arrays of length `nx*ny*nz`.
     """
     (
         relative_mobility_grids,
@@ -948,7 +943,6 @@ def compute_residual(
         production_rates=production_rates,
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
-        dtype=dtype,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
 
@@ -984,15 +978,14 @@ def assemble_numerical_jacobian(
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
-    dtype: npt.DTypeLike,
     md_per_cp_to_ft2_per_psi_per_day: float,
-) -> csr_matrix:
+) -> coo_matrix:
     """
     Assemble the saturation Jacobian using column-wise forward finite differences.
 
-    :param saturation_vector: Current saturation vector ``[Sw_0, Sg_0, ...]``.
-    :param residual_base: Base residual ``R(S)`` at current iterate.
-    :param total_cell_count: Total number of cells ``nx * ny * nz``.
+    :param saturation_vector: Current saturation vector `[Sw_0, Sg_0, ...]`.
+    :param residual_base: Base residual `R(S)` at current iterate.
+    :param total_cell_count: Total number of cells `nx * ny * nz`.
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
     :param cell_count_z: Number of cells in z-direction.
@@ -1002,7 +995,7 @@ def assemble_numerical_jacobian(
     :param old_water_saturation_grid: Water saturation at start of time step.
     :param old_gas_saturation_grid: Gas saturation at start of time step.
     :param oil_pressure_grid: Fixed oil pressure grid (psi).
-    :param pressure_change_grid: ``P_new - P_old`` (psi).
+    :param pressure_change_grid: `P_new - P_old` (psi).
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
     :param rock_properties: Rock properties.
     :param fluid_properties: Fluid properties.
@@ -1018,11 +1011,11 @@ def assemble_numerical_jacobian(
     :param well_indices_cache: Cache of well indices.
     :param injection_rates: Injection rates proxy.
     :param production_rates: Production rates proxy.
-    :param pressure_boundaries: Padded pressure boundary grid, shape ``(nx+2, ny+2, nz+2)``.
-    :param flux_boundaries: Padded flux boundary grid, shape ``(nx+2, ny+2, nz+2)``.
+    :param pressure_boundaries: Padded pressure boundary grid, shape `(nx+2, ny+2, nz+2)`.
+    :param flux_boundaries: Padded flux boundary grid, shape `(nx+2, ny+2, nz+2)`.
     :param dtype: NumPy dtype.
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
-    :return: Sparse Jacobian of shape ``(2N, 2N)`` in CSR format, where ``N = nx*ny*nz``.
+    :return: Sparse Jacobian of shape `(2N, 2N)` in COO format, where `N = nx*ny*nz`.
     """
     rows = []
     cols = []
@@ -1031,9 +1024,9 @@ def assemble_numerical_jacobian(
     machine_eps = np.finfo(dtype).eps  # type: ignore
     base_epsilon = float(np.sqrt(machine_eps))
 
-    water_saturation_grid_f64 = water_saturation_grid.astype(np.float64, copy=True)
-    oil_saturation_grid_f64 = oil_saturation_grid.astype(np.float64, copy=True)
-    gas_saturation_grid_f64 = gas_saturation_grid.astype(np.float64, copy=True)
+    water_saturation_grid = water_saturation_grid.astype(np.float64, copy=True)
+    oil_saturation_grid = oil_saturation_grid.astype(np.float64, copy=True)
+    gas_saturation_grid = gas_saturation_grid.astype(np.float64, copy=True)
 
     residual_kwargs = dict(
         old_water_saturation_grid=old_water_saturation_grid,
@@ -1063,7 +1056,6 @@ def assemble_numerical_jacobian(
         production_rates=production_rates,
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
-        dtype=dtype,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
 
@@ -1102,8 +1094,8 @@ def assemble_numerical_jacobian(
                     )
                 )
 
-        cell_water_saturation = water_saturation_grid_f64[i, j, k]
-        cell_gas_saturation = gas_saturation_grid_f64[i, j, k]
+        cell_water_saturation = water_saturation_grid[i, j, k]
+        cell_gas_saturation = gas_saturation_grid[i, j, k]
         cell_oil_saturation = 1.0 - cell_water_saturation - cell_gas_saturation
 
         for var_offset in range(2):
@@ -1116,9 +1108,9 @@ def assemble_numerical_jacobian(
                 if s_j + epsilon < 0.0:
                     epsilon = (-s_j * 0.5) if s_j > 1e-15 else (base_epsilon * 0.01)
 
-            original_water_saturation = water_saturation_grid_f64[i, j, k]
-            original_gas_saturation = gas_saturation_grid_f64[i, j, k]
-            original_oil_saturation = oil_saturation_grid_f64[i, j, k]
+            original_water_saturation = water_saturation_grid[i, j, k]
+            original_gas_saturation = gas_saturation_grid[i, j, k]
+            original_oil_saturation = oil_saturation_grid[i, j, k]
 
             if var_offset == 0:
                 perturbed_water_saturation = original_water_saturation + epsilon
@@ -1130,14 +1122,14 @@ def assemble_numerical_jacobian(
                 0.0, 1.0 - perturbed_water_saturation - perturbed_gas_saturation
             )
 
-            water_saturation_grid_f64[i, j, k] = perturbed_water_saturation
-            gas_saturation_grid_f64[i, j, k] = perturbed_gas_saturation
-            oil_saturation_grid_f64[i, j, k] = perturbed_oil_saturation
+            water_saturation_grid[i, j, k] = perturbed_water_saturation
+            gas_saturation_grid[i, j, k] = perturbed_gas_saturation
+            oil_saturation_grid[i, j, k] = perturbed_oil_saturation
 
             perturbed_water_residual, perturbed_gas_residual = compute_residual(
-                water_saturation_grid=water_saturation_grid_f64,
-                oil_saturation_grid=oil_saturation_grid_f64,
-                gas_saturation_grid=gas_saturation_grid_f64,
+                water_saturation_grid=water_saturation_grid,
+                oil_saturation_grid=oil_saturation_grid,
+                gas_saturation_grid=gas_saturation_grid,
                 **residual_kwargs,  # type: ignore[arg-type]
             )
             residual_perturbed = interleave_residuals(
@@ -1145,9 +1137,9 @@ def assemble_numerical_jacobian(
                 gas_residual=perturbed_gas_residual,
             )
 
-            water_saturation_grid_f64[i, j, k] = original_water_saturation
-            gas_saturation_grid_f64[i, j, k] = original_gas_saturation
-            oil_saturation_grid_f64[i, j, k] = original_oil_saturation
+            water_saturation_grid[i, j, k] = original_water_saturation
+            gas_saturation_grid[i, j, k] = original_gas_saturation
+            oil_saturation_grid[i, j, k] = original_oil_saturation
 
             for affected_idx in affected_cell_indices:
                 row_water = 2 * affected_idx
@@ -1176,7 +1168,7 @@ def assemble_numerical_jacobian(
         ),
         shape=(system_size, system_size),
         dtype=np.float64,
-    ).tocsr()
+    )
 
 
 def compute_relperm_and_capillary_pressure_derivative_grids(
@@ -1205,11 +1197,11 @@ def compute_relperm_and_capillary_pressure_derivative_grids(
     """
     Compute all relperm and capillary-pressure derivative grids for the analytical Jacobian.
 
-    **Relperm derivatives** — all nine raw partials ``d kr_alpha / d S_beta``
-    (with ``beta`` in ``{Sw, So, Sg}``) are returned unchanged.
+    **Relperm derivatives** — all nine raw partials `d kr_alpha / d S_beta`
+    (with `beta` in `{Sw, So, Sg}`) are returned unchanged.
 
     **Capillary-pressure derivatives projected onto (Sw, Sg) basis** — the
-    constraint ``So = 1 - Sw - Sg`` gives ``dSo/dSw = dSo/dSg = -1``, so
+    constraint `So = 1 - Sw - Sg` gives `dSo/dSw = dSo/dSg = -1`, so
 
         dPcow_dSw_eff = dPcow_dSw + dPcow_dSo * (-1)
         dPcow_dSg_eff =              dPcow_dSo * (-1)
@@ -1228,14 +1220,23 @@ def compute_relperm_and_capillary_pressure_derivative_grids(
     relperm_table = rock_fluid_tables.relative_permeability_table
     capillary_table = rock_fluid_tables.capillary_pressure_table
 
+    water_saturation_grid = water_saturation_grid.astype(np.float64, copy=False)
+    oil_saturation_grid = oil_saturation_grid.astype(np.float64, copy=False)
+    gas_saturation_grid = gas_saturation_grid.astype(np.float64, copy=False)
     irreducible_water_saturation_grid = (
-        rock_properties.irreducible_water_saturation_grid
+        rock_properties.irreducible_water_saturation_grid.astype(np.float64, copy=False)
     )
     residual_oil_saturation_water_grid = (
-        rock_properties.residual_oil_saturation_water_grid
+        rock_properties.residual_oil_saturation_water_grid.astype(
+            np.float64, copy=False
+        )
     )
-    residual_oil_saturation_gas_grid = rock_properties.residual_oil_saturation_gas_grid
-    residual_gas_saturation_grid = rock_properties.residual_gas_saturation_grid
+    residual_oil_saturation_gas_grid = (
+        rock_properties.residual_oil_saturation_gas_grid.astype(np.float64, copy=False)
+    )
+    residual_gas_saturation_grid = rock_properties.residual_gas_saturation_grid.astype(
+        np.float64, copy=False
+    )
 
     relperm_derivatives = relperm_table.derivatives(
         water_saturation=water_saturation_grid,
@@ -1843,17 +1844,17 @@ def _assemble_jacobian_well_contributions(
     :param oil_pressure_grid: Oil pressure grid (psi).
     :param water_viscosity_grid: Water viscosity grid (cP).
     :param gas_viscosity_grid: Gas viscosity grid (cP).
-    :param dkrw_dSw_grid: ``∂krw/∂Sw`` grid.
-    :param dkrw_dSo_grid: ``∂krw/∂So`` grid.
-    :param dkrw_dSg_grid: ``∂krw/∂Sg`` grid.
-    :param dkrg_dSw_grid: ``∂krg/∂Sw`` grid.
-    :param dkrg_dSo_grid: ``∂krg/∂So`` grid.
-    :param dkrg_dSg_grid: ``∂krg/∂Sg`` grid.
+    :param dkrw_dSw_grid: `∂krw/∂Sw` grid.
+    :param dkrw_dSo_grid: `∂krw/∂So` grid.
+    :param dkrw_dSg_grid: `∂krw/∂Sg` grid.
+    :param dkrg_dSw_grid: `∂krg/∂Sw` grid.
+    :param dkrg_dSo_grid: `∂krg/∂So` grid.
+    :param dkrg_dSg_grid: `∂krg/∂Sg` grid.
     :param well_indices_cache: Cache of well indices.
     :param injection_bhps: Injection bottom-hole pressures proxy.
     :param production_bhps: Production bottom-hole pressures proxy.
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
-    :return: COO triplet ``(rows, cols, vals)`` for the well Jacobian entries.
+    :return: COO triplet `(rows, cols, vals)` for the well Jacobian entries.
     """
     rows: typing.List[int] = []
     cols: typing.List[int] = []
@@ -2029,7 +2030,7 @@ def assemble_analytical_jacobian(
     config: Config,
     well_indices_cache: WellIndicesCache,
     md_per_cp_to_ft2_per_psi_per_day: float,
-) -> csr_matrix:
+) -> coo_matrix:
     """
     Assemble the full analytical saturation Jacobian.
 
@@ -2042,7 +2043,7 @@ def assemble_analytical_jacobian(
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
     :param cell_count_z: Number of cells in z-direction.
-    :param total_cell_count: ``nx * ny * nz``.
+    :param total_cell_count: `nx * ny * nz`.
     :param thickness_grid: Cell thickness grid (ft).
     :param cell_size_x: Cell size in x-direction (ft).
     :param cell_size_y: Cell size in y-direction (ft).
@@ -2058,15 +2059,15 @@ def assemble_analytical_jacobian(
     :param rock_properties: Rock properties.
     :param injection_bhps: Injection bottom-hole pressures proxy.
     :param production_bhps: Production bottom-hole pressures proxy.
-    :param capillary_pressure_grids: ``(Pcow, Pcgo)`` at current iterate.
-    :param relative_mobility_grids: ``(lam_w, lam_o, lam_g)`` at current iterate.
+    :param capillary_pressure_grids: `(Pcow, Pcgo)` at current iterate.
+    :param relative_mobility_grids: `(lam_w, lam_o, lam_g)` at current iterate.
     :param elevation_grid: Cell elevation grid (ft).
     :param gravitational_constant: Gravitational constant conversion factor (lbf/lbm).
     :param time_step_in_days: Time step size (days).
     :param config: Simulation configuration.
     :param well_indices_cache: Cache of well indices.
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
-    :return: Sparse Jacobian of shape ``(2N, 2N)`` in CSR format.
+    :return: Sparse Jacobian of shape `(2N, 2N)` in COO format.
     """
     (
         dkrw_dSw_grid,
@@ -2162,7 +2163,7 @@ def assemble_analytical_jacobian(
         (combined_vals, (combined_rows, combined_cols)),
         shape=(system_size, system_size),
         dtype=np.float64,
-    ).tocsr()
+    )
 
 
 def assemble_jacobian(
@@ -2198,19 +2199,18 @@ def assemble_jacobian(
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
-    dtype: npt.DTypeLike,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     md_per_cp_to_ft2_per_psi_per_day: float,
-) -> csr_matrix:
+) -> coo_matrix:
     """
     Dispatch Jacobian assembly to the numerical or analytical path.
 
-    :param config: Simulation configuration.  ``config.jacobian_assembly_method``
-        selects ``"analytical"`` or ``"numerical"``.
+    :param config: Simulation configuration.  `config.jacobian_assembly_method`
+        selects `"analytical"` or `"numerical"`.
     :param saturation_vector: Current saturation vector (numerical path only).
     :param residual_base: Base residual at current iterate (numerical path only).
-    :param total_cell_count: ``nx * ny * nz``.
+    :param total_cell_count: `nx * ny * nz`.
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
     :param cell_count_z: Number of cells in z-direction.
@@ -2220,7 +2220,7 @@ def assemble_jacobian(
     :param old_water_saturation_grid: Water saturation at start of time step.
     :param old_gas_saturation_grid: Gas saturation at start of time step.
     :param oil_pressure_grid: Fixed oil pressure grid (psi).
-    :param pressure_change_grid: ``P_new - P_old`` (psi).
+    :param pressure_change_grid: `P_new - P_old` (psi).
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
     :param rock_properties: Rock properties.
     :param fluid_properties: Fluid properties.
@@ -2237,13 +2237,12 @@ def assemble_jacobian(
     :param production_bhps: Production bottom-hole pressures proxy.
     :param injection_rates: Injection rates proxy.
     :param production_rates: Production rates proxy.
-    :param pressure_boundaries: Padded pressure boundary grid, shape ``(nx+2, ny+2, nz+2)``.
-    :param flux_boundaries: Padded flux boundary grid, shape ``(nx+2, ny+2, nz+2)``.
-    :param dtype: NumPy dtype.
-    :param capillary_pressure_grids: ``(Pcow, Pcgo)`` at current iterate.
-    :param relative_mobility_grids: ``(lam_w, lam_o, lam_g)`` at current iterate.
+    :param pressure_boundaries: Padded pressure boundary grid, shape `(nx+2, ny+2, nz+2)`.
+    :param flux_boundaries: Padded flux boundary grid, shape `(nx+2, ny+2, nz+2)`.
+    :param capillary_pressure_grids: `(Pcow, Pcgo)` at current iterate.
+    :param relative_mobility_grids: `(lam_w, lam_o, lam_g)` at current iterate.
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
-    :return: Jacobian as a ``(2N x 2N)`` CSR sparse matrix.
+    :return: Jacobian as a `(2N x 2N)` COO sparse matrix.
     """
     if config.jacobian_assembly_method == "analytical":
         return assemble_analytical_jacobian(
@@ -2307,18 +2306,15 @@ def assemble_jacobian(
         production_rates=production_rates,
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
-        dtype=dtype,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
 
 
 def evolve_saturation(
-    grid_shape: ThreeDimensions,
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
     time_step_size: float,
-    time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     face_transmissibilities: FaceTransmissibilities,
@@ -2347,6 +2343,11 @@ def evolve_saturation(
     Convergence is declared when the relative residual norm drops below
     `config.newton_tolerance`, or when the maximum saturation change per
     iteration is sufficiently small (quasi-equilibrium acceptance).
+
+    NOTE: All computations and assembly are done in double precision regardless of the `dtype` argument, which only
+    controls the dtype of the output saturation grids in the returned `ImplicitSaturationSolution`.
+    This is to ensure numerical stability and accuracy of the Newton iterations, which can be sensitive to precision.
+    The final saturation grids are cast to the specified `dtype` before being returned.
 
     :param grid_shape: Grid shape `(nx, ny, nz)`.
     :param cell_dimension: `(cell_size_x, cell_size_y)` in feet.
@@ -2401,7 +2402,7 @@ def evolve_saturation(
     oil_saturation_grid = old_oil_saturation_grid.copy()
     gas_saturation_grid = old_gas_saturation_grid.copy()
 
-    saturation_vector = saturation_grids_to_vector(
+    saturation_vector = pack_saturation_grids_to_vector(
         water_saturation_grid=water_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
         cell_count_x=cell_count_x,
@@ -2409,8 +2410,8 @@ def evolve_saturation(
         cell_count_z=cell_count_z,
     )
 
-    # Shared kwargs passed to residual / Jacobian helpers
-    shared_residual_kwargs = dict(
+    # Shared kwargs passed to residual functions
+    residual_kwargs = dict(
         old_water_saturation_grid=old_water_saturation_grid,
         old_gas_saturation_grid=old_gas_saturation_grid,
         oil_pressure_grid=oil_pressure_grid,
@@ -2433,7 +2434,6 @@ def evolve_saturation(
         production_rates=production_rates,
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
-        dtype=dtype,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
 
@@ -2479,7 +2479,7 @@ def evolve_saturation(
             porosity_grid=porosity_grid,
             net_to_gross_grid=net_to_gross_grid,
             rock_compressibility=rock_compressibility,
-            **shared_residual_kwargs,  # type: ignore[arg-type]
+            **residual_kwargs,  # type: ignore[arg-type]
         )
         residual_vector = interleave_residuals(water_residual, gas_residual)
         residual_norm = float(np.linalg.norm(residual_vector))
@@ -2568,15 +2568,19 @@ def evolve_saturation(
             production_rates=production_rates,
             pressure_boundaries=pressure_boundaries,
             flux_boundaries=flux_boundaries,
-            dtype=dtype,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             capillary_pressure_grids=capillary_pressure_grids,
             relative_mobility_grids=relative_mobility_grids,
         )
+        # Scale Jacobian and residual by inverse diagonal to improve conditioning for iterative solver
+        D = np.abs(jacobian.diagonal())
+        D = np.where(D > 0, D, 1.0)
+        jacobian = jacobian / D[:, None]
+        residual_vector = residual_vector / D
 
         # Solve the linear system J * dS = -R
         saturation_change, _ = solve_linear_system(
-            A_csr=jacobian,
+            A_csr=jacobian.tocsr(),
             b=-residual_vector,
             solver=config.saturation_solver,
             preconditioner=config.saturation_preconditioner,
@@ -2617,7 +2621,7 @@ def evolve_saturation(
         water_saturation_grid_trial = water_saturation_grid.copy()
         oil_saturation_grid_trial = oil_saturation_grid.copy()
         gas_saturation_grid_trial = gas_saturation_grid.copy()
-        vector_to_saturation_grids(
+        unpack_vector_to_saturation_grids(
             saturation_vector=saturation_vector_trial,
             water_saturation_grid=water_saturation_grid_trial,
             oil_saturation_grid=oil_saturation_grid_trial,
@@ -2634,7 +2638,7 @@ def evolve_saturation(
                 gas_saturation_grid=gas_saturation_grid_trial,
                 rock_properties=rock_properties,
                 config=config,
-                **shared_residual_kwargs,  # type: ignore[arg-type]
+                **residual_kwargs,  # type: ignore[arg-type]
             )
             residual_trial = interleave_residuals(
                 water_residual=water_residual_trial,
@@ -2666,7 +2670,7 @@ def evolve_saturation(
             water_saturation_grid_trial = water_saturation_grid.copy()
             oil_saturation_grid_trial = oil_saturation_grid.copy()
             gas_saturation_grid_trial = gas_saturation_grid.copy()
-            vector_to_saturation_grids(
+            unpack_vector_to_saturation_grids(
                 saturation_vector=saturation_vector_trial,
                 water_saturation_grid=water_saturation_grid_trial,
                 oil_saturation_grid=oil_saturation_grid_trial,

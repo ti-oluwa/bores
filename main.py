@@ -131,7 +131,7 @@ timer = bores.Timer(
     initial_step_size=bores.Time(days=5),
     maximum_step_size=bores.Time(months=6),
     minimum_step_size=bores.Time(hours=1),
-    simulation_time=bores.Time(years=10),
+    simulation_time=bores.Time(years=30),
     maximum_rejections=20,
 )
 
@@ -147,7 +147,7 @@ config = bores.Config(
     saturation_preconditioner=None,
     maximum_pressure_change=1800,
     # freeze_saturation_pressure=True
-    # disable_capillary_effects=True
+    disable_capillary_effects=True
 )
 
 # Run and monitor the simulation and collect states

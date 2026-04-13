@@ -613,15 +613,16 @@ def _run_impes_step(
         dtype=dtype,
     )
 
-    # Refresh boundary maps after pressure update so that dynamic BCs (Robin,
+    # Refresh boundary conditions after pressure update so that dynamic BCs (Robin,
     # Carter-Tracy) see the new interior pressures before saturation evolves.
-    logger.debug("Refreshing boundary maps after pressure solve...")
+    logger.debug("Refreshing boundary conditions after pressure solve...")
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
     flux_boundaries, pressure_boundaries = (
         boundary_conditions.refresh_dynamic_boundaries(metadata=metadata)
     )
 
-    logger.debug("Updating PVT fluid properties for saturation evolution...")
+    # Copy before PVT updates so that we can check saturation changes after solution gas liberation
+    # We did not do the copy at the very start because, it will be a wasted op, if the pressure solve fails
     old_rs = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
     old_bo = fluid_properties.oil_formation_volume_factor_grid.copy()
     old_rsw = fluid_properties.gas_solubility_in_water_grid.copy()
@@ -630,52 +631,7 @@ def _run_impes_step(
     old_sg = fluid_properties.gas_saturation_grid.copy()
     old_sw = fluid_properties.water_saturation_grid.copy()
 
-    fluid_properties = update_fluid_properties(
-        fluid_properties=fluid_properties,
-        wells=wells,
-        miscibility_model=miscibility_model,
-        pvt_tables=config.pvt_tables,
-        freeze_saturation_pressure=config.freeze_saturation_pressure,
-    )
-    fluid_properties = apply_solution_gas_updates(
-        fluid_properties=fluid_properties,
-        old_solution_gas_to_oil_ratio_grid=old_rs,
-        old_oil_formation_volume_factor_grid=old_bo,
-        old_gas_solubility_in_water_grid=old_rsw,
-        old_water_formation_volume_factor_grid=old_bw,
-    )
-    flash_check = _check_saturation_changes(
-        maximum_oil_saturation_change=float(
-            np.max(np.abs(fluid_properties.oil_saturation_grid - old_so))
-        ),
-        maximum_water_saturation_change=float(
-            np.max(np.abs(fluid_properties.water_saturation_grid - old_sw))
-        ),
-        maximum_gas_saturation_change=float(
-            np.max(np.abs(fluid_properties.gas_saturation_grid - old_sg))
-        ),
-        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
-        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
-        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
-    )
-    if flash_check.violated:
-        message = (
-            f"Solution gas liberation flash at time step {time_step} violated "
-            f"saturation change limits: {flash_check.message}"
-        )
-        logger.debug(message)
-        return StepResult(
-            fluid_properties=fluid_properties,
-            rock_properties=rock_properties,
-            saturation_history=saturation_history,
-            success=False,
-            message=message,
-            timer_kwargs={
-                "maximum_saturation_change": flash_check.max_phase_saturation_change,
-                "maximum_allowed_saturation_change": flash_check.max_allowed_phase_saturation_change,
-            },
-        )
-
+    logger.debug("Updating PVT fluid properties after pressure change...")
     fluid_properties = update_fluid_properties(
         fluid_properties=fluid_properties,
         wells=wells,
@@ -684,8 +640,7 @@ def _run_impes_step(
         freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
 
-    # Rebuild rock-fluid grids from post-flash saturations so that krg > 0
-    # in cells with newly liberated gas before the saturation transport.
+    # Rebuild rock-fluid grids
     logger.debug("Rebuilding relative permeability and mobility grids...")
     krw, kro, krg = build_three_phase_relative_permeabilities_grids(
         water_saturation_grid=fluid_properties.water_saturation_grid,
@@ -827,6 +782,59 @@ def _run_impes_step(
             gas_saturation_grid=sg,
             solvent_concentration_grid=solvent.astype(dtype, copy=False),
         )
+
+    logger.debug(
+        "Applying solution gas liberation updates for thermodynamic consistency..."
+    )
+    fluid_properties = apply_solution_gas_updates(
+        fluid_properties=fluid_properties,
+        old_solution_gas_to_oil_ratio_grid=old_rs,
+        old_oil_formation_volume_factor_grid=old_bo,
+        old_gas_solubility_in_water_grid=old_rsw,
+        old_water_formation_volume_factor_grid=old_bw,
+    )
+    flash_check = _check_saturation_changes(
+        maximum_oil_saturation_change=float(
+            np.max(np.abs(fluid_properties.oil_saturation_grid - old_so))
+        ),
+        maximum_water_saturation_change=float(
+            np.max(np.abs(fluid_properties.water_saturation_grid - old_sw))
+        ),
+        maximum_gas_saturation_change=float(
+            np.max(np.abs(fluid_properties.gas_saturation_grid - old_sg))
+        ),
+        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
+    )
+    if flash_check.violated:
+        message = (
+            f"Solution gas liberation flash at time step {time_step} violated "
+            f"saturation change limits: {flash_check.message}"
+        )
+        logger.debug(message)
+        return StepResult(
+            fluid_properties=fluid_properties,
+            rock_properties=rock_properties,
+            saturation_history=saturation_history,
+            success=False,
+            message=message,
+            timer_kwargs={
+                "maximum_saturation_change": flash_check.max_phase_saturation_change,
+                "maximum_allowed_saturation_change": flash_check.max_allowed_phase_saturation_change,
+            },
+        )
+
+    logger.debug(
+        "Updating fluid properties to reflect PVT changes from flash/liberation..."
+    )
+    fluid_properties = update_fluid_properties(
+        fluid_properties=fluid_properties,
+        wells=wells,
+        miscibility_model=miscibility_model,
+        pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
+    )
 
     if config.normalize_saturations:
         normalize_saturations(
@@ -1080,7 +1088,7 @@ def _run_sequential_implicit_step(
         dtype=dtype,
     )
 
-    # Refresh boundary maps so the saturation solve sees post-pressure BC values.
+    # Refresh boundary conditions so the saturation solve sees post-pressure BC values.
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
     flux_boundaries, pressure_boundaries = (
         boundary_conditions.refresh_dynamic_boundaries(metadata=metadata)
@@ -1094,54 +1102,7 @@ def _run_sequential_implicit_step(
     old_sg = fluid_properties.gas_saturation_grid.copy()
     old_sw = fluid_properties.water_saturation_grid.copy()
 
-    logger.debug("Updating PVT fluid properties for saturation evolution...")
-    fluid_properties = update_fluid_properties(
-        fluid_properties=fluid_properties,
-        wells=wells,
-        miscibility_model=miscibility_model,
-        pvt_tables=config.pvt_tables,
-        freeze_saturation_pressure=config.freeze_saturation_pressure,
-    )
-    fluid_properties = apply_solution_gas_updates(
-        fluid_properties=fluid_properties,
-        old_solution_gas_to_oil_ratio_grid=old_rs,
-        old_oil_formation_volume_factor_grid=old_bo,
-        old_gas_solubility_in_water_grid=old_rsw,
-        old_water_formation_volume_factor_grid=old_bw,
-    )
-
-    flash_check = _check_saturation_changes(
-        maximum_oil_saturation_change=float(
-            np.max(np.abs(fluid_properties.oil_saturation_grid - old_so))
-        ),
-        maximum_water_saturation_change=float(
-            np.max(np.abs(fluid_properties.water_saturation_grid - old_sw))
-        ),
-        maximum_gas_saturation_change=float(
-            np.max(np.abs(fluid_properties.gas_saturation_grid - old_sg))
-        ),
-        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
-        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
-        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
-    )
-    if flash_check.violated:
-        message = (
-            f"Solution gas liberation flash at time step {time_step} violated "
-            f"saturation change limits: {flash_check.message}"
-        )
-        logger.debug(message)
-        return StepResult(
-            fluid_properties=fluid_properties,
-            rock_properties=rock_properties,
-            saturation_history=saturation_history,
-            success=False,
-            message=message,
-            timer_kwargs={
-                "maximum_saturation_change": flash_check.max_phase_saturation_change,
-                "maximum_allowed_saturation_change": flash_check.max_allowed_phase_saturation_change,
-            },
-        )
-
+    logger.debug("Updating PVT fluid properties to reflect pressure changes...")
     fluid_properties = update_fluid_properties(
         fluid_properties=fluid_properties,
         wells=wells,
@@ -1154,12 +1115,10 @@ def _run_sequential_implicit_step(
     pressure_change_grid = pressure_grid - old_pressure_grid
 
     saturation_result = implicit.evolve_saturation(
-        grid_shape=grid_shape,
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
         elevation_grid=elevation_grid,
         time_step_size=time_step_size,
-        time=time,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
         face_transmissibilities=face_transmissibilities,
@@ -1232,6 +1191,59 @@ def _run_sequential_implicit_step(
         water_saturation_grid=sw,
         oil_saturation_grid=so,
         gas_saturation_grid=sg,
+    )
+
+    logger.debug(
+        "Applying solution gas liberation updates for thermodynamic consistency..."
+    )
+    fluid_properties = apply_solution_gas_updates(
+        fluid_properties=fluid_properties,
+        old_solution_gas_to_oil_ratio_grid=old_rs,
+        old_oil_formation_volume_factor_grid=old_bo,
+        old_gas_solubility_in_water_grid=old_rsw,
+        old_water_formation_volume_factor_grid=old_bw,
+    )
+    flash_check = _check_saturation_changes(
+        maximum_oil_saturation_change=float(
+            np.max(np.abs(fluid_properties.oil_saturation_grid - old_so))
+        ),
+        maximum_water_saturation_change=float(
+            np.max(np.abs(fluid_properties.water_saturation_grid - old_sw))
+        ),
+        maximum_gas_saturation_change=float(
+            np.max(np.abs(fluid_properties.gas_saturation_grid - old_sg))
+        ),
+        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
+    )
+    if flash_check.violated:
+        message = (
+            f"Solution gas liberation flash at time step {time_step} violated "
+            f"saturation change limits: {flash_check.message}"
+        )
+        logger.debug(message)
+        return StepResult(
+            fluid_properties=fluid_properties,
+            rock_properties=rock_properties,
+            saturation_history=saturation_history,
+            success=False,
+            message=message,
+            timer_kwargs={
+                "maximum_saturation_change": flash_check.max_phase_saturation_change,
+                "maximum_allowed_saturation_change": flash_check.max_allowed_phase_saturation_change,
+            },
+        )
+
+    logger.debug(
+        "Updating fluid properties to reflect PVT changes from flash/liberation..."
+    )
+    fluid_properties = update_fluid_properties(
+        fluid_properties=fluid_properties,
+        wells=wells,
+        miscibility_model=miscibility_model,
+        pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
 
     if config.normalize_saturations:
@@ -1415,6 +1427,9 @@ def _run_full_sequential_implicit_step(
             grid_shape=grid_shape, metadata=metadata
         )
 
+        logger.debug(
+            "Evolving pressure (implicit) for outer iteration saturation solve..."
+        )
         pressure_result = implicit.evolve_pressure(
             cell_dimension=cell_dimension,
             thickness_grid=thickness_grid,
@@ -1540,55 +1555,9 @@ def _run_full_sequential_implicit_step(
             dtype=dtype,
         )
 
-        iter_fluid_properties = update_fluid_properties(
-            fluid_properties=iter_fluid_properties,
-            wells=wells,
-            miscibility_model=miscibility_model,
-            pvt_tables=config.pvt_tables,
-            freeze_saturation_pressure=config.freeze_saturation_pressure,
+        logger.debug(
+            "Updating fluid properties to reflect pressure change for outer iteration..."
         )
-        iter_fluid_properties = apply_solution_gas_updates(
-            fluid_properties=iter_fluid_properties,
-            old_solution_gas_to_oil_ratio_grid=old_rs,
-            old_oil_formation_volume_factor_grid=old_bo,
-            old_gas_solubility_in_water_grid=old_rsw,
-            old_water_formation_volume_factor_grid=old_bw,
-        )
-
-        flash_check = _check_saturation_changes(
-            maximum_oil_saturation_change=float(
-                np.max(np.abs(iter_fluid_properties.oil_saturation_grid - pre_flash_so))
-            ),
-            maximum_water_saturation_change=float(
-                np.max(
-                    np.abs(iter_fluid_properties.water_saturation_grid - pre_flash_sw)
-                )
-            ),
-            maximum_gas_saturation_change=float(
-                np.max(np.abs(iter_fluid_properties.gas_saturation_grid - pre_flash_sg))
-            ),
-            max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
-            max_allowed_water_saturation_change=config.maximum_water_saturation_change,
-            max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
-        )
-        if flash_check.violated:
-            message = (
-                f"Solution gas flash at time step {time_step}, outer iteration "
-                f"{iteration + 1} violated saturation change limits: {flash_check.message}"
-            )
-            logger.warning(message)
-            return StepResult(
-                fluid_properties=fluid_properties,
-                rock_properties=rock_properties,
-                saturation_history=saturation_history,
-                success=False,
-                message=message,
-                timer_kwargs={
-                    "maximum_saturation_change": flash_check.max_phase_saturation_change,
-                    "maximum_allowed_saturation_change": flash_check.max_allowed_phase_saturation_change,
-                },
-            )
-
         iter_fluid_properties = update_fluid_properties(
             fluid_properties=iter_fluid_properties,
             wells=wells,
@@ -1597,20 +1566,23 @@ def _run_full_sequential_implicit_step(
             freeze_saturation_pressure=config.freeze_saturation_pressure,
         )
 
-        # Refresh boundary maps with updated pressure for the saturation solve.
+        # Refresh boundary conditions with updated pressure for the saturation solve.
         metadata = attrs.evolve(metadata, fluid_properties=iter_fluid_properties)
         flux_boundaries, pressure_boundaries = (
             boundary_conditions.refresh_dynamic_boundaries(metadata=metadata)
         )
 
         pressure_change_grid = pressure_grid - fluid_properties.pressure_grid
+        logger.debug(
+            "Evolving saturation (implicit, Newton-Raphson) for outer iteration %d/%d...",
+            iteration + 1,
+            maximum_outer_iterations,
+        )
         saturation_result = implicit.evolve_saturation(
-            grid_shape=grid_shape,
             cell_dimension=cell_dimension,
             thickness_grid=thickness_grid,
             elevation_grid=elevation_grid,
             time_step_size=time_step_size,
-            time=time,
             rock_properties=rock_properties,
             fluid_properties=iter_fluid_properties,
             face_transmissibilities=face_transmissibilities,
@@ -1678,6 +1650,61 @@ def _run_full_sequential_implicit_step(
             water_saturation_grid=sw,
             oil_saturation_grid=so,
             gas_saturation_grid=sg,
+        )
+
+        logger.debug(
+            "Applying solution gas liberation updates for thermodynamic consistency..."
+        )
+        iter_fluid_properties = apply_solution_gas_updates(
+            fluid_properties=iter_fluid_properties,
+            old_solution_gas_to_oil_ratio_grid=old_rs,
+            old_oil_formation_volume_factor_grid=old_bo,
+            old_gas_solubility_in_water_grid=old_rsw,
+            old_water_formation_volume_factor_grid=old_bw,
+        )
+        flash_check = _check_saturation_changes(
+            maximum_oil_saturation_change=float(
+                np.max(np.abs(iter_fluid_properties.oil_saturation_grid - pre_flash_so))
+            ),
+            maximum_water_saturation_change=float(
+                np.max(
+                    np.abs(iter_fluid_properties.water_saturation_grid - pre_flash_sw)
+                )
+            ),
+            maximum_gas_saturation_change=float(
+                np.max(np.abs(iter_fluid_properties.gas_saturation_grid - pre_flash_sg))
+            ),
+            max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
+            max_allowed_water_saturation_change=config.maximum_water_saturation_change,
+            max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
+        )
+        if flash_check.violated:
+            message = (
+                f"Solution gas flash at time step {time_step}, outer iteration "
+                f"{iteration + 1} violated saturation change limits: {flash_check.message}"
+            )
+            logger.warning(message)
+            return StepResult(
+                fluid_properties=fluid_properties,
+                rock_properties=rock_properties,
+                saturation_history=saturation_history,
+                success=False,
+                message=message,
+                timer_kwargs={
+                    "maximum_saturation_change": flash_check.max_phase_saturation_change,
+                    "maximum_allowed_saturation_change": flash_check.max_allowed_phase_saturation_change,
+                },
+            )
+
+        logger.debug(
+            "Updating fluid properties to reflect PVT changes from flash/liberation..."
+        )
+        iter_fluid_properties = update_fluid_properties(
+            fluid_properties=iter_fluid_properties,
+            wells=wells,
+            miscibility_model=miscibility_model,
+            pvt_tables=config.pvt_tables,
+            freeze_saturation_pressure=config.freeze_saturation_pressure,
         )
 
         if config.normalize_saturations:
@@ -2173,7 +2200,6 @@ def _run_explicit_step(
             saturation_epsilon=saturation_epsilon,
         )
 
-    logger.debug("Updating PVT fluid properties after explicit solve...")
     old_rs = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
     old_bo = fluid_properties.oil_formation_volume_factor_grid.copy()
     old_rsw = fluid_properties.gas_solubility_in_water_grid.copy()
@@ -2182,12 +2208,17 @@ def _run_explicit_step(
     old_sg_pre_flash = fluid_properties.gas_saturation_grid.copy()
     old_sw_pre_flash = fluid_properties.water_saturation_grid.copy()
 
+    logger.debug("Updating PVT fluid properties after explicit solve...")
     fluid_properties = update_fluid_properties(
         fluid_properties=fluid_properties,
         wells=wells,
         miscibility_model=miscibility_model,
         pvt_tables=config.pvt_tables,
         freeze_saturation_pressure=config.freeze_saturation_pressure,
+    )
+
+    logger.debug(
+        "Applying solution gas liberation updates for thermodynamic consistency..."
     )
     fluid_properties = apply_solution_gas_updates(
         fluid_properties=fluid_properties,
@@ -2196,7 +2227,6 @@ def _run_explicit_step(
         old_gas_solubility_in_water_grid=old_rsw,
         old_water_formation_volume_factor_grid=old_bw,
     )
-
     flash_check = _check_saturation_changes(
         maximum_oil_saturation_change=float(
             np.max(np.abs(fluid_properties.oil_saturation_grid - old_so_pre_flash))

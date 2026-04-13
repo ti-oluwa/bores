@@ -48,6 +48,6 @@ if os.getenv("BORES_SAVE_RAW_NDARRAY", "f").lower() not in (
 ):
     register_ndarray_serializers()
 
-use_32bit_precision()
+use_64bit_precision()
 
 __version__ = "0.1.0"
