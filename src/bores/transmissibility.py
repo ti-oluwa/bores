@@ -46,8 +46,9 @@ def build_face_transmissibilities(
     Precompute geometric face transmissibilities T_geo = k_harmonic * A / L for
     every forward-facing interface in x, y, and z on the grid.
 
-    Result arrays are shaped (nx, ny, nz) where (nx, ny, nz) = grid shape.
+    Result arrays are shaped (nx + 2, ny + 2, nz + 2) where (nx + 2, ny + 2, nz + 2) = padded grid shape.
     Entry [i, j, k] is the transmissibility of the face between (i,j,k) and:
+
         T_x: (i+1, j,   k  )
         T_y: (i,   j+1, k  )
         T_z: (i,   j,   k+1)
@@ -90,53 +91,95 @@ def _compute_face_transmissibilities(
 ) -> typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid]:
     nx, ny, nz = Kx.shape
 
-    Tx = np.zeros((nx, ny, nz), dtype=dtype)
-    Ty = np.zeros((nx, ny, nz), dtype=dtype)
-    Tz = np.zeros((nx, ny, nz), dtype=dtype)
+    Tx = np.zeros((nx + 2, ny + 2, nz + 2), dtype=dtype)
+    Ty = np.zeros((nx + 2, ny + 2, nz + 2), dtype=dtype)
+    Tz = np.zeros((nx + 2, ny + 2, nz + 2), dtype=dtype)
 
-    for i in numba.prange(nx - 1):  # type: ignore[attr-defined]
-        for j in range(ny - 1):
-            for k in range(nz - 1):
+    for i in numba.prange(nx):  # type: ignore[attr-defined]
+        for j in range(ny):
+            for k in range(nz):
                 cell_thickness = thickness_grid[i, j, k]
 
-                # X face: (i,j,k) → (i+1,j,k)
-                # k_harmonic uses the x-permeability (flow in x-direction)
-                kx_harmonic = compute_harmonic_mean(
-                    Kx[i, j, k] * net_to_gross_grid[i, j, k],
-                    Kx[i + 1, j, k] * net_to_gross_grid[i + 1, j, k],
-                )
-                # Face area in x: Δy × harmonic(cell_thickness, h_i+1)
-                # Flow length: Δx (cell-centre to cell-centre = Δx for uniform grid)
-                east_thickness = thickness_grid[i + 1, j, k]
-                east_harmonic_thickness = compute_harmonic_mean(
-                    cell_thickness, east_thickness
-                )
-                flow_area_x = cell_size_y * east_harmonic_thickness
-                Tx[i, j, k] = kx_harmonic * flow_area_x / cell_size_x
+                # X forward face only exists if east neighbour is real
+                if i + 1 < nx:
+                    kx_harmonic = compute_harmonic_mean(
+                        Kx[i, j, k] * net_to_gross_grid[i, j, k],
+                        Kx[i + 1, j, k] * net_to_gross_grid[i + 1, j, k],
+                    )
+                    east_thickness = thickness_grid[i + 1, j, k]
+                    east_harmonic_thickness = compute_harmonic_mean(
+                        cell_thickness, east_thickness
+                    )
+                    flow_area_x = cell_size_y * east_harmonic_thickness
+                    Tx[i + 1, j + 1, k + 1] = kx_harmonic * flow_area_x / cell_size_x
+                else:
+                    # East boundary face mirrors boundary cell, since no real east neighbour
+                    kx_harmonic = Kx[i, j, k] * net_to_gross_grid[i, j, k]
+                    flow_area_x = cell_size_y * cell_thickness
+                    Tx[i + 1, j + 1, k + 1] = (
+                        2.0 * kx_harmonic * flow_area_x / cell_size_x
+                    )
 
-                # Y face: (i,j,k) → (i,j+1,k)
-                ky_harmonic = compute_harmonic_mean(
-                    Ky[i, j, k] * net_to_gross_grid[i, j, k],
-                    Ky[i, j + 1, k] * net_to_gross_grid[i, j + 1, k],
-                )
-                south_thickness = thickness_grid[i, j + 1, k]
-                south_harmonic_thickness = compute_harmonic_mean(
-                    cell_thickness, south_thickness
-                )
-                flow_area_y = cell_size_x * south_harmonic_thickness
-                Ty[i, j, k] = ky_harmonic * flow_area_y / cell_size_y
+                # West boundary face. Only cell i=0 owns this slot
+                if i == 0:
+                    kx_harmonic = Kx[i, j, k] * net_to_gross_grid[i, j, k]
+                    flow_area_x = cell_size_y * cell_thickness
+                    Tx[0, j + 1, k + 1] = 2.0 * kx_harmonic * flow_area_x / cell_size_x
 
-                # Z face: (i,j,k) → (i,j,k+1)
-                kz_harmonic = compute_harmonic_mean(
-                    Kz[i, j, k] * net_to_gross_grid[i, j, k],
-                    Kz[i, j, k + 1] * net_to_gross_grid[i, j, k + 1],
-                )
-                bottom_thickness = thickness_grid[i, j, k + 1]
-                bottom_harmonic_thickness = compute_harmonic_mean(
-                    cell_thickness, bottom_thickness
-                )
-                # For vertical: area = Δx × Δy, flow length = harmonic mean thickness
-                flow_area_z = cell_size_x * cell_size_y
-                Tz[i, j, k] = kz_harmonic * flow_area_z / bottom_harmonic_thickness
+                # Y forward face only exists if south neighbour is real
+                if j + 1 < ny:
+                    ky_harmonic = compute_harmonic_mean(
+                        Ky[i, j, k] * net_to_gross_grid[i, j, k],
+                        Ky[i, j + 1, k] * net_to_gross_grid[i, j + 1, k],
+                    )
+                    south_thickness = thickness_grid[i, j + 1, k]
+                    south_harmonic_thickness = compute_harmonic_mean(
+                        cell_thickness, south_thickness
+                    )
+                    flow_area_y = cell_size_x * south_harmonic_thickness
+                    Ty[i + 1, j + 1, k + 1] = ky_harmonic * flow_area_y / cell_size_y
+                else:
+                    # South boundary face mirrors boundary cell, since no real south neighbour
+                    ky_harmonic = Ky[i, j, k] * net_to_gross_grid[i, j, k]
+                    flow_area_y = cell_size_x * cell_thickness
+                    Ty[i + 1, j + 1, k + 1] = (
+                        2.0 * ky_harmonic * flow_area_y / cell_size_y
+                    )
+
+                # North boundary face. Only cell j=0 owns this slot
+                if j == 0:
+                    ky_harmonic = Ky[i, j, k] * net_to_gross_grid[i, j, k]
+                    flow_area_y = cell_size_x * cell_thickness
+                    Ty[i + 1, 0, k + 1] = 2.0 * ky_harmonic * flow_area_y / cell_size_y
+
+                # Z forward face only exists if bottom neighbour is real
+                if k + 1 < nz:
+                    kz_harmonic = compute_harmonic_mean(
+                        Kz[i, j, k] * net_to_gross_grid[i, j, k],
+                        Kz[i, j, k + 1] * net_to_gross_grid[i, j, k + 1],
+                    )
+                    bottom_thickness = thickness_grid[i, j, k + 1]
+                    bottom_harmonic_thickness = compute_harmonic_mean(
+                        cell_thickness, bottom_thickness
+                    )
+                    flow_area_z = cell_size_x * cell_size_y
+                    Tz[i + 1, j + 1, k + 1] = (
+                        kz_harmonic * flow_area_z / bottom_harmonic_thickness
+                    )
+                else:
+                    # Bottom boundary face mirrors boundary cell, since no real bottom neighbour
+                    kz_harmonic = Kz[i, j, k] * net_to_gross_grid[i, j, k]
+                    flow_area_z = cell_size_x * cell_size_y
+                    Tz[i + 1, j + 1, k + 1] = (
+                        2.0 * kz_harmonic * flow_area_z / cell_thickness
+                    )
+
+                # Top boundary face. Only cell k=0 owns this slot
+                if k == 0:
+                    kz_harmonic = Kz[i, j, k] * net_to_gross_grid[i, j, k]
+                    flow_area_z = cell_size_x * cell_size_y
+                    Tz[i + 1, j + 1, 0] = (
+                        2.0 * kz_harmonic * flow_area_z / cell_thickness
+                    )
 
     return Tx, Ty, Tz

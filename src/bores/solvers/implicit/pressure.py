@@ -725,7 +725,9 @@ def compute_face_flux_contributions(
                             water_relative_mobility_grid=water_relative_mobility_grid,
                             oil_relative_mobility_grid=oil_relative_mobility_grid,
                             gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_x[i, j, k],
+                            face_transmissibility=face_transmissibilities_x[
+                                i + 1, j + 1, k + 1
+                            ],  # face transmissibilities are defined on the padded grid
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -765,7 +767,7 @@ def compute_face_flux_contributions(
                 else:
                     # Out-of-bounds: look up ghost-cell 1D index in padded space.
                     # Ghost cell lives at (ei+1, ej+1, ek+1) in padded grid.
-                    ni, nj, nk = ei + 1, ej + 1, ek + 1
+                    pei, pej, pek = ei + 1, ej + 1, ek + 1
                     transmissibility, capillary_flux, gravity_flux = (
                         compute_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
@@ -776,7 +778,9 @@ def compute_face_flux_contributions(
                             water_relative_mobility_grid=water_relative_mobility_grid,
                             oil_relative_mobility_grid=oil_relative_mobility_grid,
                             gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_x[i, j, k],
+                            face_transmissibility=face_transmissibilities_x[
+                                i + 1, j + 1, k + 1
+                            ],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -790,7 +794,7 @@ def compute_face_flux_contributions(
                     thread_owner_cell[ii, local_slot] = this_cell_1d_index
                     thread_transmissibility[ii, local_slot] = transmissibility
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pressure_boundary = pressure_boundaries[pei, pej, pek]
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
@@ -799,7 +803,7 @@ def compute_face_flux_contributions(
                         # Neumann: flux_boundaries[ghost_1d] is the known flux (ft³/day).
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[ni, nj, nk]
+                        thread_bc_flux[ii, local_slot] = flux_boundaries[pei, pej, pek]
                     local_slot += 1
 
                 # WEST FACE (i-1, j, k) — boundary-only
@@ -807,7 +811,7 @@ def compute_face_flux_contributions(
                 # Interior west faces are handled as the east face of the western cell.
                 wi, wj, wk = i - 1, j, k
                 if wi < 0:
-                    ni, nj, nk = wi + 1, wj + 1, wk + 1
+                    pwi, pwj, pwk = wi + 1, wj + 1, wk + 1
                     transmissibility, capillary_flux, gravity_flux = (
                         compute_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
@@ -815,7 +819,9 @@ def compute_face_flux_contributions(
                             water_relative_mobility_grid=water_relative_mobility_grid,
                             oil_relative_mobility_grid=oil_relative_mobility_grid,
                             gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_x[i, j, k],
+                            face_transmissibility=face_transmissibilities_x[
+                                pwi, pwj, pwk
+                            ],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -829,7 +835,7 @@ def compute_face_flux_contributions(
                     thread_owner_cell[ii, local_slot] = this_cell_1d_index
                     thread_transmissibility[ii, local_slot] = transmissibility
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pressure_boundary = pressure_boundaries[pwi, pwj, pwk]
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
@@ -837,7 +843,7 @@ def compute_face_flux_contributions(
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[ni, nj, nk]
+                        thread_bc_flux[ii, local_slot] = flux_boundaries[pwi, pwj, pwk]
                     local_slot += 1
 
                 # SOUTH FACE (i, j+1, k)
@@ -850,7 +856,9 @@ def compute_face_flux_contributions(
                             water_relative_mobility_grid=water_relative_mobility_grid,
                             oil_relative_mobility_grid=oil_relative_mobility_grid,
                             gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_y[i, j, k],
+                            face_transmissibility=face_transmissibilities_y[
+                                i + 1, j + 1, k + 1
+                            ],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -886,7 +894,7 @@ def compute_face_flux_contributions(
                     thread_is_neumann[ii, local_slot] = False
                     local_slot += 1
                 else:
-                    ni, nj, nk = si + 1, sj + 1, sk + 1
+                    psi, psj, psk = si + 1, sj + 1, sk + 1
                     transmissibility, capillary_flux, gravity_flux = (
                         compute_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
@@ -894,7 +902,9 @@ def compute_face_flux_contributions(
                             water_relative_mobility_grid=water_relative_mobility_grid,
                             oil_relative_mobility_grid=oil_relative_mobility_grid,
                             gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_y[i, j, k],
+                            face_transmissibility=face_transmissibilities_y[
+                                i + 1, j + 1, k + 1
+                            ],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -908,7 +918,7 @@ def compute_face_flux_contributions(
                     thread_owner_cell[ii, local_slot] = this_cell_1d_index
                     thread_transmissibility[ii, local_slot] = transmissibility
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pressure_boundary = pressure_boundaries[psi, psj, psk]
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
@@ -916,13 +926,13 @@ def compute_face_flux_contributions(
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[ni, nj, nk]
+                        thread_bc_flux[ii, local_slot] = flux_boundaries[psi, psj, psk]
                     local_slot += 1
 
                 # NORTH FACE (i, j-1, k) — boundary-only
                 ni, nj, nk = i, j - 1, k
                 if nj < 0:
-                    bi, bj, bk = ni + 1, nj + 1, nk + 1
+                    pni, pnj, pnk = ni + 1, nj + 1, nk + 1
                     transmissibility, capillary_flux, gravity_flux = (
                         compute_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
@@ -930,7 +940,9 @@ def compute_face_flux_contributions(
                             water_relative_mobility_grid=water_relative_mobility_grid,
                             oil_relative_mobility_grid=oil_relative_mobility_grid,
                             gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_y[i, j, k],
+                            face_transmissibility=face_transmissibilities_y[
+                                pni, pnj, pnk
+                            ],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -944,7 +956,7 @@ def compute_face_flux_contributions(
                     thread_owner_cell[ii, local_slot] = this_cell_1d_index
                     thread_transmissibility[ii, local_slot] = transmissibility
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
-                    pressure_boundary = pressure_boundaries[bi, bj, bk]
+                    pressure_boundary = pressure_boundaries[pni, pnj, pnk]
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
@@ -952,7 +964,7 @@ def compute_face_flux_contributions(
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[bi, bj, bk]
+                        thread_bc_flux[ii, local_slot] = flux_boundaries[pni, pnj, pnk]
                     local_slot += 1
 
                 # BOTTOM FACE (i, j, k+1)
@@ -965,7 +977,9 @@ def compute_face_flux_contributions(
                             water_relative_mobility_grid=water_relative_mobility_grid,
                             oil_relative_mobility_grid=oil_relative_mobility_grid,
                             gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_z[i, j, k],
+                            face_transmissibility=face_transmissibilities_z[
+                                i + 1, j + 1, k + 1
+                            ],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -1001,7 +1015,7 @@ def compute_face_flux_contributions(
                     thread_is_neumann[ii, local_slot] = False
                     local_slot += 1
                 else:
-                    ni, nj, nk = bi + 1, bj + 1, bk + 1
+                    pbi, pbj, pbk = bi + 1, bj + 1, bk + 1
                     transmissibility, capillary_flux, gravity_flux = (
                         compute_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
@@ -1009,7 +1023,9 @@ def compute_face_flux_contributions(
                             water_relative_mobility_grid=water_relative_mobility_grid,
                             oil_relative_mobility_grid=oil_relative_mobility_grid,
                             gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_z[i, j, k],
+                            face_transmissibility=face_transmissibilities_z[
+                                i + 1, j + 1, k + 1
+                            ],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -1023,7 +1039,7 @@ def compute_face_flux_contributions(
                     thread_owner_cell[ii, local_slot] = this_cell_1d_index
                     thread_transmissibility[ii, local_slot] = transmissibility
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pressure_boundary = pressure_boundaries[pbi, pbj, pbk]
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
@@ -1031,13 +1047,13 @@ def compute_face_flux_contributions(
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[ni, nj, nk]
+                        thread_bc_flux[ii, local_slot] = flux_boundaries[pbi, pbj, pbk]
                     local_slot += 1
 
                 # TOP FACE (i, j, k-1) — boundary-only
                 ti, tj, tk = i, j, k - 1
                 if tk < 0:
-                    ni, nj, nk = ti + 1, tj + 1, tk + 1
+                    pti, ptj, ptk = ti + 1, tj + 1, tk + 1
                     transmissibility, capillary_flux, gravity_flux = (
                         compute_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
@@ -1045,7 +1061,9 @@ def compute_face_flux_contributions(
                             water_relative_mobility_grid=water_relative_mobility_grid,
                             oil_relative_mobility_grid=oil_relative_mobility_grid,
                             gas_relative_mobility_grid=gas_relative_mobility_grid,
-                            face_transmissibility=face_transmissibilities_z[i, j, k],
+                            face_transmissibility=face_transmissibilities_z[
+                                pti, ptj, ptk
+                            ],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -1059,7 +1077,7 @@ def compute_face_flux_contributions(
                     thread_owner_cell[ii, local_slot] = this_cell_1d_index
                     thread_transmissibility[ii, local_slot] = transmissibility
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pressure_boundary = pressure_boundaries[pti, ptj, ptk]
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
@@ -1067,7 +1085,7 @@ def compute_face_flux_contributions(
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[ni, nj, nk]
+                        thread_bc_flux[ii, local_slot] = flux_boundaries[pti, ptj, ptk]
                     local_slot += 1
 
         entries_written_per_i_slice[ii] = local_slot
@@ -1099,8 +1117,8 @@ def compute_face_flux_contributions(
         while slot < entries_written_per_i_slice[ii]:
             if thread_is_dirichlet[ii, slot]:
                 # Dirichlet BC:
-                #   diagonal += T           (adds resistance term)
-                #   rhs      += T * p_bc + rhs_term   (known pressure drives flow)
+                #   diagonal += T  (adds resistance term)
+                #   rhs += T * p_bc + rhs_term (known pressure drives flow)
                 owner = thread_owner_cell[ii, slot]
                 transmissibility = thread_transmissibility[ii, slot]
                 diagonal_additions[owner] += transmissibility
@@ -1111,7 +1129,7 @@ def compute_face_flux_contributions(
                 slot += 1
             elif thread_is_neumann[ii, slot]:
                 # Neumann BC:
-                #   rhs += q_bc    (known flux, ft³/day, applied directly)
+                #   rhs += q_bc (known flux, ft³/day, applied directly)
                 # No diagonal or off-diagonal contribution.
                 owner = thread_owner_cell[ii, slot]
                 rhs_additions[owner] += thread_bc_flux[ii, slot]
@@ -1407,8 +1425,10 @@ def compute_well_contributions(
             )
 
             if injected_phase == FluidPhase.GAS:
+                phase_mobility = gas_relative_mobility_grid[i, j, k]
                 compressibility_kwargs: dict = {}
             else:
+                phase_mobility = water_relative_mobility_grid[i, j, k]
                 compressibility_kwargs = {
                     "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
                     "gas_formation_volume_factor": gas_formation_volume_factor_grid[

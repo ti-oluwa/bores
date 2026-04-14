@@ -220,7 +220,7 @@ The permeability visualization reveals the same layered pattern but with a wider
 ### Depth Grid (showing dip)
 
 ```python
-depth_grid = model.get_depth_grid(apply_dip=True)
+depth_grid = model.build_depth_grid(apply_dip=True)
 fig = viz.make_plot(
     source=depth_grid,
     plot_type="scatter_3d",

@@ -2649,10 +2649,10 @@ class DataVisualizer:
             # Get original cell dimensions and depth grid from model
             if is_model_state:
                 cell_dimension = source.model.cell_dimension  # type: ignore
-                depth_grid = source.model.get_depth_grid(apply_dip=True)  # type: ignore
+                depth_grid = source.model.build_depth_grid(apply_dip=True)  # type: ignore
             else:
                 cell_dimension = source.cell_dimension  # type: ignore
-                depth_grid = source.get_depth_grid(apply_dip=True)  # type: ignore
+                depth_grid = source.build_depth_grid(apply_dip=True)  # type: ignore
         else:
             # Working with raw `ThreeDimensionalGrid`
             data = source

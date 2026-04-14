@@ -37,10 +37,10 @@ def compute_well_rates(
     production_fvfs: PhaseTensorsProxy[float, ThreeDimensions],
 ) -> None:
     """
-    Compute well flow rates using the new pressure from the pressure solve and
-    the BHPs stored during the Jacobian assembly step.
+    Compute well flow rates and update them in-place using the new pressure
+    from the pressure solve and the BHPs stored during the Jacobian assembly step.
 
-    This function is called after the pressure solve. It uses the new pressure
+    This function is meant to be called after the pressure solve. It uses the new pressure
     grid and the BHPs computed during `compute_well_contributions` to evaluate
     accurate per-phase flow rates for use in the saturation solver.
 
@@ -121,11 +121,18 @@ def compute_well_rates(
                     temperature=cell_temperature,
                 ),
             )
+            total_relative_mobility = (
+                water_relative_mobility_grid[i, j, k]
+                + oil_relative_mobility_grid[i, j, k]
+                + gas_relative_mobility_grid[i, j, k]
+            )
+            if total_relative_mobility == 0.0:
+                injection_rates[i, j, k] = (0.0, 0.0, 0.0)
+                injection_fvfs[i, j, k] = (0.0, 0.0, 0.0)
+                continue
 
             if injected_phase == FluidPhase.GAS:
-                phase_mobility = typing.cast(
-                    float, gas_relative_mobility_grid[i, j, k]
-                )
+                phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
                 # Build pseudo-pressure table if needed
                 use_pp, pp_table = get_pseudo_pressure_table(
                     fluid=injected_fluid,
@@ -152,7 +159,7 @@ def compute_well_rates(
                     pressure=new_pressure,
                     temperature=cell_temperature,
                     bottom_hole_pressure=bhp,
-                    phase_mobility=phase_mobility,
+                    phase_mobility=total_relative_mobility,
                     use_pseudo_pressure=use_pp,
                     pseudo_pressure_table=pp_table,
                     average_compressibility_factor=avg_z_factor,
@@ -177,7 +184,7 @@ def compute_well_rates(
                     }
                 else:
                     compressibility_kwargs = {}
-                
+
                 phase_compressibility = typing.cast(
                     float,
                     injected_fluid.get_compressibility(
@@ -194,7 +201,7 @@ def compute_well_rates(
                         well_index=well_index,
                         pressure=new_pressure,
                         bottom_hole_pressure=bhp,
-                        phase_mobility=phase_mobility,
+                        phase_mobility=total_relative_mobility,
                         fluid_compressibility=phase_compressibility,
                         incompressibility_threshold=incompressibility_threshold,
                     )

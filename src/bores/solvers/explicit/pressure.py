@@ -702,7 +702,9 @@ def compute_net_flux_contributions(
                         cell_indices=(i, j, k),
                         neighbour_indices=(ei, j, k),
                         oil_pressure_grid=current_oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_x[i, j, k],
+                        face_transmissibility=face_transmissibilities_x[
+                            i + 1, j + 1, k + 1
+                        ],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -716,26 +718,27 @@ def compute_net_flux_contributions(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                 else:
-                    ni, nj, nk = ei + 1, j + 1, k + 1
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pei, pej, pek = ei + 1, j + 1, k + 1
+                    pressure_boundary = pressure_boundaries[pei, pej, pek]
                     if not np.isnan(pressure_boundary):
                         net_flux += (
-                            face_transmissibilities_x[i, j, k]
+                            face_transmissibilities_x[pei, pej, pek]
                             * cell_total_mobility
                             * md_per_cp_to_ft2_per_psi_per_day
                             * (pressure_boundary - cell_pressure)
                         )
                     else:
-                        net_flux += flux_boundaries[ni, nj, nk]
+                        net_flux += flux_boundaries[pei, pej, pek]
 
                 # WEST (i-1, j, k)
                 wi = i - 1
+                pwi, pwj, pwk = wi + 1, j + 1, k + 1
                 if wi >= 0:
                     net_flux += compute_flux_from_neighbour(
                         cell_indices=(i, j, k),
                         neighbour_indices=(wi, j, k),
                         oil_pressure_grid=current_oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_x[wi, j, k],
+                        face_transmissibility=face_transmissibilities_x[pwi, pwj, pwk],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -749,17 +752,16 @@ def compute_net_flux_contributions(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                 else:
-                    ni, nj, nk = wi + 1, j + 1, k + 1
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pressure_boundary = pressure_boundaries[pwi, pwj, pwk]
                     if not np.isnan(pressure_boundary):
                         net_flux += (
-                            face_transmissibilities_x[i, j, k]
+                            face_transmissibilities_x[pwi, pwj, pwk]
                             * cell_total_mobility
                             * md_per_cp_to_ft2_per_psi_per_day
                             * (pressure_boundary - cell_pressure)
                         )
                     else:
-                        net_flux += flux_boundaries[ni, nj, nk]
+                        net_flux += flux_boundaries[pwi, pwj, pwk]
 
                 # SOUTH (i, j+1, k)
                 sj = j + 1
@@ -768,7 +770,9 @@ def compute_net_flux_contributions(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, sj, k),
                         oil_pressure_grid=current_oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_y[i, j, k],
+                        face_transmissibility=face_transmissibilities_y[
+                            i + 1, j + 1, k + 1
+                        ],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -782,26 +786,27 @@ def compute_net_flux_contributions(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                 else:
-                    ni, nj, nk = i + 1, sj + 1, k + 1
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    psi, psj, psk = i + 1, sj + 1, k + 1
+                    pressure_boundary = pressure_boundaries[psi, psj, psk]
                     if not np.isnan(pressure_boundary):
                         net_flux += (
-                            face_transmissibilities_y[i, j, k]
+                            face_transmissibilities_y[psi, psj, psk]
                             * cell_total_mobility
                             * md_per_cp_to_ft2_per_psi_per_day
                             * (pressure_boundary - cell_pressure)
                         )
                     else:
-                        net_flux += flux_boundaries[ni, nj, nk]
+                        net_flux += flux_boundaries[psi, psj, psk]
 
                 # NORTH (i, j-1, k)
                 nj = j - 1
+                pni, pnj, pnk = i + 1, nj + 1, k + 1
                 if nj >= 0:
                     net_flux += compute_flux_from_neighbour(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, nj, k),
                         oil_pressure_grid=current_oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_y[i, nj, k],
+                        face_transmissibility=face_transmissibilities_y[pni, pnj, pnk],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -815,17 +820,16 @@ def compute_net_flux_contributions(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                 else:
-                    ni, nj, nk = i + 1, nj + 1, k + 1
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pressure_boundary = pressure_boundaries[pni, pnj, pnk]
                     if not np.isnan(pressure_boundary):
                         net_flux += (
-                            face_transmissibilities_y[i, j, k]
+                            face_transmissibilities_y[pni, pnj, pnk]
                             * cell_total_mobility
                             * md_per_cp_to_ft2_per_psi_per_day
                             * (pressure_boundary - cell_pressure)
                         )
                     else:
-                        net_flux += flux_boundaries[ni, nj, nk]
+                        net_flux += flux_boundaries[pni, pnj, pnk]
 
                 # BOTTOM (i, j, k+1)
                 bk = k + 1
@@ -834,7 +838,9 @@ def compute_net_flux_contributions(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, j, bk),
                         oil_pressure_grid=current_oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_z[i, j, k],
+                        face_transmissibility=face_transmissibilities_z[
+                            i + 1, j + 1, k + 1
+                        ],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -848,26 +854,27 @@ def compute_net_flux_contributions(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                 else:
-                    ni, nj, nk = i + 1, j + 1, bk + 1
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pbi, pbj, pbk = i + 1, j + 1, bk + 1
+                    pressure_boundary = pressure_boundaries[pbi, pbj, pbk]
                     if not np.isnan(pressure_boundary):
                         net_flux += (
-                            face_transmissibilities_z[i, j, k]
+                            face_transmissibilities_z[pbi, pbj, pbk]
                             * cell_total_mobility
                             * md_per_cp_to_ft2_per_psi_per_day
                             * (pressure_boundary - cell_pressure)
                         )
                     else:
-                        net_flux += flux_boundaries[ni, nj, nk]
+                        net_flux += flux_boundaries[pbi, pbj, pbk]
 
                 # TOP (i, j, k-1)
                 tk = k - 1
+                pti, ptj, ptk = i + 1, j + 1, tk + 1
                 if tk >= 0:
                     net_flux += compute_flux_from_neighbour(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, j, tk),
                         oil_pressure_grid=current_oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_z[i, j, tk],
+                        face_transmissibility=face_transmissibilities_z[pti, ptj, ptk],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -881,17 +888,16 @@ def compute_net_flux_contributions(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                 else:
-                    ni, nj, nk = i + 1, j + 1, tk + 1
-                    pressure_boundary = pressure_boundaries[ni, nj, nk]
+                    pressure_boundary = pressure_boundaries[pti, ptj, ptk]
                     if not np.isnan(pressure_boundary):
                         net_flux += (
-                            face_transmissibilities_z[i, j, k]
+                            face_transmissibilities_z[pti, ptj, ptk]
                             * cell_total_mobility
                             * md_per_cp_to_ft2_per_psi_per_day
                             * (pressure_boundary - cell_pressure)
                         )
                     else:
-                        net_flux += flux_boundaries[ni, nj, nk]
+                        net_flux += flux_boundaries[pti, ptj, ptk]
 
                 flux_grid[i, j, k] = net_flux
 

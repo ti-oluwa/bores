@@ -394,6 +394,29 @@ class RunStats:
             table.add_row(
                 "Avg Newton iterations", f"{self.average_newton_iterations:.2f}"
             )
+
+        # Material balance errors
+        table.add_section()
+        table.add_row(
+            "Total absolute MBE",
+            f"{last.total_absolute_mbe:.3e} res ft³",
+        )
+        table.add_row(
+            "Total relative MBE",
+            f"{last.total_relative_mbe * 100:.2e}%",
+        )
+        table.add_row(
+            "Oil MBE (rel)",
+            f"{last.relative_oil_mbe * 100:.2e}%",
+        )
+        table.add_row(
+            "Water MBE (rel)",
+            f"{last.relative_water_mbe * 100:.2e}%",
+        )
+        table.add_row(
+            "Gas MBE (rel)",
+            f"{last.relative_gas_mbe * 100:.2e}%",
+        )
         return table
 
     def summary(self) -> str:
@@ -431,6 +454,22 @@ class RunStats:
             lines.append(
                 f"  Average Newton iterations  : {self.average_newton_iterations:.2f}"
             )
+        lines.append("")
+        lines.append(
+            f"  Total absolute MBE        : {last.total_absolute_mbe:.3e} res ft³"
+        )
+        lines.append(
+            f"  Total relative MBE        : {last.total_relative_mbe * 100:.2e}%"
+        )
+        lines.append(
+            f"  Oil MBE (relative)        : {last.relative_oil_mbe * 100:.2e}%"
+        )
+        lines.append(
+            f"  Water MBE (relative)      : {last.relative_water_mbe * 100:.2e}%"
+        )
+        lines.append(
+            f"  Gas MBE (relative)        : {last.relative_gas_mbe * 100:.2e}%"
+        )
         lines.append("═" * 62)
         return "\n".join(lines)
 

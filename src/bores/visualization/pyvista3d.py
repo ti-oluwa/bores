@@ -1961,9 +1961,9 @@ class DataVisualizer:
                 source.model.cell_dimension if is_model_state else source.cell_dimension  # type: ignore
             )
             depth_grid = (
-                source.model.get_depth_grid(apply_dip=True)  # type: ignore
+                source.model.build_depth_grid(apply_dip=True)  # type: ignore
                 if is_model_state
-                else source.get_depth_grid(apply_dip=True)  # type: ignore
+                else source.build_depth_grid(apply_dip=True)  # type: ignore
             )
         else:
             data = source

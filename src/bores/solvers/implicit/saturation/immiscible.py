@@ -343,7 +343,9 @@ def _compute_saturation_residual(
                         cell_indices=(i, j, k),
                         neighbour_indices=(east_i, j, k),
                         oil_pressure_grid=oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_x[i, j, k],
+                        face_transmissibility=face_transmissibilities_x[
+                            i + 1, j + 1, k + 1
+                        ],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -360,18 +362,20 @@ def _compute_saturation_residual(
                     net_gas_flux += gas_flux
                 else:
                     # Boundary: ghost at padded index (east_i+1, j+1, k+1)
-                    ghost_i, ghost_j, ghost_k = east_i + 1, j + 1, k + 1
-                    pressure_boundary = pressure_boundaries[ghost_i, ghost_j, ghost_k]
-                    t_conv = (
-                        face_transmissibilities_x[i, j, k]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
+                    pei, pej, pek = east_i + 1, j + 1, k + 1
+                    pressure_boundary = pressure_boundaries[pei, pej, pek]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        pressure_difference = pressure_boundary - cell_pressure
+                        factor = (
+                            face_transmissibilities_x[pei, pej, pek]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
+                        net_water_flux += (
+                            cell_water_mobility * factor * pressure_difference
+                        )
+                        net_gas_flux += cell_gas_mobility * factor * pressure_difference
                     else:
-                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[pei, pej, pek]
                         if cell_total_mobility > 0.0:
                             net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
@@ -382,12 +386,13 @@ def _compute_saturation_residual(
 
                 # WEST (i-1, j, k)
                 west_i = i - 1
+                pwi, pwj, pwk = west_i + 1, j + 1, k + 1
                 if west_i >= 0:
                     water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                         cell_indices=(i, j, k),
                         neighbour_indices=(west_i, j, k),
                         oil_pressure_grid=oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_x[west_i, j, k],
+                        face_transmissibility=face_transmissibilities_x[pwi, pwj, pwk],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -404,18 +409,19 @@ def _compute_saturation_residual(
                     net_gas_flux += gas_flux
                 else:
                     # Boundary: ghost at padded index (west_i+1, j+1, k+1) = (0, j+1, k+1)
-                    ghost_i, ghost_j, ghost_k = west_i + 1, j + 1, k + 1
-                    pressure_boundary = pressure_boundaries[ghost_i, ghost_j, ghost_k]
-                    t_conv = (
-                        face_transmissibilities_x[i, j, k]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
+                    pressure_boundary = pressure_boundaries[pwi, pwj, pwk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        pressure_difference = pressure_boundary - cell_pressure
+                        factor = (
+                            face_transmissibilities_x[pwi, pwj, pwk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
+                        net_water_flux += (
+                            cell_water_mobility * factor * pressure_difference
+                        )
+                        net_gas_flux += cell_gas_mobility * factor * pressure_difference
                     else:
-                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[pwi, pwj, pwk]
                         if cell_total_mobility > 0.0:
                             net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
@@ -431,7 +437,9 @@ def _compute_saturation_residual(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, south_j, k),
                         oil_pressure_grid=oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_y[i, j, k],
+                        face_transmissibility=face_transmissibilities_y[
+                            i + 1, j + 1, k + 1
+                        ],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -447,18 +455,20 @@ def _compute_saturation_residual(
                     net_water_flux += water_flux
                     net_gas_flux += gas_flux
                 else:
-                    ghost_i, ghost_j, ghost_k = i + 1, south_j + 1, k + 1
-                    pressure_boundary = pressure_boundaries[ghost_i, ghost_j, ghost_k]
-                    t_conv = (
-                        face_transmissibilities_y[i, j, k]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
+                    psi, psj, psk = i + 1, south_j + 1, k + 1
+                    pressure_boundary = pressure_boundaries[psi, psj, psk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        pressure_difference = pressure_boundary - cell_pressure
+                        factor = (
+                            face_transmissibilities_y[psi, psj, psk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
+                        net_water_flux += (
+                            cell_water_mobility * factor * pressure_difference
+                        )
+                        net_gas_flux += cell_gas_mobility * factor * pressure_difference
                     else:
-                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[psi, psj, psk]
                         if cell_total_mobility > 0.0:
                             net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
@@ -469,12 +479,13 @@ def _compute_saturation_residual(
 
                 # NORTH (i, j-1, k)
                 north_j = j - 1
+                pni, pnj, pnk = i + 1, north_j + 1, k + 1
                 if north_j >= 0:
                     water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, north_j, k),
                         oil_pressure_grid=oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_y[i, north_j, k],
+                        face_transmissibility=face_transmissibilities_y[pni, pnj, pnk],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -490,18 +501,19 @@ def _compute_saturation_residual(
                     net_water_flux += water_flux
                     net_gas_flux += gas_flux
                 else:
-                    ghost_i, ghost_j, ghost_k = i + 1, north_j + 1, k + 1
-                    pressure_boundary = pressure_boundaries[ghost_i, ghost_j, ghost_k]
-                    t_conv = (
-                        face_transmissibilities_y[i, j, k]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
+                    pressure_boundary = pressure_boundaries[pni, pnj, pnk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        pressure_difference = pressure_boundary - cell_pressure
+                        factor = (
+                            face_transmissibilities_y[pni, pnj, pnk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
+                        net_water_flux += (
+                            cell_water_mobility * factor * pressure_difference
+                        )
+                        net_gas_flux += cell_gas_mobility * factor * pressure_difference
                     else:
-                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[pni, pnj, pnk]
                         if cell_total_mobility > 0.0:
                             net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
@@ -517,7 +529,9 @@ def _compute_saturation_residual(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, j, bottom_k),
                         oil_pressure_grid=oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_z[i, j, k],
+                        face_transmissibility=face_transmissibilities_z[
+                            i + 1, j + 1, k + 1
+                        ],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -533,18 +547,20 @@ def _compute_saturation_residual(
                     net_water_flux += water_flux
                     net_gas_flux += gas_flux
                 else:
-                    ghost_i, ghost_j, ghost_k = i + 1, j + 1, bottom_k + 1
-                    pressure_boundary = pressure_boundaries[ghost_i, ghost_j, ghost_k]
-                    t_conv = (
-                        face_transmissibilities_z[i, j, k]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
+                    pbi, pbj, pbk = i + 1, j + 1, bottom_k + 1
+                    pressure_boundary = pressure_boundaries[pbi, pbj, pbk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        pressure_difference = pressure_boundary - cell_pressure
+                        factor = (
+                            face_transmissibilities_z[pbi, pbj, pbk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
+                        net_water_flux += (
+                            cell_water_mobility * factor * pressure_difference
+                        )
+                        net_gas_flux += cell_gas_mobility * factor * pressure_difference
                     else:
-                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[pbi, pbj, pbk]
                         if cell_total_mobility > 0.0:
                             net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
@@ -555,12 +571,13 @@ def _compute_saturation_residual(
 
                 # TOP (i, j, k-1)
                 top_k = k - 1
+                pti, ptj, ptk = i + 1, j + 1, top_k + 1
                 if top_k >= 0:
                     water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, j, top_k),
                         oil_pressure_grid=oil_pressure_grid,
-                        face_transmissibility=face_transmissibilities_z[i, j, top_k],
+                        face_transmissibility=face_transmissibilities_z[pti, ptj, ptk],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
                         gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -576,18 +593,19 @@ def _compute_saturation_residual(
                     net_water_flux += water_flux
                     net_gas_flux += gas_flux
                 else:
-                    ghost_i, ghost_j, ghost_k = i + 1, j + 1, top_k + 1
-                    pressure_boundary = pressure_boundaries[ghost_i, ghost_j, ghost_k]
-                    t_conv = (
-                        face_transmissibilities_z[i, j, k]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
+                    pressure_boundary = pressure_boundaries[pti, ptj, ptk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        pressure_difference = pressure_boundary - cell_pressure
+                        factor = (
+                            face_transmissibilities_z[pti, ptj, ptk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
+                        net_water_flux += (
+                            cell_water_mobility * factor * pressure_difference
+                        )
+                        net_gas_flux += cell_gas_mobility * factor * pressure_difference
                     else:
-                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[pti, ptj, ptk]
                         if cell_total_mobility > 0.0:
                             net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
@@ -1021,7 +1039,7 @@ def assemble_numerical_jacobian(
     cols = []
     vals = []
 
-    machine_eps = np.finfo(dtype).eps  # type: ignore
+    machine_eps = np.finfo(np.float64).eps  # type: ignore
     base_epsilon = float(np.sqrt(machine_eps))
 
     water_saturation_grid = water_saturation_grid.astype(np.float64, copy=True)
@@ -1044,13 +1062,10 @@ def assemble_numerical_jacobian(
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
-        porosity_grid=rock_properties.porosity_grid,
-        net_to_gross_grid=rock_properties.net_to_gross_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
-        rock_compressibility=rock_properties.compressibility,
         well_indices_cache=well_indices_cache,
         injection_rates=injection_rates,
         production_rates=production_rates,
@@ -1460,34 +1475,34 @@ def _assemble_analytical_jacobian(
                 for face in range(6):
                     if face == 0:  # East
                         ni, nj, nk = np.int64(i + 1), np.int64(j), np.int64(k)
-                        transmissibility = face_transmissibilities_x[i, j, k]
+                        transmissibility = face_transmissibilities_x[
+                            i + 1, j + 1, k + 1
+                        ]
                     elif face == 1:  # West
                         ni, nj, nk = np.int64(i - 1), np.int64(j), np.int64(k)
-                        transmissibility = (
-                            face_transmissibilities_x[i - 1, j, k]
-                            if i > 0
-                            else face_transmissibilities_x[i, j, k]
-                        )
+                        transmissibility = face_transmissibilities_x[
+                            ni + 1, nj + 1, nk + 1
+                        ]
                     elif face == 2:  # South
                         ni, nj, nk = np.int64(i), np.int64(j + 1), np.int64(k)
-                        transmissibility = face_transmissibilities_y[i, j, k]
+                        transmissibility = face_transmissibilities_y[
+                            i + 1, j + 1, k + 1
+                        ]
                     elif face == 3:  # North
                         ni, nj, nk = np.int64(i), np.int64(j - 1), np.int64(k)
-                        transmissibility = (
-                            face_transmissibilities_y[i, j - 1, k]
-                            if j > 0
-                            else face_transmissibilities_y[i, j, k]
-                        )
+                        transmissibility = face_transmissibilities_y[
+                            ni + 1, nj + 1, nk + 1
+                        ]
                     elif face == 4:  # Bottom
                         ni, nj, nk = np.int64(i), np.int64(j), np.int64(k + 1)
-                        transmissibility = face_transmissibilities_z[i, j, k]
+                        transmissibility = face_transmissibilities_z[
+                            i + 1, j + 1, k + 1
+                        ]
                     else:  # Top (face == 5)
                         ni, nj, nk = np.int64(i), np.int64(j), np.int64(k - 1)
-                        transmissibility = (
-                            face_transmissibilities_z[i, j, k - 1]
-                            if k > 0
-                            else face_transmissibilities_z[i, j, k]
-                        )
+                        transmissibility = face_transmissibilities_z[
+                            ni + 1, nj + 1, nk + 1
+                        ]
 
                     # Skip boundary faces — prescribed BC flux has zero Jacobian w.r.t. S
                     if (
@@ -1582,7 +1597,7 @@ def _assemble_analytical_jacobian(
                     dPcgo_dSw_n = dPcgo_dSw_eff_grid[ni, nj, nk]
                     dPcgo_dSg_n = dPcgo_dSg_eff_grid[ni, nj, nk]
 
-                    #  WATER Jacobian contributions
+                    # WATER Jacobian contributions
                     upwind_water_relative_mobility = (
                         water_relative_mobility_grid[ni, nj, nk]
                         if water_neighbour_is_upwind
@@ -1665,7 +1680,7 @@ def _assemble_analytical_jacobian(
                     dRw_dSw_n = -(dFw_mob_dSw_n + dFw_cap_dSw_n)
                     dRw_dSg_n = -(dFw_mob_dSg_n + dFw_cap_dSg_n)
 
-                    #  GAS Jacobian contributions
+                    # GAS Jacobian contributions
                     upwind_gas_relative_mobility = (
                         gas_relative_mobility_grid[ni, nj, nk]
                         if gas_neighbour_is_upwind

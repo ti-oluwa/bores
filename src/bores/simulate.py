@@ -424,6 +424,9 @@ def _apply_minimum_injector_saturations(
     return sg, so, sw
 
 
+# STEP FUNCTIONS
+
+
 def _run_impes_step(
     time_step: int,
     grid_shape: ThreeDimensions,
@@ -2531,7 +2534,6 @@ def run(
             )
         model = input
 
-    rock_fluid_tables = config.rock_fluid_tables
     boundary_conditions = config.boundary_conditions
     timer = config.timer
     wells = config.wells
@@ -2558,6 +2560,7 @@ def run(
     log_interval = config.log_interval
     capture_timer_state = config.capture_timer_state
     enable_hysteresis = config.enable_hysteresis
+    apply_dip = not config.disable_structural_dip
 
     logger.info("Starting simulation workflow...")
     logger.info(
@@ -2569,6 +2572,7 @@ def run(
     logger.info(
         f"Evolution scheme: {_SCHEME_ALIASES.get(scheme, scheme.replace('-', ' ').title())}"
     )
+    logger.info(f"Array numerical precision: {np.dtype(dtype).name!r}")
     logger.info("Total simulation time: %.1f seconds", timer.simulation_time)
     logger.info("Output frequency: every %d steps", output_frequency)
     logger.info("Has wells: %s", has_wells)
@@ -2587,6 +2591,7 @@ def run(
         thickness_grid = model.thickness_grid
         absolute_permeability = rock_properties.absolute_permeability
         net_to_gross_grid = rock_properties.net_to_gross_grid
+        elevation_grid = model.build_elevation_grid(apply_dip=apply_dip)
 
         logger.debug("Building well indices cache")
         well_indices_cache = build_well_indices_cache(
@@ -2598,10 +2603,6 @@ def run(
             absolute_permeability=absolute_permeability,
             net_to_gross_grid=net_to_gross_grid,
             boundary_conditions=boundary_conditions,
-        )
-
-        elevation_grid = model.get_elevation_grid(
-            apply_dip=not config.disable_structural_dip
         )
 
         logger.debug("Building face transmissibilities...")

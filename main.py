@@ -140,14 +140,15 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="si",
+    scheme="impes",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     maximum_pressure_change=1800,
+    jacobian_assembly_method="analytical",
     # freeze_saturation_pressure=True
-    disable_capillary_effects=True
+    # disable_capillary_effects=True
 )
 
 # Run and monitor the simulation and collect states

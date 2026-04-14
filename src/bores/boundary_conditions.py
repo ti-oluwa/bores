@@ -68,15 +68,16 @@ def boundary_function(
     typing.Callable[P, R],
     typing.Callable[[typing.Callable[P, R]], typing.Callable[P, R]],
 ]:
-    """Register a callable as a named boundary function for serialization.
+    """
+    Register a callable as a named boundary function for serialization.
 
     A boundary function is any callable that computes values (pressure, flux,
-    or a production-index array) to support a boundary condition.  Registering
+    or a production-index array) to support a boundary condition. Registering
     a function allows `BoundaryCondition` subclasses that store it as an
     attribute to be serialized and deserialized by name.
 
     Usage:
-    
+
     ```python
     @boundary_function
     def linear_pressure_gradient(x, y):
@@ -87,9 +88,9 @@ def boundary_function(
         return 2500 + 0.1 * x
     ```
 
-    :param func: The function to register.  When the decorator is used
+    :param func: The function to register. When the decorator is used
         without arguments this is supplied automatically by Python.
-    :param name: Optional registration key.  Defaults to ``func.__name__``.
+    :param name: Optional registration key. Defaults to `func.__name__`.
     :param override: If *True*, an existing registration under the same name
         is silently replaced.
     :return: The (unmodified) function, or a decorator when called without
@@ -145,14 +146,15 @@ def get_boundary_function(name: str) -> typing.Callable:
 def _serialize_boundary_function(
     func: typing.Callable[..., typing.Any], recurse: bool = True
 ) -> typing.Dict[str, typing.Any]:
-    """Serialize a boundary function to a JSON-compatible dict.
+    """
+    Serialize a boundary function to a JSON-compatible dict.
 
     Supports registered functions, `functools.partial` wrappers, and
     `ParameterizedBoundaryFunction` instances.
 
     :param func: The callable to serialize.
     :param recurse: Passed through to `ParameterizedBoundaryFunction.dump`.
-    :return: A dict with a ``"type"`` discriminator key.
+    :return: A dict with a `"type"` discriminator key.
     :raises SerializationError: If the function cannot be identified.
     """
     with _boundary_function_lock:
@@ -181,7 +183,8 @@ def _serialize_boundary_function(
 def _deserialize_boundary_function(
     data: typing.Mapping[str, typing.Any],
 ) -> typing.Callable[..., typing.Any]:
-    """Deserialize a boundary function from a dict produced by `_serialize_boundary_function`.
+    """
+    Deserialize a boundary function from a dict produced by `_serialize_boundary_function`.
 
     :param data: Serialized representation.
     :return: The reconstructed callable.
@@ -221,25 +224,28 @@ class ParameterizedBoundaryFunction(
     Serializable,
     fields={"func_name": str, "params": typing.Dict[str, typing.Any]},
 ):
-    """A fully serializable alternative to `functools.partial` for boundary functions.
+    """
+    A fully serializable alternative to `functools.partial` for boundary functions.
 
     Stores a reference to a registered boundary function by name together with
-    a fixed parameter dict.  On call, the stored parameters are merged with any
+    a fixed parameter dict. On call, the stored parameters are merged with any
     additional keyword arguments supplied by the caller.
 
-    Usage::
+    Usage:
 
-        @boundary_function
-        def linear_pi(metadata, slope=1.0, intercept=0.0):
-            # returns a production-index array shaped like the boundary slice
-            ...
+    ```python
+    @boundary_function
+    def linear_pi(metadata, slope=1.0, intercept=0.0):
+        # returns a production-index array shaped like the boundary slice
+        ...
 
-        alpha = ParameterizedBoundaryFunction(
-            func_name="linear_pi",
-            params={"slope": 2.5, "intercept": 50.0},
-        )
+    alpha = ParameterizedBoundaryFunction(
+        func_name="linear_pi",
+        params={"slope": 2.5, "intercept": 50.0},
+    )
 
-        robin = RobinBoundary(pressure=2000.0, alpha=alpha)
+    robin = RobinBoundary(pressure=2000.0, alpha=alpha)
+    ```
 
     :param func_name: Name under which the base function was registered with
         `@boundary_function`.
@@ -256,7 +262,8 @@ class ParameterizedBoundaryFunction(
         self._func = get_boundary_function(func_name)
 
     def __call__(self, *args: typing.Any, **kwargs: typing.Any) -> np.ndarray:
-        """Invoke the underlying function with stored parameters.
+        """
+        Invoke the underlying function with stored parameters.
 
         :param args: Positional arguments forwarded to the base function.
         :param kwargs: Keyword arguments forwarded to the base function; these
@@ -273,7 +280,7 @@ class ParameterizedBoundaryFunction(
         return cls(func_name=data["func_name"], params=dict(data["params"]))
 
 
-# Built-in registered alpha functions for RobinBoundary
+# Built-in registered alpha functions for `RobinBoundary`
 
 
 @boundary_function(name="constant_productivity_index")
@@ -283,23 +290,25 @@ def _constant_productivity_index(
     direction: "Boundary",
     value: float = 1.0,
 ) -> np.ndarray:
-    """Return a uniform production-index array equal to *value* over the boundary slice.
+    """
+    Return a uniform production-index array equal to *value* over the boundary slice.
 
     This is the simplest alpha function for `RobinBoundary`: every ghost cell
-    has the same productivity index.  Use `ParameterizedBoundaryFunction` to
-    set the actual numeric value::
+    has the same productivity index. Use `ParameterizedBoundaryFunction` to
+    set the actual numeric value:
 
-        alpha = ParameterizedBoundaryFunction(
-            func_name="constant_productivity_index",
-            params={"value": 25.0},
-        )
+    ```python
+    alpha = ParameterizedBoundaryFunction(
+        func_name="constant_productivity_index",
+        params={"value": 25.0},
+    )
+    ```
 
     :param metadata: Boundary metadata (unused here, kept for API consistency).
     :param boundary_slice: Slice tuple identifying the boundary cells.
     :param direction: Face direction (unused here).
     :param value: Scalar productivity-index value (ft³/day/psi).
-    :return: Array of shape matching ``metadata.pressure_grid[boundary_slice]``
-        filled with *value*.
+    :return: Array of shape matching `metadata.pressure_grid[boundary_slice]` filled with *value*.
     """
     assert metadata.fluid_properties is not None
     shape = metadata.fluid_properties.pressure_grid[boundary_slice].shape
@@ -313,9 +322,10 @@ def _transmissibility_weighted_pi(
     direction: "Boundary",
     mobility_scale: float = 1.0,
 ) -> np.ndarray:
-    """Return a production-index array derived from face transmissibilities and total mobility.
+    """
+    Return a production-index array derived from face transmissibilities and total mobility.
 
-    The productivity index at each boundary cell is::
+    The productivity index at each boundary cell is:
 
         PI[i,j,k] = T_face[i,j,k] * lambda_total[i,j,k] * mobility_scale
 
@@ -323,7 +333,7 @@ def _transmissibility_weighted_pi(
     the ghost cell and *lambda_total* is the sum of the three-phase relative
     mobilities at that cell.
 
-    :param metadata: Boundary metadata.  Must carry `face_transmissibilities`
+    :param metadata: Boundary metadata. Must carry `face_transmissibilities`
         and `relative_mobility_grids`.
     :param boundary_slice: Slice tuple identifying the boundary cells.
     :param direction: Face direction; determines which transmissibility array
@@ -343,17 +353,23 @@ def _transmissibility_weighted_pi(
             "in BoundaryMetadata."
         )
 
-    ft = metadata.face_transmissibilities
+    transmissibilities = metadata.face_transmissibilities
     if direction in (Boundary.LEFT, Boundary.RIGHT):
-        T_face = ft.x[boundary_slice]
+        T_face = transmissibilities.x[boundary_slice]
     elif direction in (Boundary.FRONT, Boundary.BACK):
-        T_face = ft.y[boundary_slice]
+        T_face = transmissibilities.y[boundary_slice]
     else:
-        T_face = ft.z[boundary_slice]
+        T_face = transmissibilities.z[boundary_slice]
 
-    lw, lo, lg = metadata.relative_mobility_grids
-    lambda_total = lw[boundary_slice] + lo[boundary_slice] + lg[boundary_slice]
-    return T_face * lambda_total * mobility_scale
+    water_relative_mobility, oil_relative_mobility, gas_relative_mobility = (
+        metadata.relative_mobility_grids
+    )
+    total_relative_mobility = (
+        water_relative_mobility[boundary_slice]
+        + oil_relative_mobility[boundary_slice]
+        + gas_relative_mobility[boundary_slice]
+    )
+    return T_face * total_relative_mobility * mobility_scale
 
 
 class Boundary(enum.Enum):
@@ -380,7 +396,7 @@ class BoundaryType(enum.Enum):
     - **FLUX** - the ghost-cell value is a volumetric flow rate (ft³/day) into
     the boundary face. The solver uses it as a Neumann source term.
 
-    - **PRESSURE** - the ghost-cell value is a pressure (psi).  The solver
+    - **PRESSURE** - the ghost-cell value is a pressure (psi). The solver
     treats it as a Dirichlet constraint and computes the face flux from the
     pressure difference and transmissibility.
     """
@@ -394,13 +410,8 @@ class BoundaryMetadata:
     """
     Metadata bundle supplied to every boundary condition call.
 
-    `BoundaryMetadata` is a lightweight wrapper - it holds *references* to
-    the simulation arrays that already exist in memory; no data is copied.
-    It is rebuilt once per time step (or once per BC evaluation pass) so its
-    construction cost is negligible.
-
     Every field is *Optional* so that boundary conditions that do not need
-    the full context can be constructed cheaply.  A boundary condition that
+    the full context can be constructed cheaply. A boundary condition that
     requires a specific field should validate its presence at call time and
     raise `ValidationError` with a clear message.
 
@@ -417,8 +428,8 @@ class BoundaryMetadata:
     :param face_transmissibilities: Precomputed geometric face transmissibilities
         (x, y, z) for the padded grid in mD·ft.
     :param time: Current simulation time in seconds.
-    :param grid_shape: Original (un-padded) grid shape as ``(nx, ny, nz)``.
-    :param cell_dimension: Physical cell dimensions ``(dx, dy)`` in feet.
+    :param grid_shape: Original (un-padded) grid shape as `(nx, ny, nz)`.
+    :param cell_dimension: Physical cell dimensions `(dx, dy)` in feet.
     :param thickness_grid: Un-padded cell thickness array (ft).
     """
 
@@ -529,13 +540,13 @@ class BoundaryCondition(
         Compute and return ghost-cell values for the specified boundary face.
 
         The returned array has the same shape as
-        ``metadata.fluid_properties.pressure_grid[boundary_slice]`` (or any
+        `metadata.fluid_properties.pressure_grid[boundary_slice]` (or any
         other grid on the padded domain sliced with *boundary_slice*).
 
         :param boundary_slice: Tuple of `slice` objects that, when applied to a
             padded grid, selects exactly the ghost-cell layer for this face.
             For example, the left boundary of a 3-D padded grid is
-            ``(slice(0, 1), slice(None), slice(None))``.
+            `(slice(0, 1), slice(None), slice(None))`.
         :param direction: Which face of the domain this call covers.
         :param metadata: Simulation context bundle.
         :return: Array of ghost-cell values shaped like the boundary slice.
@@ -580,7 +591,7 @@ boundary_condition = make_serializable_type_registrar(
 """Decorator that registers a `BoundaryCondition` subclass for serialization."""
 
 
-def _neighbour_slice(
+def get_neighbour_slice(
     boundary_slice: typing.Tuple[slice, ...], direction: Boundary
 ) -> typing.Tuple[slice, ...]:
     """
@@ -632,10 +643,10 @@ class NeumannBoundary(BoundaryCondition[NDimension]):
     constructing this object (or use `c.BARRELS_TO_CUBIC_FEET` multiplier).
 
     :param flux: Volumetric flow rate (ft³/day) applied uniformly across
-        the boundary face.  Default is *0.0* (no-flow).
+        the boundary face. Default is *0.0* (no-flow).
 
     Example:
-    ```python
+    ``python
     # No-flow (sealed) boundary - default
     sealed = NeumannBoundary()
 
@@ -663,10 +674,9 @@ class NeumannBoundary(BoundaryCondition[NDimension]):
 
         :param boundary_slice: Ghost-cell layer slice.
         :param direction: Face direction (unused; flux is spatially uniform).
-        :param metadata: Simulation context.  Must carry `fluid_properties` so
+        :param metadata: Simulation context. Must carry `fluid_properties` so
             that the returned array shape can be determined.
-        :return: Array shaped like the boundary slice, every element equal to
-            `self.flux`.
+        :return: Array shaped like the boundary slice, every element equal to `self.flux`.
         :raises ValidationError: If `metadata.fluid_properties` is *None*.
         """
         if metadata.fluid_properties is None:
@@ -711,7 +721,7 @@ class DirichletBoundary(BoundaryCondition[NDimension]):
     Constant-pressure (Dirichlet) boundary condition.
 
     Returns a uniform array equal to `pressure` (psi) over the ghost-cell
-    layer.  The solver uses this value directly as the ghost-cell pressure,
+    layer. The solver uses this value directly as the ghost-cell pressure,
     driving flow across the face according to the local transmissibility.
 
     :param pressure: Prescribed boundary pressure (psi).
@@ -743,9 +753,8 @@ class DirichletBoundary(BoundaryCondition[NDimension]):
 
         :param boundary_slice: Ghost-cell layer slice.
         :param direction: Face direction (unused; pressure is spatially uniform).
-        :param metadata: Simulation context.  Must carry `fluid_properties`.
-        :return: Array shaped like the boundary slice, every element equal to
-            `self.pressure`.
+        :param metadata: Simulation context. Must carry `fluid_properties`.
+        :return: Array shaped like the boundary slice, every element equal to `self.pressure`.
         :raises ValidationError: If `metadata.fluid_properties` is *None*.
         """
         if metadata.fluid_properties is None:
@@ -805,7 +814,7 @@ class RobinBoundary(BoundaryCondition[NDimension]):
     throughout the simulator.
 
     The `alpha` callable must accept the same positional arguments as
-    `BoundaryCondition.__call__`, i.e. ``(metadata, boundary_slice, direction)``,
+    `BoundaryCondition.__call__`, i.e. `(metadata, boundary_slice, direction)`,
     and must return an `np.ndarray` shaped like the boundary slice. You can use a registered
     `@boundary_function`, a `ParameterizedBoundaryFunction`, or any callable
     that satisfies this contract.
@@ -814,17 +823,17 @@ class RobinBoundary(BoundaryCondition[NDimension]):
 
     Two ready-to-use alpha functions are registered by default:
 
-    - ``"constant_productivity_index"`` - uniform PI equal to a scalar
+    - `"constant_productivity_index"` - uniform PI equal to a scalar
       *value* parameter (ft³/day/psi).
-    - ``"transmissibility_weighted_pi"`` - ``T_face * lambda_total``, where
+    - `"transmissibility_weighted_pi"` - `T_face * lambda_total`, where
       *T_face* is the geometric face transmissibility and *lambda_total* is
       the sum of three-phase relative mobilities.
 
     :param pressure: Reference boundary pressure (psi).  Typically the
         aquifer pressure, injection manifold pressure, or any target pressure
         at the face.
-    :param alpha: Callable ``(metadata, boundary_slice, direction) -> np.ndarray``
-        returning a production-index array (ft³/day/psi).  Must be a registered
+    :param alpha: Callable `(metadata, boundary_slice, direction) -> np.ndarray`
+        returning a production-index array (ft³/day/psi). Must be a registered
         boundary function or a `ParameterizedBoundaryFunction` so that the
         condition can be serialized.
 
@@ -871,7 +880,7 @@ class RobinBoundary(BoundaryCondition[NDimension]):
                 "interior neighbour pressures."
             )
 
-        nbr_slice = _neighbour_slice(boundary_slice, direction)
+        nbr_slice = get_neighbour_slice(boundary_slice, direction)
         p_interior = metadata.fluid_properties.pressure_grid[nbr_slice].astype(
             metadata.dtype, copy=False
         )
@@ -923,12 +932,11 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
 
     *Physical properties (recommended)* - supply `aquifer_permeability`,
     `aquifer_porosity`, `aquifer_compressibility`, `water_viscosity`,
-    `inner_radius`, `outer_radius`, and `aquifer_thickness`.  The aquifer
+    `inner_radius`, `outer_radius`, and `aquifer_thickness`. The aquifer
     constant *B* and hydraulic diffusivity are derived from first principles.
 
     *Calibrated constant (legacy)* - supply a history-matched
-    `aquifer_constant` (bbl/psi) directly, together with
-    `dimensionless_radius_ratio`.
+    `aquifer_constant` (bbl/psi) directly, together with `dimensionless_radius_ratio`.
 
     **Sign convention**
 
@@ -949,10 +957,9 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
     :param inner_radius: Reservoir-aquifer contact radius (ft).
     :param outer_radius: Aquifer outer extent (ft).
     :param aquifer_thickness: Aquifer thickness (ft).
-    :param aquifer_constant: Pre-computed aquifer constant *B* (bbl/psi) for
-        calibrated-constant mode.
+    :param aquifer_constant: Pre-computed aquifer constant *B* (bbl/psi) for calibrated-constant mode.
     :param dimensionless_radius_ratio: r_outer / r_inner used in calibrated-constant mode. Default is *10.0*.
-    :param angle: Aquifer encroachment angle in degrees.  *360* = full contact;
+    :param angle: Aquifer encroachment angle in degrees. *360* = full contact;
         *180* = half-circle edge drive.  Default is *360*.
 
     **References**:
@@ -1107,7 +1114,7 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
 
         :param boundary_slice: Ghost-cell layer slice.
         :param direction: Face direction the aquifer is attached to.
-        :param metadata: Simulation context.  Must carry `fluid_properties`
+        :param metadata: Simulation context. Must carry `fluid_properties`
             so that boundary-face pressures can be read, and `time`
             (seconds) for the superposition computation.
         :return: Array of volumetric influx rates (ft³/day) shaped like the
@@ -1125,7 +1132,7 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
 
         current_time_days = metadata.time * c.DAYS_PER_SECOND
 
-        nbr_slice = _neighbour_slice(boundary_slice, direction)
+        nbr_slice = get_neighbour_slice(boundary_slice, direction)
         avg_pressure = float(
             np.mean(metadata.fluid_properties.pressure_grid[nbr_slice])
         )
@@ -1168,8 +1175,7 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
         Compute water influx rate using Van Everdingen-Hurst superposition.
 
         :param current_time_days: Current simulation time (days).
-        :return: Total influx rate (bbl/day or ft³/day consistent with *B*
-            units).
+        :return: Total influx rate (bbl/day or ft³/day consistent with *B* units).
         """
         if not self._pressure_history:
             return 0.0
@@ -1353,8 +1359,7 @@ def _face_slices(
     Return the ghost-slice / neighbour-slice pair dict for a given grid dimensionality.
 
     :param ndim: Grid dimensionality (2 or 3).
-    :return: Dict mapping each `Boundary` face to a 2-tuple of
-        ``(ghost_slice, neighbour_slice)``.
+    :return: Dict mapping each `Boundary` face to a 2-tuple of `(ghost_slice, neighbour_slice)`.
     :raises ValidationError: If *ndim* is not 2 or 3.
     """
     if ndim == 2:
@@ -1495,12 +1500,12 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         Both arrays are the *same* Python objects that back the cache, so
         callers must not mutate them; treat them as read-only views.
 
-        :param grid_shape: Un-padded grid shape ``(nx, ny)`` or ``(nx, ny, nz)``.
+        :param grid_shape: Un-padded grid shape `(nx, ny)` or `(nx, ny, nz)`.
         :param metadata: Simulation context bundle passed through to each
             boundary condition.
         :param pad_width: Ghost-cell layer width. Must match the padding used
             when the grids were created. Default is *1*.
-        :return: A 2-tuple ``(flux_grid, pressure_grid)`` where each element is
+        :return: A 2-tuple `(flux_grid, pressure_grid)` where each element is
             a sparse NDimensionalGrid with shape matching the padded grid.
             *flux_grid* - boundary cells controlled by a FLUX-type condition,
             values in ft³/day, NaN elsewhere.
@@ -1523,13 +1528,15 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
             object.__setattr__(self, "_flux_cache", flux_cache)
             object.__setattr__(self, "_pressure_cache", pressure_cache)
             # Determine and cache whether all boundaries are static
-            all_static = all(condition.is_static() for direction, condition in face_conditions)
+            all_static = all(
+                condition.is_static() for direction, condition in face_conditions
+            )
             object.__setattr__(self, "_all_static", all_static)
         else:
             flux_cache = self._flux_cache
             pressure_cache = self._pressure_cache
             assert flux_cache is not None and pressure_cache is not None
-            # If all conditions are static, can skip re-evaluation entirely
+            # If all conditions are static, skip re-evaluation entirely
             if self._all_static:
                 return flux_cache, pressure_cache
 
@@ -1588,7 +1595,7 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
             an updated `fluid_properties` reflecting the latest pressure state.
         :param pad_width: Ghost-cell layer width (must match the value used in
             the initial `get_boundaries` call).
-        :return: A 2-tuple ``(flux_grid, pressure_grid)`` - the updated cached arrays.
+        :return: A 2-tuple `(flux_grid, pressure_grid)` containing the updated cached arrays.
         :raises RuntimeError: If called before `get_boundaries` initialization.
         """
         if not self._cache_initialised:
@@ -1609,7 +1616,7 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         face_conditions = self._face_conditions(ndim)
 
         for direction, condition in face_conditions:
-            # Skip static faces - their cache entries are already correct
+            # Skip static faces. Their cache entries are already correct
             if condition.is_static():
                 continue
 

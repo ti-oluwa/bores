@@ -295,9 +295,11 @@ class ReservoirModel(
         :param grid_shape: Shape of the reservoir grid (num_cells_x, num_cells_y, num_cells_z)
         :param cell_dimension: Size of each cell in the grid (cell_size_x, cell_size_y) in ft
         :param thickness_grid: N-dimensional numpy array representing the thickness of each cell in the reservoir (ft)
-        :param fluid_properties: Fluid properties or lazy loader for fluid properties
-        :param rock_fluid_properties: Rock-fluid properties or lazy loader
-        :param saturation_history: Saturation history or lazy loader
+        :param fluid_properties: Fluid properties for fluid properties
+        :param rock_fluid_properties: Rock-fluid properties
+        :param saturation_history: Saturation history
+        :param face_transmissibilities: Optional precomputed face transmissibilities. If not provided, 
+            they will be computed from the permeability and grid properties when accessed.
         :param dip_angle: Dip angle of the reservoir in degrees (0 = horizontal, 90 = vertical)
         :param dip_azimuth: Dip azimuth of the reservoir in degrees (0 = North, 90 = East, 180 = South, 270 = West)
         :param datum_depth: Reference depth for reservoir model. Basically the reservoir top depth (below sea level)
@@ -359,11 +361,11 @@ class ReservoirModel(
         }
         return type(self)(**{**attrs, **kwargs})  # type: ignore[arg-type]
 
-    def get_elevation_grid(
+    def build_elevation_grid(
         self, apply_dip: bool = False
     ) -> NDimensionalGrid[NDimension]:
         """
-        Generate an elevation grid of the reservoir cells.
+        Build an elevation grid of the reservoir cells.
 
         The elevation grid is generated based on the thickness of each cell, starting from the base elevation (0 ft).
 
@@ -374,11 +376,11 @@ class ReservoirModel(
         Example:
         ```python
         # Flat reservoir
-        elevation = model.get_elevation_grid(apply_dip=False)
+        elevation = model.build_elevation_grid(apply_dip=False)
 
         # Dipping reservoir (5° toward North)
         model = ReservoirModel(dip_angle=5.0, dip_direction="N", ...)
-        elevation = model.get_elevation_grid(apply_dip=True)
+        elevation = model.build_elevation_grid(apply_dip=True)
         ```
         """
         if self.datum_depth is None:
@@ -405,9 +407,9 @@ class ReservoirModel(
             dip_azimuth=self.dip_azimuth,
         )
 
-    def get_depth_grid(self, apply_dip: bool = False) -> NDimensionalGrid[NDimension]:
+    def build_depth_grid(self, apply_dip: bool = False) -> NDimensionalGrid[NDimension]:
         """
-        Generate a depth grid of the reservoir cells.
+        Build a depth grid of the reservoir cells.
 
         The depth grid is generated based on the thickness of each cell, starting from the surface (0 ft).
 
@@ -419,11 +421,11 @@ class ReservoirModel(
 
         ```python
         # Flat reservoir
-        depth = model.get_depth_grid(apply_dip=False)
+        depth = model.build_depth_grid(apply_dip=False)
 
         # Dipping reservoir (5° toward North)
         model = ReservoirModel(dip_angle=5.0, ...)
-        depth = model.get_depth_grid(apply_dip=True)
+        depth = model.build_depth_grid(apply_dip=True)
         ```
         """
         base_depth_grid = build_depth_grid(
