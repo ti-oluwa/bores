@@ -1193,7 +1193,7 @@ def compute_fluxes_from_neighbour(
 
     :param cell_indices: Indices of the current cell (i, j, k)
     :param neighbour_indices: Indices of the neighbouring cell (i±1, j, k) or (i, j±1, k) or (i, j, k±1)
-    :param oil_pressure_grid: 3D grid of oil pressures (psi)
+    :param face_transmissibility: Transmissibility of the face between the current cell and the neighbour (ft³/psi.day)
     :param water_relative_mobility_grid: 3D grid of water mobilities (ft²/psi.day)
     :param oil_relative_mobility_grid: 3D grid of oil mobilities (ft²/psi.day)
     :param gas_relative_mobility_grid: 3D grid of gas mobilities (ft²/psi.day)
@@ -1366,7 +1366,8 @@ def compute_well_contributions(
     :param config: Simulation configuration
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor
     :param dtype: Desired dtype for output arrays (e.g. np.float32 or np.float64)
-    :param
+    :param injection_bhps: Optional proxy to write back computed injection BHPs
+    :param production_bhps: Optional proxy to write back computed production BHPs
     :return: Four flat arrays ready for scatter-add
         into the final diagonal and RHS before COO matrix construction.
     """
@@ -1425,10 +1426,8 @@ def compute_well_contributions(
             )
 
             if injected_phase == FluidPhase.GAS:
-                phase_mobility = gas_relative_mobility_grid[i, j, k]
                 compressibility_kwargs: dict = {}
             else:
-                phase_mobility = water_relative_mobility_grid[i, j, k]
                 compressibility_kwargs = {
                     "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
                     "gas_formation_volume_factor": gas_formation_volume_factor_grid[

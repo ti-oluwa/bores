@@ -121,16 +121,6 @@ def compute_well_rates(
                     temperature=cell_temperature,
                 ),
             )
-            total_relative_mobility = (
-                water_relative_mobility_grid[i, j, k]
-                + oil_relative_mobility_grid[i, j, k]
-                + gas_relative_mobility_grid[i, j, k]
-            )
-            if total_relative_mobility == 0.0:
-                injection_rates[i, j, k] = (0.0, 0.0, 0.0)
-                injection_fvfs[i, j, k] = (0.0, 0.0, 0.0)
-                continue
-
             if injected_phase == FluidPhase.GAS:
                 phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
                 # Build pseudo-pressure table if needed
@@ -159,7 +149,7 @@ def compute_well_rates(
                     pressure=new_pressure,
                     temperature=cell_temperature,
                     bottom_hole_pressure=bhp,
-                    phase_mobility=total_relative_mobility,
+                    phase_mobility=phase_mobility,
                     use_pseudo_pressure=use_pp,
                     pseudo_pressure_table=pp_table,
                     average_compressibility_factor=avg_z_factor,
@@ -201,7 +191,7 @@ def compute_well_rates(
                         well_index=well_index,
                         pressure=new_pressure,
                         bottom_hole_pressure=bhp,
-                        phase_mobility=total_relative_mobility,
+                        phase_mobility=phase_mobility,
                         fluid_compressibility=phase_compressibility,
                         incompressibility_threshold=incompressibility_threshold,
                     )

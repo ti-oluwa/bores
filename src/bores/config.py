@@ -264,14 +264,14 @@ class Config(
     solve. This parameter seeds a small but non-zero gas saturation in those
     cells so that krg > 0 and transport can proceed.
 
-    The value should be above ``phase_appearance_tolerance`` to guarantee that
-    the relative permeability model returns a non-zero krg. A value of 1e-4
-    (0.01% pore volume) is typically sufficient. Setting too large a value
+    The value should be above `phase_appearance_tolerance` and `residual_gas_saturation` to guarantee that
+    the relative permeability model returns a non-zero krg. Setting too large a value
     introduces an artificial initial gas saturation that may affect early-time
-    results and MBE. Set to ``None`` to disable gas saturation seeding entirely,
+    results and MBE. Set to `None` to disable gas saturation seeding entirely,
     which is appropriate when the initial gas saturation is already non-zero in
     injector cells.
     """
+
     minimum_injector_water_saturation: typing.Optional[float] = attrs.field(
         default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
     )
@@ -279,13 +279,14 @@ class Config(
     Minimum water saturation enforced in active water injector wellblocks after
     each pressure solve and rate computation.
 
-    Analogous to ``minimum_injector_gas_saturation`` but for water injectors.
+    Analogous to `minimum_injector_gas_saturation` but for water injectors.
     In practice, connate water saturation is almost always non-zero so this
     seeding is rarely needed for water injection. However, in synthetic models
     or edge cases where initial water saturation is exactly zero in injector
     cells, this parameter prevents krw from being zero in the transport step.
 
-    The value should be above ``phase_appearance_tolerance``. Set to ``None``
+    The value should be above `phase_appearance_tolerance` and `irreducible_water_saturation` to guarantee that
+    the relative permeability model returns a non-zero krw. Set to `None`
     to disable water saturation seeding, which is the recommended setting for
     most realistic models where connate water is already present.
     """

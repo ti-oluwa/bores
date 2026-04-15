@@ -29,6 +29,11 @@ from bores.grids.pvt import (
     build_three_phase_relative_permeabilities_grids,
 )
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
+from bores.initialization import (
+    apply_minimum_injector_saturations,
+    check_zero_flow_initialization,
+    seed_injection_saturations,
+)
 from bores.material_balance import (
     MaterialBalanceErrors,
     compute_material_balance_errors,
@@ -46,7 +51,7 @@ from bores.solvers.rates import compute_well_rates
 from bores.states import ModelState
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTDataSet, PVTTables
-from bores.transmissibility import FaceTransmissibilities, build_face_transmissibilities
+from bores.transmissibility import FaceTransmissibilities
 from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDimensions
 from bores.updates import (
     apply_solution_gas_updates,
@@ -345,85 +350,6 @@ def _rebuild_rock_fluid_grids(
     )
 
 
-def _apply_minimum_injector_saturations(
-    gas_saturation_grid: NDimensionalGrid[ThreeDimensions],
-    oil_saturation_grid: NDimensionalGrid[ThreeDimensions],
-    water_saturation_grid: NDimensionalGrid[ThreeDimensions],
-    injection_rates: Rates[float, ThreeDimensions],
-    minimum_gas_saturation: typing.Optional[float],
-    minimum_water_saturation: typing.Optional[float],
-    dtype: npt.DTypeLike,
-) -> typing.Tuple[
-    NDimensionalGrid[ThreeDimensions],
-    NDimensionalGrid[ThreeDimensions],
-    NDimensionalGrid[ThreeDimensions],
-]:
-    """
-    Seed (in-place) minimum saturation in active injector wellblocks to ensure non-zero
-    relative permeability for transport.
-
-    For gas injectors, gas saturation is raised to at least
-    `minimum_gas_saturation` and oil saturation is reduced by the same
-    amount to conserve total saturation. For water injectors, the same
-    logic applies between water and oil. `Sw + So + Sg = 1` is preserved
-    exactly. Cells with zero injection rate are not modified.
-
-    :param gas_saturation_grid: Current gas saturation grid.
-    :param oil_saturation_grid: Current oil saturation grid.
-    :param water_saturation_grid: Current water saturation grid.
-    :param injection_rates: Injection rates proxy — active gas injector cells
-        have `gas > 0`, active water injector cells have `water > 0`.
-    :param minimum_gas_saturation: Minimum gas saturation to enforce in active
-        gas injector wellblocks. Should be above `phase_appearance_tolerance`
-        to guarantee `krg > 0`. Pass `None` to disable gas seeding.
-    :param minimum_water_saturation: Minimum water saturation to enforce in
-        active water injector wellblocks. Should be above
-        `phase_appearance_tolerance` to guarantee `krw > 0`. Pass `None` to disable water seeding.
-    :param dtype: NumPy dtype used for all grid arrays.
-    :return: Updated `(gas_saturation_grid, oil_saturation_grid, water_saturation_grid)`
-        with minimum saturations enforced.
-    """
-    sg = gas_saturation_grid
-    so = oil_saturation_grid
-    sw = water_saturation_grid
-
-    if minimum_gas_saturation is not None:
-        gas_injector_mask = injection_rates.gas.array(dtype=dtype) > 0
-        if gas_injector_mask.any():
-            sg_new = np.where(
-                gas_injector_mask,
-                np.maximum(sg, np.full_like(sg, minimum_gas_saturation, dtype=dtype)),
-                sg,
-            ).astype(dtype)
-
-            delta_sg = sg_new - sg
-            so = np.where(
-                gas_injector_mask,
-                np.maximum(so - delta_sg, np.zeros_like(so, dtype=dtype)),
-                so,
-            ).astype(dtype)
-            sg = sg_new
-
-    if minimum_water_saturation is not None:
-        water_injector_mask = injection_rates.water.array(dtype=dtype) > 0
-        if water_injector_mask.any():
-            sw_new = np.where(
-                water_injector_mask,
-                np.maximum(sw, np.full_like(sw, minimum_water_saturation, dtype=dtype)),
-                sw,
-            ).astype(dtype)
-
-            delta_sw = sw_new - sw
-            so = np.where(
-                water_injector_mask,
-                np.maximum(so - delta_sw, np.zeros_like(so, dtype=dtype)),
-                so,
-            ).astype(dtype)
-            sw = sw_new
-
-    return sg, so, sw
-
-
 # STEP FUNCTIONS
 
 
@@ -605,15 +531,6 @@ def _run_impes_step(
         production_rates=_rates_proxy(production_rates),
         injection_fvfs=_fvfs_proxy(injection_fvfs),
         production_fvfs=_fvfs_proxy(production_fvfs),
-    )
-    _apply_minimum_injector_saturations(
-        gas_saturation_grid=fluid_properties.gas_saturation_grid,
-        oil_saturation_grid=fluid_properties.oil_saturation_grid,
-        water_saturation_grid=fluid_properties.water_saturation_grid,
-        injection_rates=injection_rates,
-        minimum_gas_saturation=config.minimum_injector_gas_saturation,
-        minimum_water_saturation=config.minimum_injector_water_saturation,
-        dtype=dtype,
     )
 
     # Refresh boundary conditions after pressure update so that dynamic BCs (Robin,
@@ -1081,16 +998,6 @@ def _run_sequential_implicit_step(
         production_fvfs=_fvfs_proxy(production_fvfs),
     )
 
-    _apply_minimum_injector_saturations(
-        gas_saturation_grid=fluid_properties.gas_saturation_grid,
-        oil_saturation_grid=fluid_properties.oil_saturation_grid,
-        water_saturation_grid=fluid_properties.water_saturation_grid,
-        injection_rates=injection_rates,
-        minimum_gas_saturation=config.minimum_injector_gas_saturation,
-        minimum_water_saturation=config.minimum_injector_water_saturation,
-        dtype=dtype,
-    )
-
     # Refresh boundary conditions so the saturation solve sees post-pressure BC values.
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
     flux_boundaries, pressure_boundaries = (
@@ -1546,16 +1453,6 @@ def _run_full_sequential_implicit_step(
             production_rates=_rates_proxy(production_rates),
             injection_fvfs=_fvfs_proxy(injection_fvfs),
             production_fvfs=_fvfs_proxy(production_fvfs),
-        )
-
-        _apply_minimum_injector_saturations(
-            gas_saturation_grid=iter_fluid_properties.gas_saturation_grid,
-            oil_saturation_grid=iter_fluid_properties.oil_saturation_grid,
-            water_saturation_grid=iter_fluid_properties.water_saturation_grid,
-            injection_rates=injection_rates,
-            minimum_gas_saturation=config.minimum_injector_gas_saturation,
-            minimum_water_saturation=config.minimum_injector_water_saturation,
-            dtype=dtype,
         )
 
         logger.debug(
@@ -2618,6 +2515,19 @@ def run(
         )
         model = model.evolve(fluid_properties=fluid_properties)
 
+        # Seed injector saturations to avoid phase deadlock at t=0
+        if has_wells:
+            logger.debug("Seeding injection saturations in injector perforations...")
+            fluid_properties = seed_injection_saturations(
+                fluid_properties=fluid_properties,
+                wells=wells,
+                well_indices_cache=well_indices_cache,
+                rock_fluid_tables_config=config,
+                minimum_injector_water_saturation=config.minimum_injector_water_saturation,
+                minimum_injector_gas_saturation=config.minimum_injector_gas_saturation,
+                inplace=True,
+            )
+
         logger.debug("Building initial rock-fluid property grids...")
         relperm_grids, relative_mobility_grids, capillary_pressure_grids = (
             _rebuild_rock_fluid_grids(fluid_properties, rock_properties, config)
@@ -2669,6 +2579,22 @@ def run(
                     logger.debug("Wells updated.")
 
                 if new_step > 1:
+                    # Apply minimum injector saturations BEFORE mobility rebuild to ensure
+                    # non-zero mobilities in the pressure Jacobian.
+                    if has_wells:
+                        logger.debug(
+                            f"Enforcing minimum injector saturations for time step {new_step}..."
+                        )
+                        fluid_properties = apply_minimum_injector_saturations(
+                            fluid_properties=fluid_properties,
+                            wells=wells,
+                            well_indices_cache=well_indices_cache,
+                            minimum_injector_water_saturation=config.minimum_injector_water_saturation,
+                            minimum_injector_gas_saturation=config.minimum_injector_gas_saturation,
+                            dtype=dtype,
+                        )
+                        logger.debug("Minimum injector saturations enforced.")
+
                     # Rebuild rock-fluid grids from the current saturation state
                     # at the start of every step so the solvers see consistent mobilities.
                     logger.debug(

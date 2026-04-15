@@ -1436,8 +1436,8 @@ def _assemble_analytical_jacobian(
                 )
                 water_row = 2 * cell_1d_index
                 gas_row = 2 * cell_1d_index + 1
-                cell_water_saturation_column = 2 * cell_1d_index
-                cell_gas_saturation_column = 2 * cell_1d_index + 1
+                cell_water_column = 2 * cell_1d_index
+                cell_gas_column = 2 * cell_1d_index + 1
 
                 cell_volume = (
                     cell_size_x
@@ -1451,12 +1451,12 @@ def _assemble_analytical_jacobian(
 
                 # Accumulation diagonal (dR_w/dSw and dR_g/dSg = phi*V/dt)
                 all_rows[i, local_ptr] = water_row
-                all_cols[i, local_ptr] = cell_water_saturation_column
+                all_cols[i, local_ptr] = cell_water_column
                 all_vals[i, local_ptr] = accumulation_coefficient
                 local_ptr += 1
 
                 all_rows[i, local_ptr] = gas_row
-                all_cols[i, local_ptr] = cell_gas_saturation_column
+                all_cols[i, local_ptr] = cell_gas_column
                 all_vals[i, local_ptr] = accumulation_coefficient
                 local_ptr += 1
 
@@ -1575,8 +1575,8 @@ def _assemble_analytical_jacobian(
                         cell_count_y=cell_count_y,
                         cell_count_z=cell_count_z,
                     )
-                    neighbour_water_saturation_column = 2 * neighbour_1d_index
-                    neighbour_gas_saturation_column = 2 * neighbour_1d_index + 1
+                    neighbour_water_column = 2 * neighbour_1d_index
+                    neighbour_gas_column = 2 * neighbour_1d_index + 1
 
                     # Projected relperm derivatives at neighbour
                     dkrw_dSw_n_eff = (
@@ -1765,44 +1765,44 @@ def _assemble_analytical_jacobian(
                     # Write diagonal contributions (w.r.t. cell i's unknowns)
                     if dRw_dSw_i != 0.0:
                         all_rows[i, local_ptr] = water_row
-                        all_cols[i, local_ptr] = cell_water_saturation_column
+                        all_cols[i, local_ptr] = cell_water_column
                         all_vals[i, local_ptr] = dRw_dSw_i
                         local_ptr += 1
                     if dRw_dSg_i != 0.0:
                         all_rows[i, local_ptr] = water_row
-                        all_cols[i, local_ptr] = cell_gas_saturation_column
+                        all_cols[i, local_ptr] = cell_gas_column
                         all_vals[i, local_ptr] = dRw_dSg_i
                         local_ptr += 1
                     if dRg_dSw_i != 0.0:
                         all_rows[i, local_ptr] = gas_row
-                        all_cols[i, local_ptr] = cell_water_saturation_column
+                        all_cols[i, local_ptr] = cell_water_column
                         all_vals[i, local_ptr] = dRg_dSw_i
                         local_ptr += 1
                     if dRg_dSg_i != 0.0:
                         all_rows[i, local_ptr] = gas_row
-                        all_cols[i, local_ptr] = cell_gas_saturation_column
+                        all_cols[i, local_ptr] = cell_gas_column
                         all_vals[i, local_ptr] = dRg_dSg_i
                         local_ptr += 1
 
                     # Write off-diagonal contributions (w.r.t. neighbour's unknowns)
                     if dRw_dSw_n != 0.0:
                         all_rows[i, local_ptr] = water_row
-                        all_cols[i, local_ptr] = neighbour_water_saturation_column
+                        all_cols[i, local_ptr] = neighbour_water_column
                         all_vals[i, local_ptr] = dRw_dSw_n
                         local_ptr += 1
                     if dRw_dSg_n != 0.0:
                         all_rows[i, local_ptr] = water_row
-                        all_cols[i, local_ptr] = neighbour_gas_saturation_column
+                        all_cols[i, local_ptr] = neighbour_gas_column
                         all_vals[i, local_ptr] = dRw_dSg_n
                         local_ptr += 1
                     if dRg_dSw_n != 0.0:
                         all_rows[i, local_ptr] = gas_row
-                        all_cols[i, local_ptr] = neighbour_water_saturation_column
+                        all_cols[i, local_ptr] = neighbour_water_column
                         all_vals[i, local_ptr] = dRg_dSw_n
                         local_ptr += 1
                     if dRg_dSg_n != 0.0:
                         all_rows[i, local_ptr] = gas_row
-                        all_cols[i, local_ptr] = neighbour_gas_saturation_column
+                        all_cols[i, local_ptr] = neighbour_gas_column
                         all_vals[i, local_ptr] = dRg_dSg_n
                         local_ptr += 1
 
@@ -1903,7 +1903,7 @@ def _assemble_jacobian_well_contributions(
             water_bhp, _, gas_bhp = injection_bhps[i, j, k]
 
             if gas_bhp:
-                drawdown = cell_pressure - gas_bhp
+                drawdown = gas_bhp - cell_pressure
                 gas_viscosity = typing.cast(float, gas_viscosity_grid[i, j, k])
                 inverse_gas_viscosity = (
                     1.0 / gas_viscosity if gas_viscosity > 0.0 else 0.0
@@ -1924,11 +1924,11 @@ def _assemble_jacobian_well_contributions(
                     * dkrg_dSg_eff
                     * drawdown
                 )
-                _add_diagonal_entry(cell_1d_index, 1, 0, -dqg_dSw)
-                _add_diagonal_entry(cell_1d_index, 1, 1, -dqg_dSg)
+                _add_diagonal_entry(cell_1d_index, 1, 0, dqg_dSw)
+                _add_diagonal_entry(cell_1d_index, 1, 1, dqg_dSg)
 
             elif water_bhp:
-                drawdown = cell_pressure - water_bhp
+                drawdown = water_bhp - cell_pressure
                 water_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
                 inverse_water_viscosity = (
                     1.0 / water_viscosity if water_viscosity > 0.0 else 0.0
@@ -1949,8 +1949,8 @@ def _assemble_jacobian_well_contributions(
                     * dkrw_dSg_eff
                     * drawdown
                 )
-                _add_diagonal_entry(cell_1d_index, 0, 0, -dqw_dSw)
-                _add_diagonal_entry(cell_1d_index, 0, 1, -dqw_dSg)
+                _add_diagonal_entry(cell_1d_index, 0, 0, dqw_dSw)
+                _add_diagonal_entry(cell_1d_index, 0, 1, dqw_dSg)
 
     for well_indices in well_indices_cache.production.values():
         for perforation_index in well_indices:
@@ -1961,7 +1961,7 @@ def _assemble_jacobian_well_contributions(
             water_bhp, _, gas_bhp = production_bhps[i, j, k]
 
             if water_bhp:
-                drawdown = cell_pressure - water_bhp
+                drawdown = water_bhp - cell_pressure
                 water_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
                 inverse_water_viscosity = (
                     1.0 / water_viscosity if water_viscosity > 0.0 else 0.0
@@ -1982,11 +1982,11 @@ def _assemble_jacobian_well_contributions(
                     * dkrw_dSg_eff
                     * drawdown
                 )
-                _add_diagonal_entry(cell_1d_index, 0, 0, -dqw_dSw)
-                _add_diagonal_entry(cell_1d_index, 0, 1, -dqw_dSg)
+                _add_diagonal_entry(cell_1d_index, 0, 0, dqw_dSw)
+                _add_diagonal_entry(cell_1d_index, 0, 1, dqw_dSg)
 
             if gas_bhp:
-                drawdown = cell_pressure - gas_bhp
+                drawdown = gas_bhp - cell_pressure
                 gas_viscosity = typing.cast(float, gas_viscosity_grid[i, j, k])
                 inverse_gas_viscosity = (
                     1.0 / gas_viscosity if gas_viscosity > 0.0 else 0.0
@@ -2007,8 +2007,8 @@ def _assemble_jacobian_well_contributions(
                     * dkrg_dSg_eff
                     * drawdown
                 )
-                _add_diagonal_entry(cell_1d_index, 1, 0, -dqg_dSw)
-                _add_diagonal_entry(cell_1d_index, 1, 1, -dqg_dSg)
+                _add_diagonal_entry(cell_1d_index, 1, 0, dqg_dSw)
+                _add_diagonal_entry(cell_1d_index, 1, 1, dqg_dSg)
 
     return (
         np.array(rows, dtype=np.int32),

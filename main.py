@@ -3,7 +3,7 @@ import typing
 import bores
 
 # Set precision
-bores.use_32bit_precision()
+# bores.use_32bit_precision()
 
 # Grid dimensions: 10x10x3 cells, each 1000 ft x 1000 ft, 100 ft thick
 grid_shape = typing.cast(bores.ThreeDimensions, (10, 10, 3))
@@ -39,7 +39,7 @@ water_saturation, oil_saturation, gas_saturation = bores.build_saturation_grids(
 )
 
 # Isotropic permeability: 100 mD
-perm_grid = bores.uniform_grid(grid_shape, value=100.0)
+perm_grid = bores.uniform_grid(grid_shape, value=10.0)
 permeability = bores.RockPermeability(x=perm_grid)
 
 # Build the reservoir model
@@ -117,8 +117,8 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 # Rock-fluid tables (Brooks-Corey relative permeability + capillary pressure)
 rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=bores.BrooksCoreyRelPermModel(
-        water_exponent=2.0,
-        oil_exponent=2.0,
+        water_exponent=1.0,
+        oil_exponent=1.0,
         gas_exponent=1.5,
         wettability=bores.Wettability.WATER_WET,
         mixing_rule="eclipse_rule",
@@ -140,14 +140,14 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="impes",
+    scheme="si",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     maximum_pressure_change=1800,
     jacobian_assembly_method="analytical",
-    # freeze_saturation_pressure=True
+    # freeze_saturation_pressure=True,
     # disable_capillary_effects=True
 )
 

@@ -789,6 +789,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         normalize_saturations=True,
         phase_appearance_tolerance=1e-6,
         saturation_convergence_tolerance=1e-4,
+        minimum_injector_gas_saturation=0.2,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
     return (wells,)

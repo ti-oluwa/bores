@@ -1567,9 +1567,9 @@ def eclipse_rule(
     where f_w and f_g are saturation-dependent factors.
 
     Notes:
-        - Used in commercial ECLIPSE simulator
-        - Provides smooth transition between phases
-        - Handles edge cases robustly
+    - Used in commercial ECLIPSE simulator
+    - Provides smooth transition between phases
+    - Handles edge cases robustly
     """
     total_mobile = oil_saturation + water_saturation + gas_saturation
 
@@ -3223,21 +3223,21 @@ class BrooksCoreyRelPermModel(
     """
     Minimum floor for the water relative permeability.
 
-    ``"auto"`` - dtype-aware floor; ``None`` - no floor; ``float`` - explicit value.
+    `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
     """
 
     min_oil_relperm: RelPermFloor = "auto"
     """
     Minimum floor for the oil relative permeability.
 
-    ``"auto"`` - dtype-aware floor; ``None`` - no floor; ``float`` - explicit value.
+    `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
     """
 
     min_gas_relperm: RelPermFloor = "auto"
     """
     Minimum floor for the gas relative permeability.
 
-    ``"auto"`` - dtype-aware floor; ``None`` - no floor; ``float`` - explicit value.
+    `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
     """
 
     supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
@@ -3375,7 +3375,7 @@ class BrooksCoreyRelPermModel(
         computed analytically via the chain rule through effective saturation.
         The three-phase oil relative permeability derivative is then completed
         by the extended chain rule through the mixing rule (including the
-        ``d_kro/d_krw`` and ``d_kro/d_krg`` terms for rules like Stone II that
+        `d_kro/d_krw` and `d_kro/d_krg` terms for rules like Stone II that
         use the actual two-phase water/gas kr values).
 
         Wherever a minimum relperm floor is active (raw kr ≤ floor), the
@@ -3386,16 +3386,16 @@ class BrooksCoreyRelPermModel(
         :param oil_saturation: Oil saturation (fraction, 0 to 1).
         :param gas_saturation: Gas saturation (fraction, 0 to 1).
         :param irreducible_water_saturation: Optional override for the
-            irreducible (connate) water saturation.  Uses the model default
+            irreducible (connate) water saturation. Uses the model default
             when not provided.
         :param residual_oil_saturation_water: Optional override for the residual
-            oil saturation to water flooding.  Uses the model default when not
+            oil saturation to water flooding. Uses the model default when not
             provided.
         :param residual_oil_saturation_gas: Optional override for the residual
-            oil saturation to gas flooding.  Uses the model default when not
+            oil saturation to gas flooding. Uses the model default when not
             provided.
         :param residual_gas_saturation: Optional override for the residual gas
-            saturation.  Uses the model default when not provided.
+            saturation. Uses the model default when not provided.
         :return: `RelativePermeabilityDerivatives` dictionary.
         """
         Swc = (
