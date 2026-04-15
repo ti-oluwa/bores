@@ -105,6 +105,9 @@ def _apply_relperm_floor(
     """
     Clamp `kr` to `[floor, ∞)` in-place-compatible fashion.
 
+    Smoothly transitions from the raw `kr` values to the floored value, avoiding
+    non-differentiability and ensuring well-behaved derivatives for solvers.
+
     When `floor` is `None` the array is returned unchanged.
 
     :param kr: Relative permeability value(s).
@@ -113,7 +116,7 @@ def _apply_relperm_floor(
     """
     if floor is None:
         return kr
-    return np.maximum(kr, floor).astype(kr.dtype)
+    return np.sqrt(kr**2 + floor**2).astype(kr.dtype)
 
 
 @numba.njit(cache=True, inline="always")
@@ -123,20 +126,17 @@ def _apply_relperm_floor_to_derivative(
     floor: typing.Optional[float],
 ) -> FloatOrArray:
     """
-    Zero out the derivative wherever the raw (pre-floor) kr was below the
-    floor, making the derivative consistent with the floored kr value.
+    Smoothly clamp the derivative of `kr` to zero in the floored region.
+    When `kr` is above the floor, the derivative is unchanged. As `kr` approaches
+    and falls below the floor, the derivative transitions smoothly to zero, ensuring
+    that the Jacobian remains well-conditioned and solvers remain stable.
 
     When `floor` is `None` the derivative is returned unchanged.
 
     The derivative of `max(kr, floor)` w.r.t. any variable is:
 
     - `dkr / d(var)`  when `kr > floor`  (active region)
-    - `0`             when `kr <= floor` (floored / flat region)
-
-    This subgradient choice (zero at the boundary `kr == floor`) is the
-    industry-standard convention: it avoids fictitious sensitivity in the
-    Jacobian at cells that are effectively immobile, keeping the linear
-    system well-conditioned.
+    - `kr / np.sqrt(kr**2 + floor**2)`  when `kr <= floor` (floored / flat region)
 
     :param dkr: Derivative of the raw (pre-floor) kr w.r.t. some variable.
     :param kr_raw: Raw (pre-floor) kr value(s), used to identify floored cells.
@@ -145,7 +145,9 @@ def _apply_relperm_floor_to_derivative(
     """
     if floor is None:
         return dkr
-    return np.where(kr_raw > floor, dkr, 0.0).astype(dkr.dtype)
+    return np.where(kr_raw > floor, dkr, kr_raw / np.sqrt(kr_raw**2 + floor**2)).astype(
+        dkr.dtype
+    )
 
 
 """
@@ -294,7 +296,7 @@ class MixingRule:
         :param gas_saturation: Current gas saturation.
         :param epsilon: Step size for central differences (used only in the
             fallback path). Defaults to 1e-7.
-        :return: A ``MixingRulePartialDerivatives`` dictionary containing the
+        :return: A `MixingRulePartialDerivatives` dictionary containing the
             seven partial derivatives.
         """
         if self._dfunc is not None:
@@ -3440,7 +3442,6 @@ class BrooksCoreyRelPermModel(
         wettability = self.wettability
         mixing_rule = typing.cast(MixingRule, self.mixing_rule)
 
-        # Resolve floors once up front
         floor_w = _resolve_relperm_floor(self.min_water_relperm)
         floor_o = _resolve_relperm_floor(self.min_oil_relperm)
         floor_g = _resolve_relperm_floor(self.min_gas_relperm)

@@ -1503,9 +1503,9 @@ def compute_well_contributions(
 
             if injection_bhps is not None:
                 if injected_phase == FluidPhase.GAS:
-                    injection_bhps[i, j, k] = (0.0, 0.0, effective_bhp)
+                    injection_bhps[i, j, k] = (np.nan, np.nan, effective_bhp)
                 else:
-                    injection_bhps[i, j, k] = (effective_bhp, 0.0, 0.0)
+                    injection_bhps[i, j, k] = (effective_bhp, np.nan, np.nan)
 
     for well in wells.production_wells:
         if not well.is_open:
@@ -1643,7 +1643,18 @@ def compute_well_contributions(
                 _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
 
             if production_bhps is not None:
-                production_bhps[i, j, k] = (effective_bhp, effective_bhp, effective_bhp)
+                gas_bhp = (
+                    effective_bhp if FluidPhase.GAS in well.produced_phases else np.nan
+                )
+                water_bhp = (
+                    effective_bhp
+                    if FluidPhase.WATER in well.produced_phases
+                    else np.nan
+                )
+                oil_bhp = (
+                    effective_bhp if FluidPhase.OIL in well.produced_phases else np.nan
+                )
+                production_bhps[i, j, k] = (water_bhp, oil_bhp, gas_bhp)
     return (
         np.array(list(diagonal_dict.keys()), dtype=np.int32),
         np.array(list(diagonal_dict.values()), dtype=dtype),

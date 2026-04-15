@@ -121,6 +121,12 @@ def compute_well_rates(
                     temperature=cell_temperature,
                 ),
             )
+            total_mobility = typing.cast(
+                float,
+                gas_relative_mobility_grid[i, j, k]
+                + water_relative_mobility_grid[i, j, k]
+                + oil_relative_mobility_grid[i, j, k],
+            )
             if injected_phase == FluidPhase.GAS:
                 phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
                 # Build pseudo-pressure table if needed
@@ -149,14 +155,14 @@ def compute_well_rates(
                     pressure=new_pressure,
                     temperature=cell_temperature,
                     bottom_hole_pressure=bhp,
-                    phase_mobility=phase_mobility,
+                    phase_mobility=total_mobility,
                     use_pseudo_pressure=use_pp,
                     pseudo_pressure_table=pp_table,
                     average_compressibility_factor=avg_z_factor,
                     formation_volume_factor=phase_fvf,
                 )
                 injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
-                injection_fvfs[i, j, k] = (0.0, 0.0, phase_fvf)
+                injection_fvfs[i, j, k] = (np.nan, np.nan, phase_fvf)
 
             else:
                 # Water injection
@@ -191,14 +197,14 @@ def compute_well_rates(
                         well_index=well_index,
                         pressure=new_pressure,
                         bottom_hole_pressure=bhp,
-                        phase_mobility=phase_mobility,
+                        phase_mobility=total_mobility,
                         fluid_compressibility=phase_compressibility,
                         incompressibility_threshold=incompressibility_threshold,
                     )
                     * bbl_to_ft3
                 )
                 injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
-                injection_fvfs[i, j, k] = (phase_fvf, 0.0, 0.0)
+                injection_fvfs[i, j, k] = (phase_fvf, np.nan, np.nan)
 
     # Production wells
     for well in wells.production_wells:
@@ -212,21 +218,19 @@ def compute_well_rates(
             new_pressure = typing.cast(float, new_pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
 
-            # Retrieve shared BHP stored during pressure solve.
-            # All three entries are the same shared BHP — use index 1 (oil)
-            # as the canonical stored value but any index works since they
-            # are all written as shared_bhp during compute_well_contributions.
-            shared_bhp = production_bhps.oil[i, j, k]
-            if not np.isfinite(shared_bhp) or shared_bhp == 0.0:
+            if (
+                not np.any(np.isfinite(production_bhps[i, j, k]))
+                or np.mean(production_bhps[i, j, k]) == 0.0
+            ):
                 # Perforation was skipped during pressure solve, skip here too.
                 continue
 
             water_rate = 0.0
             oil_rate = 0.0
             gas_rate = 0.0
-            water_fvf = 0.0
-            oil_fvf = 0.0
-            gas_fvf = 0.0
+            water_fvf = np.nan
+            oil_fvf = np.nan
+            gas_fvf = np.nan
 
             for produced_fluid in well.produced_fluids:
                 produced_phase = produced_fluid.phase
@@ -241,6 +245,7 @@ def compute_well_rates(
                     phase_fvf = typing.cast(
                         float, gas_formation_volume_factor_grid[i, j, k]
                     )
+                    bhp = production_bhps.gas[i, j, k]
                     use_pp, pp_table = get_pseudo_pressure_table(
                         fluid=produced_fluid,
                         pressure=new_pressure,
@@ -259,13 +264,13 @@ def compute_well_rates(
                         pressure=new_pressure,
                         temperature=cell_temperature,
                         gas_gravity=specific_gravity,
-                        bottom_hole_pressure=shared_bhp,
+                        bottom_hole_pressure=bhp,
                     )
                     flow_rate = compute_gas_well_rate(
                         well_index=well_index,
                         pressure=new_pressure,
                         temperature=cell_temperature,
-                        bottom_hole_pressure=shared_bhp,
+                        bottom_hole_pressure=bhp,
                         phase_mobility=phase_mobility,
                         use_pseudo_pressure=use_pp,
                         pseudo_pressure_table=pp_table,
@@ -283,11 +288,12 @@ def compute_well_rates(
                     phase_compressibility = typing.cast(
                         float, water_compressibility_grid[i, j, k]
                     )
+                    bhp = production_bhps.water[i, j, k]
                     flow_rate = (
                         compute_oil_well_rate(
                             well_index=well_index,
                             pressure=new_pressure,
-                            bottom_hole_pressure=shared_bhp,
+                            bottom_hole_pressure=bhp,
                             phase_mobility=phase_mobility,
                             fluid_compressibility=phase_compressibility,
                             incompressibility_threshold=incompressibility_threshold,
@@ -305,11 +311,12 @@ def compute_well_rates(
                     phase_compressibility = typing.cast(
                         float, oil_compressibility_grid[i, j, k]
                     )
+                    bhp = production_bhps.oil[i, j, k]
                     flow_rate = (
                         compute_oil_well_rate(
                             well_index=well_index,
                             pressure=new_pressure,
-                            bottom_hole_pressure=shared_bhp,
+                            bottom_hole_pressure=bhp,
                             phase_mobility=phase_mobility,
                             fluid_compressibility=phase_compressibility,
                             incompressibility_threshold=incompressibility_threshold,

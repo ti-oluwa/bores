@@ -1258,7 +1258,6 @@ def _compute_brooks_corey_derivatives_array(
         np.zeros_like(sg),
     )
     d_pcgo_d_so = np.zeros_like(sg)
-
     return d_pcow_d_sw, d_pcow_d_so, d_pcgo_d_sg, d_pcgo_d_so
 
 

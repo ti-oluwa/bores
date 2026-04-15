@@ -897,7 +897,7 @@ class WellSchedules(StoreSerializable, typing.Generic[Coordinates]):
     schedule.add("event1", WellEvent(...))
 
     schedules = WellSchedules()
-    schedules.add("Well_A", schedule)
+    schedules.add("Well-A", schedule)
     ```
     """
 

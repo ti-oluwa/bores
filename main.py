@@ -148,7 +148,8 @@ config = bores.Config(
     maximum_pressure_change=1800,
     jacobian_assembly_method="analytical",
     # freeze_saturation_pressure=True,
-    # disable_capillary_effects=True
+    # disable_capillary_effects=True,
+    # minimum_injector_water_saturation=0.1,
 )
 
 # Run and monitor the simulation and collect states

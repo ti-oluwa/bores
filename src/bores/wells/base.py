@@ -1,5 +1,5 @@
 """Well implementations and base classes."""
-
+import functools
 import itertools
 import logging
 import threading
@@ -20,7 +20,13 @@ from bores.serialization import (
 )
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTTables
-from bores.types import Coordinates, Orientation, ThreeDimensions, TwoDimensions
+from bores.types import (
+    Coordinates,
+    FluidPhase,
+    Orientation,
+    ThreeDimensions,
+    TwoDimensions,
+)
 from bores.wells.controls import ControlResult, WellControl
 from bores.wells.core import (
     InjectedFluid,
@@ -600,6 +606,11 @@ class ProductionWell(Well[Coordinates, ProducedFluid]):
                     "Duplicate fluid phase found in `produced_fluids`. Each phase should only be listed once."
                 )
         super().__attrs_post_init__()
+
+    @functools.cached_property
+    def produced_phases(self) -> typing.List[FluidPhase]:
+        """List of unique fluid phases produced by the well (e.g., ['oil', 'gas', 'water'])."""
+        return [fluid.phase for fluid in self.produced_fluids] # type: ignore[return-value]
 
 
 InjectionWellT = typing.TypeVar("InjectionWellT", bound=InjectionWell)

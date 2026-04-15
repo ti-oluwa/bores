@@ -280,17 +280,17 @@ def _make_rates(grid_shape: NDimension) -> Rates[float, NDimension]:
 
 def _make_fvfs(grid_shape: NDimension) -> FormationVolumeFactors[float, NDimension]:
     return FormationVolumeFactors(
-        oil=SparseTensor(grid_shape, dtype=float),
-        water=SparseTensor(grid_shape, dtype=float),
-        gas=SparseTensor(grid_shape, dtype=float),
+        oil=SparseTensor(grid_shape, dtype=float, default=np.nan),
+        water=SparseTensor(grid_shape, dtype=float, default=np.nan),
+        gas=SparseTensor(grid_shape, dtype=float, default=np.nan),
     )
 
 
 def _make_bhps(grid_shape: NDimension) -> BottomHolePressures[float, NDimension]:
     return BottomHolePressures(
-        oil=BottomHolePressure(grid_shape, dtype=float),
-        water=BottomHolePressure(grid_shape, dtype=float),
-        gas=BottomHolePressure(grid_shape, dtype=float),
+        oil=BottomHolePressure(grid_shape, dtype=float, default=np.nan),
+        water=BottomHolePressure(grid_shape, dtype=float, default=np.nan),
+        gas=BottomHolePressure(grid_shape, dtype=float, default=np.nan),
     )
 
 

@@ -1059,15 +1059,15 @@ def compute_well_rate_grid(
 
             if injection_fvfs is not None:
                 if injected_phase == FluidPhase.GAS:
-                    injection_fvfs[i, j, k] = (0.0, 0.0, phase_fvf)
+                    injection_fvfs[i, j, k] = (np.nan, np.nan, phase_fvf)
                 else:
-                    injection_fvfs[i, j, k] = (phase_fvf, 0.0, 0.0)
+                    injection_fvfs[i, j, k] = (phase_fvf, np.nan, np.nan)
 
             if injection_bhps is not None:
                 if injected_phase == FluidPhase.GAS:
-                    injection_bhps[i, j, k] = (0.0, 0.0, effective_bhp)
+                    injection_bhps[i, j, k] = (np.nan, np.nan, effective_bhp)
                 else:
-                    injection_bhps[i, j, k] = (effective_bhp, 0.0, 0.0)
+                    injection_bhps[i, j, k] = (effective_bhp, np.nan, np.nan)
 
     # Process production wells
     for well in wells.production_wells:
@@ -1130,12 +1130,12 @@ def compute_well_rate_grid(
             water_rate = 0.0
             oil_rate = 0.0
             gas_rate = 0.0
-            water_fvf = 0.0
-            oil_fvf = 0.0
-            gas_fvf = 0.0
-            water_bhp = 0.0
-            oil_bhp = 0.0
-            gas_bhp = 0.0
+            water_fvf = np.nan
+            oil_fvf = np.nan
+            gas_fvf = np.nan
+            water_bhp = np.nan
+            oil_bhp = np.nan
+            gas_bhp = np.nan
             for produced_fluid in well.produced_fluids:
                 produced_phase = produced_fluid.phase
 

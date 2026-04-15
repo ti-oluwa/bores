@@ -1303,7 +1303,7 @@ def compute_relperm_and_capillary_pressure_derivative_grids(
         dPcgo_dSw_eff = -raw_dPcgo_dSo
         dPcgo_dSg_eff = raw_dPcgo_dSg - raw_dPcgo_dSo
     else:
-        zeros = np.zeros_like(water_saturation_grid, dtype=np.float64)
+        zeros = np.zeros_like(water_saturation_grid)
         dPcow_dSw_eff = zeros
         dPcow_dSg_eff = zeros.copy()
         dPcgo_dSw_eff = zeros.copy()
@@ -1902,7 +1902,7 @@ def _assemble_jacobian_well_contributions(
             cell_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
             water_bhp, _, gas_bhp = injection_bhps[i, j, k]
 
-            if gas_bhp:
+            if np.isfinite(gas_bhp) and gas_bhp != 0.0:
                 drawdown = gas_bhp - cell_pressure
                 gas_viscosity = typing.cast(float, gas_viscosity_grid[i, j, k])
                 inverse_gas_viscosity = (
@@ -1927,7 +1927,7 @@ def _assemble_jacobian_well_contributions(
                 _add_diagonal_entry(cell_1d_index, 1, 0, dqg_dSw)
                 _add_diagonal_entry(cell_1d_index, 1, 1, dqg_dSg)
 
-            elif water_bhp:
+            elif np.isfinite(water_bhp) and water_bhp != 0.0:
                 drawdown = water_bhp - cell_pressure
                 water_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
                 inverse_water_viscosity = (
@@ -1960,7 +1960,7 @@ def _assemble_jacobian_well_contributions(
             cell_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
             water_bhp, _, gas_bhp = production_bhps[i, j, k]
 
-            if water_bhp:
+            if np.isfinite(water_bhp) and water_bhp != 0.0:
                 drawdown = water_bhp - cell_pressure
                 water_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
                 inverse_water_viscosity = (
@@ -1985,7 +1985,7 @@ def _assemble_jacobian_well_contributions(
                 _add_diagonal_entry(cell_1d_index, 0, 0, dqw_dSw)
                 _add_diagonal_entry(cell_1d_index, 0, 1, dqw_dSg)
 
-            if gas_bhp:
+            if np.isfinite(gas_bhp) and gas_bhp != 0.0:
                 drawdown = gas_bhp - cell_pressure
                 gas_viscosity = typing.cast(float, gas_viscosity_grid[i, j, k])
                 inverse_gas_viscosity = (
