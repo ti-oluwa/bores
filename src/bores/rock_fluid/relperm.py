@@ -2241,7 +2241,6 @@ class TwoPhaseRelPermTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
-
         # Compute the raw (pre-floor) kr for flooring the derivative
         floor = _resolve_relperm_floor(self.min_wetting_relperm)
 
@@ -2309,7 +2308,6 @@ class TwoPhaseRelPermTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
-
         floor = _resolve_relperm_floor(self.min_non_wetting_relperm)
 
         if self.non_wetting_phase_relative_permeability_derivative is not None:

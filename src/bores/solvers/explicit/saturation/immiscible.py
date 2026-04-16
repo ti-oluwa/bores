@@ -751,19 +751,13 @@ def compute_net_flux_contributions(
                     pressure_boundary = pressure_boundaries[pei, pej, pek]
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
-                        t_factor = (
+                        T = (
                             face_transmissibilities_x[pei, pej, pek]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += (
-                            cell_water_mobility * t_factor * pressure_difference
-                        )
-                        net_oil_flux += (
-                            cell_oil_mobility * t_factor * pressure_difference
-                        )
-                        net_gas_flux += (
-                            cell_gas_mobility * t_factor * pressure_difference
-                        )
+                        net_water_flux += cell_water_mobility * T * pressure_difference
+                        net_oil_flux += cell_oil_mobility * T * pressure_difference
+                        net_gas_flux += cell_gas_mobility * T * pressure_difference
                     else:
                         flux_boundary = flux_boundaries[pei, pej, pek]
                         if cell_total_mobility > 0.0:
@@ -805,19 +799,13 @@ def compute_net_flux_contributions(
                     pressure_boundary = pressure_boundaries[pwi, pwj, pwk]
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
-                        t_factor = (
+                        T = (
                             face_transmissibilities_x[pwi, pwj, pwk]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += (
-                            cell_water_mobility * t_factor * pressure_difference
-                        )
-                        net_oil_flux += (
-                            cell_oil_mobility * t_factor * pressure_difference
-                        )
-                        net_gas_flux += (
-                            cell_gas_mobility * t_factor * pressure_difference
-                        )
+                        net_water_flux += cell_water_mobility * T * pressure_difference
+                        net_oil_flux += cell_oil_mobility * T * pressure_difference
+                        net_gas_flux += cell_gas_mobility * T * pressure_difference
                     else:
                         flux_boundary = flux_boundaries[pwi, pwj, pwk]
                         if cell_total_mobility > 0.0:
@@ -861,19 +849,13 @@ def compute_net_flux_contributions(
                     pressure_boundary = pressure_boundaries[psi, psj, psk]
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
-                        t_factor = (
+                        T = (
                             face_transmissibilities_y[psi, psj, psk]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += (
-                            cell_water_mobility * t_factor * pressure_difference
-                        )
-                        net_oil_flux += (
-                            cell_oil_mobility * t_factor * pressure_difference
-                        )
-                        net_gas_flux += (
-                            cell_gas_mobility * t_factor * pressure_difference
-                        )
+                        net_water_flux += cell_water_mobility * T * pressure_difference
+                        net_oil_flux += cell_oil_mobility * T * pressure_difference
+                        net_gas_flux += cell_gas_mobility * T * pressure_difference
                     else:
                         flux_boundary = flux_boundaries[psi, psj, psk]
                         if cell_total_mobility > 0.0:
@@ -915,19 +897,13 @@ def compute_net_flux_contributions(
                     pressure_boundary = pressure_boundaries[pni, pnj, pnk]
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
-                        t_factor = (
+                        T = (
                             face_transmissibilities_y[pni, pnj, pnk]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += (
-                            cell_water_mobility * t_factor * pressure_difference
-                        )
-                        net_oil_flux += (
-                            cell_oil_mobility * t_factor * pressure_difference
-                        )
-                        net_gas_flux += (
-                            cell_gas_mobility * t_factor * pressure_difference
-                        )
+                        net_water_flux += cell_water_mobility * T * pressure_difference
+                        net_oil_flux += cell_oil_mobility * T * pressure_difference
+                        net_gas_flux += cell_gas_mobility * T * pressure_difference
                     else:
                         flux_boundary = flux_boundaries[pni, pnj, pnk]
                         if cell_total_mobility > 0.0:
@@ -971,19 +947,13 @@ def compute_net_flux_contributions(
                     pressure_boundary = pressure_boundaries[pbi, pbj, pbk]
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
-                        t_factor = (
+                        T = (
                             face_transmissibilities_z[pbi, pbj, pbk]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += (
-                            cell_water_mobility * t_factor * pressure_difference
-                        )
-                        net_oil_flux += (
-                            cell_oil_mobility * t_factor * pressure_difference
-                        )
-                        net_gas_flux += (
-                            cell_gas_mobility * t_factor * pressure_difference
-                        )
+                        net_water_flux += cell_water_mobility * T * pressure_difference
+                        net_oil_flux += cell_oil_mobility * T * pressure_difference
+                        net_gas_flux += cell_gas_mobility * T * pressure_difference
                     else:
                         flux_boundary = flux_boundaries[pbi, pbj, pbk]
                         if cell_total_mobility > 0.0:
@@ -1025,19 +995,13 @@ def compute_net_flux_contributions(
                     pressure_boundary = pressure_boundaries[pti, ptj, ptk]
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
-                        t_factor = (
+                        T = (
                             face_transmissibilities_z[pti, ptj, ptk]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += (
-                            cell_water_mobility * t_factor * pressure_difference
-                        )
-                        net_oil_flux += (
-                            cell_oil_mobility * t_factor * pressure_difference
-                        )
-                        net_gas_flux += (
-                            cell_gas_mobility * t_factor * pressure_difference
-                        )
+                        net_water_flux += cell_water_mobility * T * pressure_difference
+                        net_oil_flux += cell_oil_mobility * T * pressure_difference
+                        net_gas_flux += cell_gas_mobility * T * pressure_difference
                     else:
                         flux_boundary = flux_boundaries[pti, ptj, ptk]
                         if cell_total_mobility > 0.0:

@@ -43,7 +43,7 @@ def build_face_transmissibilities(
     dtype: typing.Optional[npt.DTypeLike] = None,
 ) -> FaceTransmissibilities:
     """
-    Precompute geometric face transmissibilities T_geo = k_harmonic * A / L for
+    Precompute geometric face transmissibilities `T_geo = k_harmonic * A / L` for
     every forward-facing interface in x, y, and z on the grid.
 
     Result arrays are shaped (nx + 2, ny + 2, nz + 2) where (nx + 2, ny + 2, nz + 2) = padded grid shape.

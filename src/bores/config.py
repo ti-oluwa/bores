@@ -563,6 +563,16 @@ class Config(
     large or if many states are captured.
     """
 
+    check_zero_flow_initialization: bool = True
+    """
+    Whether to validate the initial state for zero-flow (deadlock) violations.
+
+    When True (default), the simulator checks the initial state before yielding it for
+    cells where the sum of inter-cell flows is zero, which can indicate phase deadlock
+    or spurious initial flux conditions. The check reports violations but does not stop
+    the simulation. When False, the validation is skipped.
+    """
+
     task_pool: typing.Optional[ThreadPoolExecutor] = attrs.field(
         default=None,
         eq=False,

@@ -15,9 +15,9 @@ def setup_grid():
     import bores
     from bores.correlations.core import compute_oil_specific_gravity
 
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
 
-    bores.use_32bit_precision()
+    # bores.use_32bit_precision()
 
     # -------------------------------------------------------------------------
     # Grid geometry — SPE1 benchmark (Odeh, 1981, JPT)
@@ -610,6 +610,8 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         reference_phase="non_wetting",  # indexed by So
         wetting_phase_relative_permeability=krw_values,
         non_wetting_phase_relative_permeability=krow_values,
+        min_non_wetting_relperm=None,
+        min_wetting_relperm=None,
     )
 
     relative_permeability_table = bores.ThreePhaseRelPermTable(
@@ -753,8 +755,8 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         maximum_step_size=bores.Time(days=30.0),
         minimum_step_size=bores.Time(minutes=10.0),
         simulation_time=bores.Time(years=10.0),
-        maximum_cfl_number=0.7,
-        ramp_up_factor=1.3,
+        maximum_cfl_number=0.9,
+        ramp_up_factor=1.5,
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,
         maximum_rejections=20,
@@ -780,16 +782,16 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         disable_capillary_effects=True,
         freeze_saturation_pressure=False,
         miscibility_model="immiscible",
-        # maximum_gas_saturation_change=0.05,
-        # maximum_oil_saturation_change=0.05,
-        # maximum_water_saturation_change=0.05,
-        # maximum_saturation_change=0.05,
-        maximum_pressure_change=1000.0,
+        # maximum_gas_saturation_change=0.9,
+        # maximum_oil_saturation_change=0.5,
+        # maximum_water_saturation_change=0.5,
+        # maximum_saturation_change=0.5,
+        maximum_pressure_change=1800.0,
         use_pseudo_pressure=True,
         normalize_saturations=True,
         phase_appearance_tolerance=1e-6,
         saturation_convergence_tolerance=1e-4,
-        minimum_injector_gas_saturation=0.2,
+        # minimum_injector_gas_saturation=0.2,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
     return (wells,)

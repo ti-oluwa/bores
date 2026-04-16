@@ -183,21 +183,6 @@ def compute_material_balance_errors(
     relative_water_mbe = absolute_water_mbe / reference_water
 
     # GAS
-    # Total gas in place (ft³) = free gas + solution gas in oil + solution gas in water
-    # Free gas (ft³):           Vp * Sg
-    # Solution gas in oil (ft³): Vp * So * Rs * Bg   where Bg = Bo_g / Bo  ... complex
-    # Simpler consistent approach: convert everything to surface SCF then back.
-    #
-    # Gas in place at surface (SCF):
-    #   G = Vp * Sg / Bg  +  Vp * So * Rs / Bo  +  Vp * Sw * Rsw / Bw
-    # where Bg [ft³/SCF], Bo [res bbl/STB→ ft³ via *5.614583], Bw similar.
-    #
-    # To stay in ft³:  multiply G_surface by Bg_ref (use current Bg field mean).
-    # But that introduces a reference Bg choice. The cleanest approach:
-    # track G in surface SCF and report MBE in surface SCF, then convert to ft³
-    # using the mean Bg for reporting alongside oil and water in ft³.
-    #
-    # We'll report all MBEs in ft³ using phase-specific FVFs for gas.
     bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
 
     # Bg in ft³/SCF  (gas_formation_volume_factor_grid is in ft³/SCF already per models.py)

@@ -294,6 +294,7 @@ class PVTTable(StoreSerializable):
 
     **Phase dispatch summary:**
 
+    ```markdown
     +---------------------------------+-----+-----+-------+
     | Method                          | Oil | Gas | Water |
     +=================================+=====+=====+=======+
@@ -303,19 +304,19 @@ class PVTTable(StoreSerializable):
     | compressibility                 | ✓   | ✓   | ✓     |
     | specific_gravity                | ✓   | ✓   | ✓     |
     | molecular_weight                | ✓   | ✓   | ✓     |
-    | bubble_point_pressure           | ✓   | ✗   | ✓     |
-    | is_saturated                    | ✓   | ✗   | ✗     |
-    | solution_gor                    | ✓   | ✗   | ✗     |
-    | compressibility_factor          | ✗   | ✓   | ✗     |
-    | solubility_in_water             | ✗   | ✓   | ✗     |
+    | bubble_point_pressure           | ✓   | x   | ✓     |
+    | is_saturated                    | ✓   | x   | x     |
+    | solution_gor                    | ✓   | x   | x     |
+    | compressibility_factor          | x   | ✓   | x     |
+    | solubility_in_water             | x   | ✓   | x     |
     +---------------------------------+-----+-----+-------+
+    ```
 
     **Extrapolation:** Outside table bounds the interpolators extrapolate
     linearly/cubically. Set `warn_on_extrapolation=True` to log warnings.
 
-    **Performance:**  Uses `RectBivariateSpline` for 2D (oil/gas) - 10-50x
-    faster than `RegularGridInterpolator`, and uses `RegularGridInterpolator`
-    for 3D (water).
+    **Performance:**  Uses `RectBivariateSpline` for 2D interpolation (oil/gas), which is 10-50x
+    faster than `RegularGridInterpolator`, and then uses `RegularGridInterpolator` for 3D interpolation (water).
     """
 
     __abstract_serializable__ = True
@@ -789,8 +790,7 @@ class PVTTable(StoreSerializable):
             return float(result)
         elif isinstance(result, np.ndarray) and result.size == 1:
             return float(result.flat[0])
-        else:
-            return result
+        return result
 
     def _pts_interpolate(
         self,
@@ -822,8 +822,7 @@ class PVTTable(StoreSerializable):
             return float(result)
         elif result.size == 1:
             return float(result.flat[0])
-        else:
-            return result
+        return result
 
     def _resolve_salinity(self, salinity: typing.Optional[QueryType]) -> QueryType:
         """Return salinity, falling back to default_salinity for water tables."""
@@ -971,7 +970,7 @@ class PVTTable(StoreSerializable):
         **Oil phase:**
         - Saturated (P ≤ Pb): interpolates directly from table.
         - Undersaturated (P > Pb): applies McCain compressibility correction:
-          ``Bo = Bob * exp(-co_avg * (P - Pb))``. Falls back to Bob if no
+          ``Bo = Bob * exp(-avg_co * (P - Pb))``. Falls back to Bob if no
           compressibility table is available.
 
         **Gas / water phase:** direct table interpolation.
@@ -1030,15 +1029,15 @@ class PVTTable(StoreSerializable):
                 t_arr[unsaturated_mask],
             )
             if "compressibility" in self._interpolators:
-                co_pb = self._pt_interpolate(
+                co_at_pb = self._pt_interpolate(
                     "compressibility", pb_arr[unsaturated_mask], t_arr[unsaturated_mask]
                 )
-                co_p = self._pt_interpolate(
+                co_at_p = self._pt_interpolate(
                     "compressibility", p_arr[unsaturated_mask], t_arr[unsaturated_mask]
                 )
-                co_avg = 0.5 * (np.asarray(co_pb) + np.asarray(co_p))
+                avg_co = 0.5 * (np.asarray(co_at_pb) + np.asarray(co_at_p))
                 result[unsaturated_mask] = np.asarray(oil_fvf_at_pb) * np.exp(
-                    -co_avg * (p_arr[unsaturated_mask] - pb_arr[unsaturated_mask])
+                    -avg_co * (p_arr[unsaturated_mask] - pb_arr[unsaturated_mask])
                 )
             else:
                 result[unsaturated_mask] = np.asarray(oil_fvf_at_pb)
@@ -1564,8 +1563,7 @@ class PVTTables(StoreSerializable):
         data separately from the interpolator settings, or inspect the
         tables without re-running the builders.
 
-        :return: `PVTDataSet` containing the raw data for each
-            non-`None` phase.
+        :return: `PVTDataSet` containing the raw data for each non-`None` phase.
 
         Example:
 
@@ -1606,7 +1604,6 @@ def _resolve_gas(
         gas_name = gas.name
         if gas.pvt_table is not None:
             gas_pvt_table = gas.pvt_table
-    # else: unknown type - fall through to default
 
     # If `gas_gravity` not supplied, try to get a scalar from the `pvt_table`
     if gas_gravity is None and gas_pvt_table is not None:
@@ -1624,7 +1621,7 @@ def _resolve_gas(
     return gas_name, gas_gravity, gas_pvt_table
 
 
-def _tables_from_gas_pvt_table(
+def _get_tables_from_gas_pvt_table(
     gas_pvt_table: PVTTable,
     pressure_grid: npt.NDArray,
     temperature_grid: npt.NDArray,
@@ -1727,7 +1724,7 @@ def build_oil_pvt_data(
     # Gas tables needed for oil Oil Compressibility anf FVF calculation
     gas_fvf_grid: typing.Optional[npt.NDArray] = None
     if gas_pvt_table is not None:
-        gas_tables = _tables_from_gas_pvt_table(
+        gas_tables = _get_tables_from_gas_pvt_table(
             gas_pvt_table, pressure_grid, temperature_grid
         )
         gas_fvf_grid = gas_tables.get("formation_volume_factor_table")
@@ -2018,7 +2015,7 @@ def build_gas_pvt_data(
 
     # If a Fluid pvt_table is available, evaluate all tables from it
     if gas_pvt_table is not None:
-        gas_tables = _tables_from_gas_pvt_table(
+        gas_tables = _get_tables_from_gas_pvt_table(
             gas_pvt_table, pressure_grid, temperature_grid
         )
         if viscosity_table is None:
@@ -2191,7 +2188,7 @@ def build_water_pvt_data(
     # Gas Bg (2D) for water compressibility liberation correction
     gas_fvf_grid: npt.NDArray
     if gas_pvt_table is not None:
-        gas_tables = _tables_from_gas_pvt_table(
+        gas_tables = _get_tables_from_gas_pvt_table(
             gas_pvt_table, pressure_grid, temperature_grid
         )
         gas_fvf_grid_2d = gas_tables.get("formation_volume_factor_table")

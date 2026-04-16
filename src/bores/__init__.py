@@ -35,6 +35,7 @@ from .utils import *
 from .visualization import *
 from .wells import *
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s : %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 

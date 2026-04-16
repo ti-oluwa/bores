@@ -35,9 +35,9 @@ def compute_gas_pseudo_pressure(
     allowing the use of standard liquid-like flow equations for gas.
 
     Physical Interpretation:
-        - m(P) transforms the nonlinear gas diffusivity equation into a linear form
-        - At low pressure: m(P) ≈ P² (ideal gas limit)
-        - At high pressure: deviations due to Z-factor and viscosity changes
+    - m(P) transforms the nonlinear gas diffusivity equation into a linear form
+    - At low pressure: m(P) ≈ P² (ideal gas limit)
+    - At high pressure: deviations due to Z-factor and viscosity changes
 
     :param pressure: Current pressure (psi)
     :param z_factor_func: Function returning Z-factor at given pressure Z(P)
@@ -46,9 +46,9 @@ def compute_gas_pseudo_pressure(
     :return: Pseudo-pressure m(P) in psi²/cP
 
     References:
-        Al-Hussainy, R., Ramey, H.J., and Crawford, P.B. (1966).
-        "The Flow of Real Gases Through Porous Media."
-        JPT, May 1966, pp. 624-636.
+    - Al-Hussainy, R., Ramey, H.J., and Crawford, P.B. (1966).
+    - "The Flow of Real Gases Through Porous Media."
+    - JPT, May 1966, pp. 624-636.
     """
     if pressure <= 0:
         raise ValidationError(f"Pressure must be positive, got {pressure}")
@@ -352,7 +352,7 @@ class PseudoPressureTable(
     Pre-computed gas pseudo-pressure table for fast lookup during simulation.
 
     Uses `np.interp` for fast linear interpolation.
-    Supports both forward (pressure → pseudo-pressure) and inverse (pseudo-pressure → pressure)
+    Supports both forward (pressure to pseudo-pressure) and inverse (pseudo-pressure to pressure)
     interpolation.
 
     Two construction modes:
