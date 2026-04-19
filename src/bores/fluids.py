@@ -192,7 +192,7 @@ class Fluid(StoreSerializable):
             )
 
         if self.pseudo_pressure_table is not None:
-            logger.debug(f"Using custom pseudo-pressure table for fluid '{self.name}'.")
+            logger.debug("Using custom pseudo-pressure table for fluid '%s'", self.name)
             return self.pseudo_pressure_table
 
         z_factor_func: typing.Optional[typing.Callable] = None  # type: ignore

@@ -8,6 +8,7 @@ import numpy.typing as npt
 from cachetools import LFUCache
 from scipy.integrate import cumulative_trapezoid, quad  # type: ignore[import-untyped]
 from scipy.interpolate import PchipInterpolator  # type: ignore[import-untyped]
+from scipy.optimize import brentq
 
 from bores.constants import c
 from bores.errors import ValidationError
@@ -649,25 +650,42 @@ class PseudoPressureTable(
             return float(result.ravel()[0])
         return result.reshape(p.shape)
 
-    def inverse_interpolate(self, pseudo_pressure: FloatOrArray) -> FloatOrArray:
+    def inverse(self, pseudo_pressure: FloatOrArray) -> FloatOrArray:
         """
         Inverse interpolate pressure at given pseudo-pressure.
 
-        Inverse interpolation: pseudo-pressure to pressure.
-
-        Uses linear interpolation on the stored (pressure, pseudo-pressure) knots.
-        Values outside the tabulated range are clamped to the boundary pressure.
+        Uses numerical inversion of the PCHIP interpolant (via Brent's method)
+        to guarantee consistency with `interpolate`.
 
         :param pseudo_pressure: Pseudo-pressure m(P) (psi²/cP) — scalar or array.
         :return: Pressure (psi).
         """
-        return np.interp(
-            x=pseudo_pressure,
-            xp=self.pseudo_pressures,
-            fp=self.pressures,
-            left=float(self.pressures[0]),
-            right=float(self.pressures[-1]),
-        )
+        mp_min = float(self.pseudo_pressures[0])
+        mp_max = float(self.pseudo_pressures[-1])
+        p_min = float(self._pchip.x[0])
+        p_max = float(self._pchip.x[-1])
+
+        def _invert_scalar(mp: float) -> float:
+            mp_clamped = np.clip(mp, mp_min, mp_max)
+            if abs(mp_clamped - mp_min) < 1e-10:
+                return p_min
+            if abs(mp_clamped - mp_max) < 1e-10:
+                return p_max
+            return brentq(
+                lambda p: self._pchip(p) - mp_clamped,
+                p_min,
+                p_max,
+                xtol=1e-6,
+                rtol=1e-8,
+            )
+
+        is_scalar = np.isscalar(pseudo_pressure)
+        mp = np.atleast_1d(np.asarray(pseudo_pressure, dtype=np.float64))
+        result = np.vectorize(_invert_scalar)(mp)
+
+        if is_scalar:
+            return float(result.ravel()[0])
+        return result.reshape(mp.shape)
 
     def __call__(self, pressure: FloatOrArray) -> FloatOrArray:
         """

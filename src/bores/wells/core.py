@@ -479,7 +479,7 @@ def compute_gas_well_rate(
     The well equation is first evaluated at surface conditions (SCF/day) via
     the (Tsc/Psc) prefactor, then multiplied by Bg (ft³/SCF) to convert to
     reservoir conditions, consistent with the oil/water rate functions which
-    return reservoir bbl/day.  The caller divides by Bg downstream to obtain
+    return reservoir bbl/day. The caller divides by Bg downstream to obtain
     surface SCF/day, following the same pattern used throughout the simulator.
 
     Two formulations are supported:
@@ -500,11 +500,11 @@ def compute_gas_well_rate(
     ```
 
     Since phase_mobility = kr/mu (no Bg term), Bg must be supplied via
-    `formation_volume_factor` or computed internally from `gas_gravity`.
+    `formation_volume_factor` or will be computed internally from `gas_gravity`.
 
     Sign convention:
     - Negative rate indicates production (BHP < reservoir pressure).
-    - Positive rate  indicates injection  (BHP > reservoir pressure).
+    - Positive rate indicates injection (BHP > reservoir pressure).
 
     :param well_index: Well index (mD*ft).
     :param pressure: Reservoir pressure at the perforation interval (psi).
@@ -514,10 +514,9 @@ def compute_gas_well_rate(
         Must not include the Bg term; surface-to-reservoir conversion is
         handled here via `formation_volume_factor` or `gas_gravity`.
     :param average_compressibility_factor: Average Z-factor over the pressure
-        interval.  Used only for the pressure-squared formulation.
-        Default 1.0.
+        interval. Used only for the pressure-squared formulation. Default 1.0.
     :param use_pseudo_pressure: If True (default), use the pseudo-pressure
-        formulation.  If False, use the pressure-squared formulation.
+        formulation. If False, use the pressure-squared formulation.
     :param pseudo_pressure_table: Pre-computed pseudo-pressure lookup table.
         Required when `use_pseudo_pressure=True`.
     :param formation_volume_factor: Gas formation volume factor Bg (ft³/SCF)
@@ -547,14 +546,14 @@ def compute_gas_well_rate(
             raise ComputationError(
                 "`gas_gravity` is required if `formation_volume_factor` is not provided."
             )
-        z_at_reservoir = compute_gas_compressibility_factor(
+        Z = compute_gas_compressibility_factor(
             pressure=pressure,
             temperature=temperature,
             gas_gravity=gas_gravity,
             method="dak",
         )
         # Bg = 0.02827 * Z * T / P  (ft³/SCF)
-        gas_fvf = 0.02827 * z_at_reservoir * temperature_rankine / pressure
+        gas_fvf = 0.02827 * Z * temperature_rankine / pressure
 
     # Common prefactor: 1.9875e-2 * (Tsc/Psc) * (W * M / T)
     # Gives Q in SCF/day; multiply by Bg at the end for ft³/day.
@@ -596,11 +595,11 @@ def compute_required_bhp_for_gas_rate(
 
     This is the exact algebraic inverse of `compute_gas_well_rate`.
     `target_rate` must be at reservoir conditions (ft³/day), consistent
-    with the return value of :func:`compute_gas_well_rate`.
+    with the return value of `compute_gas_well_rate`.
 
     Sign convention:
     - Negative `target_rate` indicates production (returned BHP < reservoir pressure).
-    - Positive `target_rate`  indicates injection  (returned BHP > reservoir pressure).
+    - Positive `target_rate` indicates injection (returned BHP > reservoir pressure).
 
     Inverse formula (pseudo-pressure):
 
@@ -663,13 +662,12 @@ def compute_required_bhp_for_gas_rate(
                 "`pseudo_pressure_table` must be provided when `use_pseudo_pressure` is True."
             )
         # m(Pbhp) = m(P) + Q_scf * Psc / denominator
-        reservoir_pseudo_pressure = pseudo_pressure_table(pressure)
         required_pseudo_pressure = (
-            reservoir_pseudo_pressure + target_rate_scf * Psc / denominator
+            pseudo_pressure_table(pressure) + target_rate_scf * Psc / denominator
         )
         try:
             return float(
-                pseudo_pressure_table.inverse_interpolate(
+                pseudo_pressure_table.inverse(
                     pseudo_pressure=required_pseudo_pressure
                 )
             )
@@ -690,8 +688,7 @@ def compute_required_bhp_for_gas_rate(
     )
     if required_bhp_squared < 0:
         raise ComputationError(
-            f"Cannot achieve target rate {target_rate:.2f} ft³/day — "
-            "results in negative pressure squared.  "
+            f"Cannot achieve target rate {target_rate:.2f} ft³/day. Rate results in negative pressure squared.  "
             "The requested rate exceeds reservoir deliverability."
         )
     return float(np.sqrt(required_bhp_squared))
