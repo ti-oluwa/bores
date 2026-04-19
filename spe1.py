@@ -106,7 +106,7 @@ rock_compressibility = 3.0e-6  # 1/psi
 # -------------------------------------------------------------------------
 kx_values = bores.array([500.0, 50.0, 200.0])  # mD
 ky_values = bores.array([500.0, 50.0, 200.0])  # mD
-kz_values = bores.array([50.0, 50.0, 25.0])  # mD 
+kz_values = bores.array([50.0, 50.0, 25.0])  # mD
 
 kx_grid = bores.layered_grid(
     grid_shape=grid_shape,
@@ -127,10 +127,8 @@ absolute_permeability = bores.RockPermeability(x=kx_grid, y=ky_grid, z=kz_grid)
 
 net_to_gross_grid = bores.uniform_grid(grid_shape=grid_shape, value=1.0)
 
-# -------------------------------------------------------------------------
 # Initial saturations (Table 1)
 # Sw = 0.12 (connate), So = 0.88, Sg = 0.0
-# -------------------------------------------------------------------------
 connate_water_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.12)
 irreducible_water_saturation_grid = connate_water_saturation_grid.copy()
 residual_oil_saturation_water_grid = bores.uniform_grid(
@@ -158,9 +156,7 @@ water_saturation_grid, oil_saturation_grid, gas_saturation_grid = (
     )
 )
 
-# -------------------------------------------------------------------------
-# Fluid properties (initial estimates — overridden by PVT tables)
-# -------------------------------------------------------------------------
+# Fluid properties (initial estimates, will be overridden by PVT tables)
 gas_gravity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.792)
 gas_viscosity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.027)
 oil_viscosity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.51)
@@ -198,10 +194,8 @@ pvt_pressures = bores.array(
 # Two temperature entries (isothermal at 200 °F; need ≥ 2 for 2-D table)
 pvt_temperatures = bores.array([200.0, 201.0])
 
-# -------------------------------------------------------------------------
 # OIL: Solution GOR (Rs), Bo, μo, ρo — all from Table 2
 # Above Pb: Rs is frozen at the bubble-point value (1270 SCF/STB)
-# -------------------------------------------------------------------------
 solution_gor_values = bores.array(
     [
         1.0,  # 14.7
@@ -262,13 +256,7 @@ oil_density_values = bores.array(
     ]
 )
 
-# -------------------------------------------------------------------------
 # GAS: Bg, μg, ρg — from Table 2 "Gas PVT Functions"
-#
-# FIX: Bg in the paper is given in RB/MSCF.
-# Convert correctly: 1 RB/MSCF = 5.614583 ft³ / 1000 SCF = 5.614583e-3 ft³/SCF
-# So: Bg [ft³/SCF] = Bg_paper [RB/MSCF] × 5.614583 / 1000
-# -------------------------------------------------------------------------
 # Raw values from paper (RB/MSCF):
 gas_fvf_values_bbl_per_mscf = bores.array(
     [
@@ -316,9 +304,7 @@ gas_density_values = bores.array(
     ]
 )
 
-# -------------------------------------------------------------------------
 # WATER: Bw, μw, ρw — from Table 2 "Undersaturated Water PVT Functions"
-# -------------------------------------------------------------------------
 water_fvf_values = bores.array(
     [
         1.0410,  # 14.7
@@ -355,10 +341,8 @@ water_density_values = bores.array(
 gas_solubility_in_water_values = bores.array([0.0] * 9)
 
 
-# -------------------------------------------------------------------------
 # Build 2-D tables (n_pressures × n_temperatures)
 # Broadcast each 1-D array across the temperature axis (isothermal)
-# -------------------------------------------------------------------------
 def make_2d(arr):
     return np.column_stack([arr, arr])
 
@@ -450,10 +434,7 @@ model = bores.reservoir_model(
 )
 
 
-# -------------------------------------------------------------------------
 # Relative permeability — Table 3 (Odeh 1981)
-# Gas-oil table indexed by gas saturation (Sg)
-# -------------------------------------------------------------------------
 sg_values = bores.array(
     [
         0.000,
@@ -581,23 +562,7 @@ rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=relative_permeability_table
 )
 
-# -------------------------------------------------------------------------
 # Gas pseudo-pressure table — Table 2 (Odeh 1981)
-#
-# Values at the paper's tabulated points (Table 2, column "m(p)"):
-#   14.7    →  0.000e0
-#   264.7   →  7.779e6
-#   514.7   →  2.676e7
-#   1014.7  →  6.752e7
-#   2014.7  →  2.707e8
-#   2514.7  →  3.681e8
-#   3014.7  →  5.181e8
-#   4014.7  →  8.037e8
-#   5014.7  →  1.152e9
-#   6014.7  →  1.542e9  (monotone between 4014 and 8014)
-#   8014.7  →  2.381e9  (monotone)
-#   9014.7  →  2.793e9  (extrapolated monotone to cover injection BHP 9011)
-# -------------------------------------------------------------------------
 gas_pressures = bores.array(
     [
         14.7,
@@ -609,25 +574,21 @@ gas_pressures = bores.array(
         3014.7,
         4014.7,
         5014.7,
-        6014.7,
-        8014.7,
         9014.7,
     ]
 )
 gas_pseudo_pressures = bores.array(
     [
         0.000e0,  # 14.7
-        7.779e6,  # 264.7
-        2.676e7,  # 514.7
-        6.752e7,  # 1014.7
-        2.707e8,  # 2014.7
-        3.681e8,  # 2514.7
-        5.181e8,  # 3014.7
-        8.037e8,  # 4014.7
-        1.152e9,  # 5014.7  (from paper)
-        1.542e9,  # 6014.7
-        2.381e9,  # 8014.7
-        2.793e9,  # 9014.7
+        7.77916e6,  # 264.7
+        2.67580e7,  # 514.7
+        8.75262e7,  # 1014.7
+        2.70709e8,  # 2014.7
+        3.86910e8,  # 2514.7
+        5.16118e8,  # 3014.7
+        8.03963e8,  # 4014.7
+        1.12256e9,  # 5014.7
+        2.51845e9,  # 9014.7
     ]
 )
 pseudo_pressure_table = bores.PseudoPressureTable(
@@ -738,6 +699,7 @@ config = bores.Config(
     normalize_saturations=True,
     phase_appearance_tolerance=1e-6,
     saturation_convergence_tolerance=1e-4,
+    saturation_cfl_threshold=0.8,
     # minimum_injector_gas_saturation=1e-4,
 )
 

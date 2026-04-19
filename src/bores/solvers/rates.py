@@ -40,21 +40,10 @@ def compute_well_rates(
     Compute well flow rates and update them in-place using the new pressure
     from the pressure solve and the BHPs stored during the Jacobian assembly step.
 
-    This function is meant to be called after the pressure solve. It uses the new pressure
-    grid and the BHPs computed during `compute_well_contributions` to evaluate
-    accurate per-phase flow rates for use in the saturation solver.
-
     Rates are computed using per-phase mobility (not total mobility) and with
     pseudo-pressure enabled for gas phases where appropriate. This gives
     physically accurate rates consistent with the BHP established during the
     pressure solve.
-
-    The split between BHP computation (in `compute_well_contributions`) and
-    rate computation (here) ensures:
-        - The Jacobian uses total mobility for numerical stability
-        - Rates use phase mobility for physical accuracy
-        - Gas rates use pseudo-pressure where appropriate
-        - All rates are consistent with the new pressure, not the old pressure
 
     :param new_pressure_grid: New oil pressure grid after pressure solve (psi)
     :param temperature_grid: Temperature grid (°F)

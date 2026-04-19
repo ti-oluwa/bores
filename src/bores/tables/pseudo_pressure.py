@@ -7,6 +7,7 @@ import numpy as np
 import numpy.typing as npt
 from cachetools import LFUCache
 from scipy.integrate import cumulative_trapezoid, quad  # type: ignore[import-untyped]
+from scipy.interpolate import PchipInterpolator  # type: ignore[import-untyped]
 
 from bores.constants import c
 from bores.errors import ValidationError
@@ -340,20 +341,99 @@ def build_pseudo_pressures(
     )
 
 
+def build_pchip_interpolant_from_points(
+    x: npt.NDArray,
+    values: npt.NDArray,
+    number_of_base_points: int,
+    number_of_endpoint_extra_points: int,
+    minimum_scale_span: float = 1.0,
+) -> typing.Tuple[PchipInterpolator, PchipInterpolator]:
+    """
+    Build a PCHIP interpolant (and its analytical derivative) from arbitrary
+    monotonically increasing x-coordinates and corresponding values.
+
+    When `number_of_base_points > 0` and the raw knot count is smaller than
+    `number_of_base_points` and the x-range exceeds `minimum_scale_span`,
+    the knot grid is expanded to `number_of_base_points` base points (plus
+    `number_of_endpoint_extra_points` extra knots in each boundary decade)
+    before fitting. The expanded grid is log-spaced when all x values are
+    positive (appropriate for pressure), and linearly spaced otherwise.
+
+    :param x: Monotonically increasing x-axis knots (e.g. pressure in psi).
+    :param values: Function values at each knot.
+    :param number_of_base_points: Target number of base knots for grid expansion.
+        Pass `0` to use the raw knots without expansion.
+    :param number_of_endpoint_extra_points: Extra knots injected into the first
+        and last 10 % of the x-range during expansion. Pass `0` to disable
+        endpoint enrichment.
+    :param spacing: Grid spacing mode for the expanded base grid. `"cosine"`
+        clusters points near the boundaries; `"linspace"` gives uniform spacing.
+    :param minimum_scale_span: Minimum x-range required before grid expansion is
+        attempted. Defaults to `1.0`, which is appropriate for pressure axes
+        measured in psi.
+    :return: Two-tuple `(interpolant, derivative_interpolant)` where
+        `derivative_interpolant` is the analytical first derivative of `interpolant`.
+    """
+    xs = x
+    vals = values
+
+    span = float(xs[-1]) - float(xs[0])
+    should_scale = (
+        number_of_base_points > 0
+        and len(xs) < number_of_base_points
+        and span > minimum_scale_span
+    )
+    if should_scale:
+        # Build expanded base grid, log-spaced for positive axes (pressure), linear otherwise
+        if float(xs[0]) > 0.0:
+            base_grid = np.logspace(
+                np.log10(float(xs[0])),
+                np.log10(float(xs[-1])),
+                number_of_base_points,
+            )
+        else:
+            base_grid = np.linspace(float(xs[0]), float(xs[-1]), number_of_base_points)
+
+        # Inject extra knots into each boundary decade
+        if number_of_endpoint_extra_points > 0:
+            decade_width = 0.10 * span
+            lower_refinement = np.linspace(
+                float(xs[0]),
+                float(xs[0]) + decade_width,
+                number_of_endpoint_extra_points + 2,
+            )
+            upper_refinement = np.linspace(
+                float(xs[-1]) - decade_width,
+                float(xs[-1]),
+                number_of_endpoint_extra_points + 2,
+            )
+            base_grid = np.unique(
+                np.concatenate((base_grid, lower_refinement, upper_refinement))
+            )
+
+        source_pchip = PchipInterpolator(xs, vals)
+        vals = source_pchip(base_grid)
+        xs = base_grid
+
+    interpolant = PchipInterpolator(xs, vals)
+    derivative_interpolant: PchipInterpolator = interpolant.derivative(1)
+    return interpolant, derivative_interpolant
+
+
 class PseudoPressureTable(
     StoreSerializable,
     fields={
         "pressures": npt.NDArray,
         "pseudo_pressures": npt.NDArray,
         "reference_pressure": typing.Optional[float],
+        "number_of_base_points": int,
+        "number_of_endpoint_extra_points": int,
     },
 ):
     """
     Pre-computed gas pseudo-pressure table for fast lookup during simulation.
 
-    Uses `np.interp` for fast linear interpolation.
-    Supports both forward (pressure to pseudo-pressure) and inverse (pseudo-pressure to pressure)
-    interpolation.
+    Uses a PCHIP interpolant for C¹-continuous forward interpolation.
 
     Two construction modes:
 
@@ -363,6 +443,15 @@ class PseudoPressureTable(
        (e.g., from laboratory data or external calculations).
 
     These modes are mutually exclusive.
+
+    **Grid scaling** (`number_of_base_points` / `number_of_endpoint_extra_points`):
+
+    When `number_of_base_points > 0` and the raw point count is smaller than
+    `number_of_base_points`, the knot grid is expanded before fitting the PCHIP
+    interpolant. Extra knots near the pressure boundaries improve derivative accuracy
+    in the low and high-pressure tails where the pseudo-pressure integrand varies
+    most rapidly. Pass `number_of_base_points=0` to disable scaling and use the
+    raw pressure grid directly.
     """
 
     @typing.overload
@@ -374,6 +463,8 @@ class PseudoPressureTable(
         pressure_range: typing.Optional[typing.Tuple[float, float]] = None,
         points: typing.Optional[int] = None,
         reference_pressure: typing.Optional[float] = None,
+        number_of_base_points: int = 500,
+        number_of_endpoint_extra_points: int = 20,
     ) -> None: ...
 
     @typing.overload
@@ -383,6 +474,8 @@ class PseudoPressureTable(
         pressures: npt.NDArray,
         pseudo_pressures: npt.NDArray,
         reference_pressure: typing.Optional[float] = None,
+        number_of_base_points: int = 500,
+        number_of_endpoint_extra_points: int = 20,
     ) -> None: ...
 
     def __init__(
@@ -398,23 +491,29 @@ class PseudoPressureTable(
         pressures: typing.Optional[npt.NDArray] = None,
         pseudo_pressures: typing.Optional[npt.NDArray] = None,
         reference_pressure: typing.Optional[float] = None,
+        number_of_base_points: int = 500,
+        number_of_endpoint_extra_points: int = 20,
     ):
         """
         Build pseudo-pressure lookup table.
 
         **Function-based mode** (compute from correlations):
 
-        :param z_factor_func: Z-factor correlation Z(P)
-        :param viscosity_func: Gas viscosity correlation μ(P)
-        :param pressure_range: (P_min, P_max) for table. Defaults to (c.MINIMUM_VALID_PRESSURE, c.MAXIMUM_VALID_PRESSURE)
-        :param points: Number of points in table (500-2000 for good accuracy)
-        :param reference_pressure: Reference pressure (psi), default 14.7
+        :param z_factor_func: Z-factor correlation Z(P).
+        :param viscosity_func: Gas viscosity correlation μ(P) in cP.
+        :param pressure_range: (P_min, P_max) for table. Defaults to (c.MINIMUM_VALID_PRESSURE, c.MAXIMUM_VALID_PRESSURE).
+        :param points: Number of pressure points to compute before PCHIP fitting.
+        :param reference_pressure: Reference pressure (psi), default c.MINIMUM_VALID_PRESSURE.
+        :param number_of_base_points: Target knot count for grid expansion before PCHIP fitting. Pass `0` to disable scaling.
+        :param number_of_endpoint_extra_points: Extra knots injected into each boundary decade during grid expansion.
 
         **Value-based mode** (use pre-computed data):
 
-        :param pressures: Array of pressure points (psi), must be sorted
-        :param pseudo_pressures: Array of corresponding pseudo-pressure values (psi²/cP)
-        :param reference_pressure: Reference pressure (psi), default 14.7
+        :param pressures: Array of pressure points (psi), must be sorted ascending.
+        :param pseudo_pressures: Array of corresponding pseudo-pressure values (psi²/cP).
+        :param reference_pressure: Reference pressure (psi), default c.MINIMUM_VALID_PRESSURE.
+        :param number_of_base_points: Same semantics as function-based mode.
+        :param number_of_endpoint_extra_points: Same semantics as function-based mode.
 
         Example (function-based):
 
@@ -430,13 +529,9 @@ class PseudoPressureTable(
         Example (value-based):
 
         ```python
-        # From lab data or external tool
-        pressure_values = np.array([100, 500, 1000, 2000, 5000])
-        pseudo_pressure_values = np.array([2.1e4, 5.3e5, 1.2e6, 2.8e6, 8.1e6])
-
         table = PseudoPressureTable(
-            pressures=pressure_values,
-            pseudo_pressures=pseudo_pressure_values,
+            pressures=np.array([100, 500, 1000, 2000, 5000]),
+            pseudo_pressures=np.array([2.1e4, 5.3e5, 1.2e6, 2.8e6, 8.1e6]),
         )
         ```
         """
@@ -460,34 +555,35 @@ class PseudoPressureTable(
         self.reference_pressure = typing.cast(
             float, reference_pressure or c.MINIMUM_VALID_PRESSURE
         )
+        self.number_of_base_points = number_of_base_points
+        self.number_of_endpoint_extra_points = number_of_endpoint_extra_points
+        dtype = get_dtype()
 
         if value_mode:
             if pressures is None or pseudo_pressures is None:
                 raise ValidationError(
                     "Value-based mode requires both 'pressures' and 'pseudo_pressures' arrays"
                 )
-
             if pressures.shape != pseudo_pressures.shape:
                 raise ValidationError(
                     f"Pressure and pseudo-pressure arrays must have same shape. "
                     f"Got pressures: {pressures.shape}, pseudo_pressures: {pseudo_pressures.shape}"
                 )
-
             if len(pressures) < 2:
                 raise ValidationError(
                     f"Need at least 2 points for interpolation, got {len(pressures)}"
                 )
 
-            dtype = get_dtype()
             self.pressures = np.ascontiguousarray(pressures, dtype=dtype)
             self.pseudo_pressures = np.ascontiguousarray(pseudo_pressures, dtype=dtype)
-
             self.z_factor_func = None  # type: ignore[assignment]
             self.viscosity_func = None  # type: ignore[assignment]
 
             logger.debug(
-                f"Built pseudo-pressure table from {len(pressures)} data points: "
-                f"P ∈ [{pressures.min():.4f}, {pressures.max():.4f}] psi"
+                "Built pseudo-pressure table from %d data points: P ∈ [%.4f, %.4f] psi",
+                len(pressures),
+                pressures.min(),
+                pressures.max(),
             )
         else:
             if z_factor_func is None or viscosity_func is None:
@@ -498,18 +594,16 @@ class PseudoPressureTable(
             self.z_factor_func = z_factor_func
             self.viscosity_func = viscosity_func
 
-            # Create pressure grid (log-spaced for better resolution at low P)
             min_pressure, max_pressure = pressure_range or (
                 c.MINIMUM_VALID_PRESSURE,
                 c.MAXIMUM_VALID_PRESSURE,
             )
-            points = typing.cast(int, points or c.GAS_PSEUDO_PRESSURE_POINTS)
-            dtype = get_dtype()
+            n_points = typing.cast(int, points or c.GAS_PSEUDO_PRESSURE_POINTS)
             self.pressures = np.logspace(
-                np.log10(min_pressure), np.log10(max_pressure), points, dtype=dtype
+                np.log10(min_pressure), np.log10(max_pressure), n_points, dtype=dtype
             )
 
-            logger.info("Building pseudo-pressure table with %d points...", points)
+            logger.info("Building pseudo-pressure table with %d points...", n_points)
             self.pseudo_pressures = build_pseudo_pressures(
                 pressures=self.pressures,
                 z_factor_func=self.z_factor_func,
@@ -518,86 +612,95 @@ class PseudoPressureTable(
                 dtype=dtype,
             )
             logger.debug(
-                f"Pseudo-pressure table built: P ∈ [{min_pressure:.4f}, {max_pressure:.4f}] psi"
+                "Pseudo-pressure table built: P ∈ [%.4f, %.4f] psi",
+                min_pressure,
+                max_pressure,
             )
 
-    def interpolate(self, pressure: float) -> float:
+        # Build interpolants
+        self._pchip, self._dpchip = build_pchip_interpolant_from_points(
+            x=self.pressures,
+            values=self.pseudo_pressures,
+            number_of_base_points=self.number_of_base_points,
+            number_of_endpoint_extra_points=self.number_of_endpoint_extra_points,
+            minimum_scale_span=1.0,
+        )
+
+    def interpolate(self, pressure: FloatOrArray) -> FloatOrArray:
         """
         Interpolate pseudo-pressure at given pressure.
 
-        Forward interpolation: pressure → pseudo-pressure
+        Forward interpolation: pressure to pseudo-pressure.
 
-        :param pressure: Pressure (psi)
-        :return: Pseudo-pressure m(P) (psi²/cP)
+        Values outside the tabulated range are clamped to the boundary
+        pseudo-pressure (constant extrapolation).
+
+        :param pressure: Pressure (psi) — scalar or array.
+        :return: Pseudo-pressure m(P) (psi²/cP).
         """
-        return np.interp(
-            x=pressure,
-            xp=self.pressures,
-            fp=self.pseudo_pressures,
-            left=self.pseudo_pressures[0],
-            right=self.pseudo_pressures[-1],
-        )
+        is_scalar = np.isscalar(pressure)
+        p = np.atleast_1d(np.asarray(pressure, dtype=np.float64))
+        p_min = float(self._pchip.x[0])
+        p_max = float(self._pchip.x[-1])
+        result = self._pchip(np.clip(p, p_min, p_max))
+        result = np.where(p < p_min, float(self.pseudo_pressures[0]), result)
+        result = np.where(p > p_max, float(self.pseudo_pressures[-1]), result)
+        if is_scalar:
+            return float(result.ravel()[0])
+        return result.reshape(p.shape)
 
-    def inverse_interpolate(self, pseudo_pressure: float) -> float:
+    def inverse_interpolate(self, pseudo_pressure: FloatOrArray) -> FloatOrArray:
         """
         Inverse interpolate pressure at given pseudo-pressure.
 
-        Inverse interpolation: pseudo-pressure → pressure
+        Inverse interpolation: pseudo-pressure to pressure.
 
-        :param pseudo_pressure: Pseudo-pressure m(P) (psi²/cP)
-        :return: Pressure (psi)
+        Uses linear interpolation on the stored (pressure, pseudo-pressure) knots.
+        Values outside the tabulated range are clamped to the boundary pressure.
+
+        :param pseudo_pressure: Pseudo-pressure m(P) (psi²/cP) — scalar or array.
+        :return: Pressure (psi).
         """
         return np.interp(
             x=pseudo_pressure,
             xp=self.pseudo_pressures,
             fp=self.pressures,
-            left=self.pressures[0],
-            right=self.pressures[-1],
+            left=float(self.pressures[0]),
+            right=float(self.pressures[-1]),
         )
 
-    def __call__(self, pressure: float) -> float:
+    def __call__(self, pressure: FloatOrArray) -> FloatOrArray:
         """
-        Fast lookup of pseudo-pressure via interpolation.
+        Fast lookup of pseudo-pressure via PCHIP interpolation.
 
-        :param pressure: Pressure (psi)
-        :return: Pseudo-pressure m(P) (psi²/cP)
+        :param pressure: Pressure (psi) — scalar or array.
+        :return: Pseudo-pressure m(P) (psi²/cP).
         """
         return self.interpolate(pressure)
 
-    def gradient(self, pressure: float) -> float:
+    def gradient(self, pressure: FloatOrArray) -> FloatOrArray:
         """
-        Compute dm/dP = 2P/(μ*Z) for use in well models.
+        Evaluate dm/dP from the stored analytical PCHIP derivative.
 
-        Only available when table was built in function-based mode.
-        For value-based mode, use numerical differentiation instead.
+        This is the integrand 2P/(μZ) evaluated consistently with the fitted
+        curve rather than from the raw functions, so it is available in both
+        construction modes and is always C⁰-continuous.
 
-        :param pressure: Pressure (psi)
-        :return: dm/dP (psi/cP)
-        :raises ValidationError: If table was built from data values (no Z/μ functions)
+        The derivative is zero outside the tabulated pressure range (constant
+        extrapolation = zero slope).
+
+        :param pressure: Pressure (psi) — scalar or array.
+        :return: dm/dP (psi/cP).
         """
-        if self.z_factor_func is None or self.viscosity_func is None:
-            raise ValidationError(
-                "`gradient(...)` method requires function-based construction mode. "
-                "Table was built from data values without Z-factor/viscosity functions. "
-                "Use numerical differentiation on the table instead."
-            )
-
-        if pressure <= 0:
-            return 0.0  # Gradient at P=0 is 0
-
-        Z = self.z_factor_func(pressure)
-        mu = self.viscosity_func(pressure)
-
-        # Protect against invalid values
-        if Z <= 0 or mu <= 0 or not np.isfinite(Z) or not np.isfinite(mu):
-            logger.warning(
-                f"Invalid Z={Z} or μ={mu} at P={pressure} in gradient calculation. "
-                "Using safe defaults."
-            )
-            Z = max(Z, 0.01) if np.isfinite(Z) else 1.0
-            mu = max(mu, 0.001) if np.isfinite(mu) else 0.01
-
-        return 2.0 * pressure / (mu * Z)  # type: ignore[return-value]
+        is_scalar = np.isscalar(pressure)
+        p = np.atleast_1d(np.asarray(pressure, dtype=np.float64))
+        p_min = float(self._dpchip.x[0])
+        p_max = float(self._dpchip.x[-1])
+        result = self._dpchip(np.clip(p, p_min, p_max))
+        result = np.where((p < p_min) | (p > p_max), 0.0, result)
+        if is_scalar:
+            return float(result.ravel()[0])
+        return result.reshape(p.shape)
 
 
 _PSEUDO_PRESSURE_TABLE_CACHE: LFUCache[typing.Hashable, PseudoPressureTable] = LFUCache(
@@ -677,7 +780,9 @@ def build_pseudo_pressure_table(
         with _pseudo_pressure_cache_lock:
             if cache_key in _PSEUDO_PRESSURE_TABLE_CACHE:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("Using cached pseudo-pressure table for key: %s", cache_key)
+                    logger.debug(
+                        "Using cached pseudo-pressure table for key: %s", cache_key
+                    )
                 return _PSEUDO_PRESSURE_TABLE_CACHE[cache_key]
 
     # Build new table outside lock to avoid blocking other threads

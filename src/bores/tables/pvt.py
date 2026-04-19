@@ -10,6 +10,7 @@ import attrs
 import numpy as np
 import numpy.typing as npt
 from scipy.interpolate import (  # type: ignore[import-untyped]
+    PchipInterpolator,
     RectBivariateSpline,
     RegularGridInterpolator,
     interp1d,
@@ -283,6 +284,65 @@ class PVTData(StoreSerializable):
             )
 
 
+def _build_pchip_2d_interpolator(
+    pressures: npt.NDArray,
+    temperatures: npt.NDArray,
+    table: npt.NDArray,
+) -> typing.Callable[[npt.NDArray, npt.NDArray], npt.NDArray]:
+    """
+    Build a PCHIP-along-axes 2D interpolator for a property table.
+
+    Fits independent PCHIP interpolants along the pressure axis at each
+    temperature knot, then along the temperature axis at each pressure query
+    point. This is a tensor-product approach that preserves monotonicity
+    independently along each axis, avoiding the oscillation risk of a global
+    tensor-product spline on noisy PVT data.
+
+    The returned callable accepts flat arrays of `(pressure, temperature)`
+    evaluation points and returns a flat result array, matching the calling
+    convention of `RectBivariateSpline.ev`.
+
+    :param pressures: 1D array of pressure knots (psi), strictly increasing.
+    :param temperatures: 1D array of temperature knots (°F), strictly increasing.
+    :param table: 2D array of shape `(n_p, n_t)` containing property values.
+    :return: Callable with signature `(pressure_points, temperature_points) -> values`.
+    """
+    # Pre-build one PCHIP per temperature column (along pressure axis)
+    # Shape: n_t interpolants, each mapping pressure to value at that T
+    _p_interps: typing.List[PchipInterpolator] = [
+        PchipInterpolator(pressures, table[:, j], extrapolate=True)
+        for j in range(len(temperatures))
+    ]
+
+    def _ev(p: npt.NDArray, t: npt.NDArray) -> npt.NDArray:
+        """
+        Evaluate at scattered `(p, t)` pairs via two-stage PCHIP interpolation.
+
+        For each query point, first interpolates along pressure at all
+        temperature knots, then interpolates along temperature to the
+        target temperature.
+        """
+        p = np.asarray(p, dtype=np.float64).ravel()
+        t = np.asarray(t, dtype=np.float64).ravel()
+        n = len(p)
+
+        # Stage 1: evaluate each pressure-axis PCHIP at all query pressures
+        # Result shape: (n_t, n_queries)
+        p_interp_values = np.empty((len(temperatures), n), dtype=np.float64)
+        for j, interp in enumerate(_p_interps):
+            p_interp_values[j] = interp(p)
+
+        # Stage 2: for each query point, interpolate along temperature
+        result = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            result[i] = PchipInterpolator(
+                temperatures, p_interp_values[:, i], extrapolate=True
+            )(t[i])
+        return result
+
+    return _ev
+
+
 class PVTTable(StoreSerializable):
     """
     Phase-aware PVT property lookup using pre-built interpolators.
@@ -312,11 +372,24 @@ class PVTTable(StoreSerializable):
     +---------------------------------+-----+-----+-------+
     ```
 
-    **Extrapolation:** Outside table bounds the interpolators extrapolate
-    linearly/cubically. Set `warn_on_extrapolation=True` to log warnings.
+    **Interpolation:**
 
-    **Performance:**  Uses `RectBivariateSpline` for 2D interpolation (oil/gas), which is 10-50x
-    faster than `RegularGridInterpolator`, and then uses `RegularGridInterpolator` for 3D interpolation (water).
+    - Oil / gas 2D tables: `RectBivariateSpline` for `"linear"`, a two-stage
+        PCHIP-along-axes approach for `"cubic"`. The PCHIP path preserves
+        monotonicity independently along the pressure and temperature axes,
+        avoiding the oscillation risk of a global tensor-product spline on
+        noisy PVT data.
+    - Water 3D tables: when a single salinity is present (constant-salinity
+        reservoir), the 3D table is pre-sliced to 2D at `default_salinity` and
+        a `RectBivariateSpline` / PCHIP interpolator is built on the slice,
+        giving the same performance as oil/gas. When multiple salinities are
+        present, `RegularGridInterpolator` is used for the full 3D lookup.
+    - The salinity fast-path is selected automatically at construction time
+        based on the number of salinity knots in the data.
+
+    **Extrapolation:** Outside table bounds the interpolators extrapolate
+    linearly or monotone-cubically. Set `warn_on_extrapolation=True` to log
+    extrapolation warnings.
     """
 
     __abstract_serializable__ = True
@@ -337,7 +410,8 @@ class PVTTable(StoreSerializable):
 
         :param data: Phase-tagged raw PVT data or path to PVT data file.
         :param interpolation_method: `"linear"` (default) or `"cubic"`.
-            Cubic requires ≥ 4 points along each axis.
+            Cubic requires ≥ 4 points along each axis and uses a two-stage
+            PCHIP-along-axes method for 2D oil/gas tables.
         :param validate: Run physical-consistency checks on `data`.
         :param warn_on_extrapolation: Log a warning when queries fall outside
             the table pressure/temperature/salinity bounds.
@@ -363,13 +437,11 @@ class PVTTable(StoreSerializable):
         if not clamps and clamps is not None:
             self.clamps = {}
         else:
-            # Merge clamps
             self.clamps: typing.Dict[str, typing.Tuple[float, float]] = {
                 **PHASE_DEFAULT_CLAMPS[data.phase],  # type: ignore
                 **(clamps or {}),
             }
 
-        # Cubic needs ≥ 4 points
         if interpolation_method != "linear":
             if len(data.pressures) < 4:
                 raise ValidationError(
@@ -391,7 +463,6 @@ class PVTTable(StoreSerializable):
         if validate:
             self._check_physical_consistency(data)
 
-        # Store extrapolation bounds
         self._extrapolation_bounds: typing.Dict[str, typing.Tuple[float, float]] = {
             "pressure": (float(data.pressures[0]), float(data.pressures[-1])),
             "temperature": (float(data.temperatures[0]), float(data.temperatures[-1])),
@@ -402,14 +473,20 @@ class PVTTable(StoreSerializable):
                 float(data.salinities[-1]),
             )
 
-        # Oil bubble-point dimensionality
         self._pb_ndim: typing.Optional[int] = None
         if data.phase == FluidPhase.OIL and data.bubble_point_pressures is not None:
             self._pb_ndim = data.bubble_point_pressures.ndim
 
-        # Water default salinity (used when salinity arg is None)
         self.default_salinity: typing.Optional[float] = (
             float(data.salinities[0]) if data.salinities is not None else None
+        )
+
+        # True when the water table was built with a single salinity value.
+        # So the 3D arrays are pre-sliced to 2D and faster 2D interpolators are used.
+        self._water_constant_salinity: bool = (
+            data.phase == FluidPhase.WATER
+            and data.salinities is not None
+            and len(data.salinities) == 1
         )
 
         self._data = data
@@ -436,8 +513,6 @@ class PVTTable(StoreSerializable):
             "interpolation_method": self.interpolation_method,
             "validate": self.validate,
             "warn_on_extrapolation": self.warn_on_extrapolation,
-            # Only store clamps that differ from the phase defaults so the
-            # payload stays compact and phase-default changes propagate forward.
             "clamps": {
                 k: list(v)
                 for k, v in self.clamps.items()
@@ -496,7 +571,6 @@ class PVTTable(StoreSerializable):
                     "`salinities` must be strictly monotonically increasing."
                 )
 
-        # Bubble point shape (oil only)
         bubble_point_pressures = data.bubble_point_pressures
         if bubble_point_pressures is not None:
             if bubble_point_pressures.ndim == 1:
@@ -523,7 +597,6 @@ class PVTTable(StoreSerializable):
             else:
                 raise ValidationError("`bubble_point_pressures` must be 1D or 2D.")
 
-        # Validate 2D table shapes
         _2d_fields = [
             "viscosity_table",
             "density_table",
@@ -543,12 +616,10 @@ class PVTTable(StoreSerializable):
                     f"n_temperatures={n_t})."
                 )
 
-        # Validate 3D table shapes. Only valid if salinities present
         _3d_fields = [
             "solubility_in_water_table",
             "bubble_point_pressure_table",
         ]
-        # Shared fields can be either 2D (oil/gas) or 3D (water)
         _shared_fields = [
             "viscosity_table",
             "density_table",
@@ -573,7 +644,6 @@ class PVTTable(StoreSerializable):
                         f"(n_p={n_p}, n_t={n_t}, n_s={n_s})."
                     )
 
-        # `solubility_in_water` requires salinities
         if data.solubility_in_water_table is not None and salinities is None:
             raise ValidationError(
                 "`solubility_in_water_table` is 3D and requires `salinities`."
@@ -604,7 +674,6 @@ class PVTTable(StoreSerializable):
         ):
             raise ValidationError("Gas Z-factor must be positive everywhere.")
 
-        # Gas density < reasonable oil density upper bound (50 lbm/ft³)
         if (
             phase == FluidPhase.GAS
             and data.density_table is not None
@@ -628,30 +697,46 @@ class PVTTable(StoreSerializable):
         temperatures = data.temperatures
         salinities = data.salinities
         k = _INTERPOLATION_DEGREES[self.interpolation_method]
+        use_pchip = self.interpolation_method == "cubic"
 
         def _register_2d(name: str, table: typing.Optional[npt.NDArray]) -> None:
-            """Register a 2D RectBivariateSpline interpolator."""
+            """Register a 2D interpolator - `RectBivariateSpline` for linear, two-stage PCHIP-along-axes for cubic."""
             if table is None:
                 return
-            self._interpolators[name] = RectBivariateSpline(
-                x=pressures, y=temperatures, z=table, kx=k, ky=k
-            )
+            if use_pchip:
+                self._interpolators[name] = _build_pchip_2d_interpolator(
+                    pressures, temperatures, table
+                )
+            else:
+                self._interpolators[name] = RectBivariateSpline(
+                    x=pressures, y=temperatures, z=table, kx=k, ky=k
+                )
 
         def _register_3d(name: str, table: typing.Optional[npt.NDArray]) -> None:
-            """Register a 3D RegularGridInterpolator."""
+            """
+            Register a 3D interpolator.
+
+            When the water table was built with a single salinity (constant-salinity
+            reservoir), pre-slice the 3D array to 2D and register a fast 2D
+            interpolator instead, matching oil/gas performance. When multiple
+            salinities are present, fall back to `RegularGridInterpolator`.
+            """
             if table is None or salinities is None:
                 return
-            self._interpolators[name] = RegularGridInterpolator(
-                points=(pressures, temperatures, salinities),
-                values=table,
-                method=self.interpolation_method,
-                bounds_error=False,
-                fill_value=None,  # extrapolate
-            )
+            if self._water_constant_salinity:
+                # Slice out the single salinity dimension and register as 2D
+                _register_2d(name, table[:, :, 0])
+            else:
+                self._interpolators[name] = RegularGridInterpolator(
+                    points=(pressures, temperatures, salinities),
+                    values=table,
+                    method=self.interpolation_method,
+                    bounds_error=False,
+                    fill_value=None,
+                )
 
         # Shared tables
         if phase == FluidPhase.WATER:
-            # Water shared tables are 3D
             _register_3d("viscosity", data.viscosity_table)
             _register_3d("density", data.density_table)
             _register_3d("formation_volume_factor", data.formation_volume_factor_table)
@@ -659,7 +744,6 @@ class PVTTable(StoreSerializable):
             _register_3d("specific_gravity", data.specific_gravity_table)
             _register_3d("molecular_weight", data.molecular_weight_table)
         else:
-            # Oil / gas shared tables are 2D
             _register_2d("viscosity", data.viscosity_table)
             _register_2d("density", data.density_table)
             _register_2d("formation_volume_factor", data.formation_volume_factor_table)
@@ -667,7 +751,6 @@ class PVTTable(StoreSerializable):
             _register_2d("specific_gravity", data.specific_gravity_table)
             _register_2d("molecular_weight", data.molecular_weight_table)
 
-        # Oil-specific tables
         if phase == FluidPhase.OIL:
             _register_2d("solution_gor", data.solution_gor_table)
 
@@ -681,19 +764,22 @@ class PVTTable(StoreSerializable):
                         bounds_error=False,
                         fill_value="extrapolate",  # type: ignore[arg-type]
                     )
-                else:  # 2D Pb(Rs, T)
+                else:
                     rs = data.solution_gas_to_oil_ratios
                     assert rs is not None
-                    self._interpolators["bubble_point_pressure"] = RectBivariateSpline(
-                        x=rs, y=temperatures, z=pb, kx=k, ky=k
-                    )
+                    if use_pchip:
+                        self._interpolators["bubble_point_pressure"] = (
+                            _build_pchip_2d_interpolator(rs, temperatures, pb)
+                        )
+                    else:
+                        self._interpolators["bubble_point_pressure"] = (
+                            RectBivariateSpline(x=rs, y=temperatures, z=pb, kx=k, ky=k)
+                        )
 
-        # Gas-specific
         if phase == FluidPhase.GAS:
             _register_2d("compressibility_factor", data.compressibility_factor_table)
             _register_3d("solubility_in_water", data.solubility_in_water_table)
 
-        # Water-specific
         if phase == FluidPhase.WATER:
             _register_3d("bubble_point_pressure", data.bubble_point_pressure_table)
             _register_2d("gas_free_fvf", data.gas_free_fvf_table)
@@ -709,7 +795,7 @@ class PVTTable(StoreSerializable):
         return typing.cast(FluidPhase, self._phase)
 
     def exists(self, name: str) -> bool:
-        """Return True if an interpolator for *name* was built."""
+        """Return True if an interpolator for `name` was built."""
         return name in self._interpolators
 
     def _warn_extrapolation(
@@ -750,7 +836,12 @@ class PVTTable(StoreSerializable):
     def _pt_interpolate(
         self, name: str, pressure: QueryType, temperature: QueryType
     ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
-        """2D interpolation via `RectBivariateSpline.ev` with clamping."""
+        """
+        2D interpolation with clamping.
+
+        Uses `RectBivariateSpline.ev` for linear mode and the two-stage PCHIP
+        callable for cubic mode. The interface is identical in both cases.
+        """
         interp = self._interpolators.get(name)
         if interp is None:
             return None
@@ -762,6 +853,10 @@ class PVTTable(StoreSerializable):
         if is_scalar:
             result: typing.Union[float, npt.NDArray] = float(
                 interp.ev(pressure, temperature)
+                if hasattr(interp, "ev")
+                else interp(
+                    np.atleast_1d(pressure), np.atleast_1d(temperature)
+                ).ravel()[0]
             )
         else:
             p = np.atleast_1d(pressure)
@@ -775,7 +870,7 @@ class PVTTable(StoreSerializable):
                     raise ValidationError(
                         f"Incompatible shapes: pressure {p.shape}, temperature {t.shape}"
                     )
-            result = interp.ev(p, t)
+            result = interp.ev(p, t) if hasattr(interp, "ev") else interp(p, t)
 
         clamps = self.clamps
         if name in clamps:
@@ -785,7 +880,6 @@ class PVTTable(StoreSerializable):
             else:
                 result = float(np.clip(result, lo, hi))
 
-        # Convert to float only if truly scalar
         if isinstance(result, np.ndarray) and result.ndim == 0:
             return float(result)
         elif isinstance(result, np.ndarray) and result.size == 1:
@@ -799,7 +893,17 @@ class PVTTable(StoreSerializable):
         temperature: QueryType,
         salinity: QueryType,
     ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
-        """3D interpolation via `RegularGridInterpolator` with clamping."""
+        """
+        3D interpolation with clamping.
+
+        When `_water_constant_salinity` is True the interpolator stored under
+        `name` is actually a 2D interpolator (the 3D table was pre-sliced at
+        construction time), so the salinity argument is ignored and `_pt_interpolate`
+        is called directly for full `RectBivariateSpline` / PCHIP performance.
+        """
+        if self._water_constant_salinity:
+            return self._pt_interpolate(name, pressure, temperature)
+
         interp = self._interpolators.get(name)
         if interp is None:
             return None
@@ -817,7 +921,6 @@ class PVTTable(StoreSerializable):
             lo, hi = clamps[name]
             np.clip(result, lo, hi, out=result)
 
-        # Convert to float only if truly scalar
         if result.ndim == 0:
             return float(result)
         elif result.size == 1:
@@ -825,7 +928,7 @@ class PVTTable(StoreSerializable):
         return result
 
     def _resolve_salinity(self, salinity: typing.Optional[QueryType]) -> QueryType:
-        """Return salinity, falling back to default_salinity for water tables."""
+        """Return salinity, falling back to `default_salinity` for water tables."""
         if salinity is not None:
             return salinity
         if self.default_salinity is not None:
@@ -841,6 +944,7 @@ class PVTTable(StoreSerializable):
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
         solution_gor: typing.Optional[QueryType] = None,
+        bubble_point_pressure: typing.Optional[QueryType] = None,
     ) -> typing.Optional[typing.Union[float, np.ndarray]]:
         """
         Get fluid viscosity μ (cP).
@@ -867,6 +971,10 @@ class PVTTable(StoreSerializable):
             the bubble point table is 2D — i.e. `Pb(Rs, T)`, so the correct
             bubble point can be located before applying the undersaturated
             correction. Not needed for 1D `Pb(T)` tables.
+        :param bubble_point_pressure: Pre-computed bubble point pressure (psi). Oil phase
+            only. When provided, skips the internal `bubble_point_pressure` table lookup,
+            saving one interpolator evaluation per call. Useful in inner loops where `Pb`
+            has already been resolved.
         :return: Viscosity in cP, or None if table not provided.
         """
         if self._phase == FluidPhase.WATER:
@@ -877,12 +985,15 @@ class PVTTable(StoreSerializable):
         if self._phase == FluidPhase.GAS:
             return self._pt_interpolate("viscosity", pressure, temperature)
 
-        # For oil, apply undersaturated Beggs & Robinson correction above Pb
         if "viscosity" not in self._interpolators:
             return None
 
-        pb = self.bubble_point_pressure(
-            temperature=temperature, solution_gor=solution_gor
+        pb = (
+            bubble_point_pressure
+            if bubble_point_pressure is not None
+            else self.bubble_point_pressure(
+                temperature=temperature, solution_gor=solution_gor
+            )
         )
         if pb is None:
             return self._pt_interpolate("viscosity", pressure, temperature)
@@ -902,12 +1013,10 @@ class PVTTable(StoreSerializable):
             )
 
         if np.any(unsaturated_mask):
-            # Viscosity at bubble point (μob)
             mu_ob = self._pt_interpolate(
                 "viscosity", pb_arr[unsaturated_mask], t_arr[unsaturated_mask]
             )
             if mu_ob is None:
-                # Fallback: use table directly at current pressure
                 result[unsaturated_mask] = self._pt_interpolate(  # type: ignore[index]
                     "viscosity", p_arr[unsaturated_mask], t_arr[unsaturated_mask]
                 )
@@ -915,19 +1024,13 @@ class PVTTable(StoreSerializable):
                 p_under = p_arr[unsaturated_mask]
                 pb_under = pb_arr[unsaturated_mask]
                 mu_ob_arr = np.asarray(mu_ob)
-                # Modified Beggs & Robinson (1975) / Vazquez & Beggs (1980)
-                # X = 2.6 * P^1.187 * exp(-11.513 - 8.98e-5 * P)
                 X = 2.6 * (p_under**1.187) * np.exp(-11.513 - 8.98e-5 * p_under)
-                X = np.clip(X, 0.0, 5.0)  # prevent runaway exponentiation
-                pressure_ratio = np.clip(
-                    p_under / pb_under,
-                    1.0,
-                    None,  # P > Pb by definition
-                )
+                X = np.clip(X, 0.0, 5.0)
+                pressure_ratio = np.clip(p_under / pb_under, 1.0, None)
                 result[unsaturated_mask] = np.clip(
                     mu_ob_arr * (pressure_ratio**X),
-                    mu_ob_arr,  # viscosity must not decrease above Pb
-                    mu_ob_arr * 100.0,  # sanity cap at 100x bubble-point value
+                    mu_ob_arr,
+                    mu_ob_arr * 100.0,
                 )
 
         clamps = self.clamps
@@ -963,6 +1066,7 @@ class PVTTable(StoreSerializable):
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
         solution_gor: typing.Optional[QueryType] = None,
+        bubble_point_pressure: typing.Optional[QueryType] = None,
     ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get formation volume factor B (bbl/STB for oil/water, ft³/SCF for gas).
@@ -970,7 +1074,7 @@ class PVTTable(StoreSerializable):
         **Oil phase:**
         - Saturated (P ≤ Pb): interpolates directly from table.
         - Undersaturated (P > Pb): applies McCain compressibility correction:
-          ``Bo = Bob * exp(-avg_co * (P - Pb))``. Falls back to Bob if no
+          `Bo = Bob * exp(-avg_co * (P - Pb))`. Falls back to Bob if no
           compressibility table is available.
 
         **Gas / water phase:** direct table interpolation.
@@ -979,6 +1083,8 @@ class PVTTable(StoreSerializable):
         :param temperature: Temperature (°F).
         :param salinity: Salinity (ppm NaCl). Water phase only; uses default if None.
         :param solution_gor: Solution GOR (SCF/STB). Required for 2D oil Pb table.
+        :param bubble_point_pressure: Pre-computed bubble point pressure (psi). Oil phase
+            only. When provided, skips the internal `bubble_point_pressure` table lookup.
         :return: FVF or None if table not provided.
         """
         if self._phase == FluidPhase.WATER:
@@ -994,15 +1100,17 @@ class PVTTable(StoreSerializable):
                 "formation_volume_factor", pressure, temperature
             )
 
-        # Oil: handle Pb correction
         if "formation_volume_factor" not in self._interpolators:
             return None
 
-        pb = self.bubble_point_pressure(
-            temperature=temperature, solution_gor=solution_gor
+        pb = (
+            bubble_point_pressure
+            if bubble_point_pressure is not None
+            else self.bubble_point_pressure(
+                temperature=temperature, solution_gor=solution_gor
+            )
         )
         if pb is None:
-            # No Pb table
             return self._pt_interpolate(
                 "formation_volume_factor", pressure, temperature
             )
@@ -1013,7 +1121,6 @@ class PVTTable(StoreSerializable):
         p_arr, t_arr, pb_arr = np.broadcast_arrays(p_arr, t_arr, pb_arr)
 
         result = np.zeros_like(p_arr, dtype=float)
-
         saturated_mask = p_arr <= pb_arr
         unsaturated_mask = ~saturated_mask
 
@@ -1042,7 +1149,6 @@ class PVTTable(StoreSerializable):
             else:
                 result[unsaturated_mask] = np.asarray(oil_fvf_at_pb)
 
-        # Apply clamps
         clamps = self.clamps
         if "formation_volume_factor" in clamps:
             lo, hi = clamps["formation_volume_factor"]
@@ -1134,8 +1240,8 @@ class PVTTable(StoreSerializable):
         - 1D table Pb(T): `temperature` only.
         - 2D table Pb(Rs, T): both `temperature` and `solution_gor` required.
 
-        **Water phase:** water bubble point pressure(P, T, S) - `pressure` and `salinity` required
-        (or defaults to `default_salinity` if salinity is None).
+        **Water phase:** water bubble point pressure(P, T, S) — `pressure` and `salinity`
+        required (or defaults to `default_salinity` if salinity is None).
 
         **Gas phase:** returns `None`.
 
@@ -1160,7 +1266,6 @@ class PVTTable(StoreSerializable):
                 self._resolve_salinity(salinity),
             )
 
-        # Oil
         interp = self._interpolators.get("bubble_point_pressure")
         if interp is None:
             return None
@@ -1169,7 +1274,6 @@ class PVTTable(StoreSerializable):
             result = interp(temperature)
             return float(result) if np.isscalar(temperature) else result
 
-        # 2D Pb(Rs, T)
         if solution_gor is None:
             raise ValidationError(
                 "2D bubble point table requires `solution_gor` (solution GOR) argument."
@@ -1185,7 +1289,7 @@ class PVTTable(StoreSerializable):
                 raise ValidationError(
                     "`solution_gor` and `temperature` must have compatible shapes."
                 )
-        result = interp.ev(rs, t)
+        result = interp.ev(rs, t) if hasattr(interp, "ev") else interp(rs, t)
         return float(result) if result.size == 1 else result
 
     def is_saturated(
@@ -1223,6 +1327,7 @@ class PVTTable(StoreSerializable):
         pressure: QueryType,
         temperature: QueryType,
         solution_gor: typing.Optional[QueryType] = None,
+        bubble_point_pressure: typing.Optional[QueryType] = None,
     ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get solution gas-oil ratio Rs (SCF/STB).
@@ -1233,6 +1338,8 @@ class PVTTable(StoreSerializable):
         :param pressure: Pressure (psi).
         :param temperature: Temperature (°F).
         :param solution_gor: Solution GOR (SCF/STB). Required for 2D oil Pb table.
+        :param bubble_point_pressure: Pre-computed bubble point pressure (psi).
+            When provided, skips the internal `bubble_point_pressure` table lookup.
         :return: Rs in SCF/STB, or None.
         """
         if self._phase != FluidPhase.OIL:
@@ -1240,8 +1347,12 @@ class PVTTable(StoreSerializable):
         if "solution_gor" not in self._interpolators:
             return None
 
-        pb = self.bubble_point_pressure(
-            temperature=temperature, solution_gor=solution_gor
+        pb = (
+            bubble_point_pressure
+            if bubble_point_pressure is not None
+            else self.bubble_point_pressure(
+                temperature=temperature, solution_gor=solution_gor
+            )
         )
         if pb is None:
             return self._pt_interpolate("solution_gor", pressure, temperature)
@@ -1260,7 +1371,6 @@ class PVTTable(StoreSerializable):
                 "solution_gor", p_arr[saturated_mask], t_arr[saturated_mask]
             )
         if np.any(unsaturated_mask):
-            # Rs frozen at Rsb above Pb
             result[unsaturated_mask] = self._pt_interpolate(
                 "solution_gor", pb_arr[unsaturated_mask], t_arr[unsaturated_mask]
             )

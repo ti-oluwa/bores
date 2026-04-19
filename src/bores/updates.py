@@ -247,12 +247,6 @@ def update_fluid_properties(
             temperature=temperature_grid,
             salinity=water_salinity_grid,
         )
-        gas_free_water_formation_volume_factor_grid = (
-            build_gas_free_water_formation_volume_factor_grid(
-                pressure_grid=pressure_grid,
-                temperature_grid=temperature_grid,
-            )
-        )
         new_water_compressibility_grid = water_pvt_table.compressibility(
             pressure=pressure_grid,
             temperature=temperature_grid,
@@ -268,12 +262,14 @@ def update_fluid_properties(
                 pressure=pressure_grid,
                 temperature=temperature_grid,
                 salinity=water_salinity_grid,
+                bubble_point_pressure=new_water_bubble_point_pressure_grid,
             )
         )
         new_water_viscosity_grid = water_pvt_table.viscosity(
             pressure=pressure_grid,
             temperature=temperature_grid,
             salinity=water_salinity_grid,
+            bubble_point_pressure=new_water_bubble_point_pressure_grid,
         )
 
     # OIL PROPERTIES (tricky due to bubble point)
@@ -374,6 +370,7 @@ def update_fluid_properties(
             pressure=pressure_grid,
             temperature=temperature_grid,
             solution_gor=fluid_properties.solution_gas_to_oil_ratio_grid,
+            bubble_point_pressure=new_oil_bubble_point_pressure_grid,
         )
         # Compute oil FVF (may use lagged compressibility which is acceptable)
         # Oil FVF does not depend necessarily on the new compressibility grid,
@@ -384,6 +381,7 @@ def update_fluid_properties(
             pressure=pressure_grid,
             temperature=temperature_grid,
             solution_gor=new_solution_gas_to_oil_ratio_grid,
+            bubble_point_pressure=new_oil_bubble_point_pressure_grid,
         )
         # Compute oil compressibility
         new_oil_compressibility_grid = oil_pvt_table.compressibility(
@@ -400,11 +398,12 @@ def update_fluid_properties(
             pressure=pressure_grid,
             temperature=temperature_grid,
             solution_gor=new_solution_gas_to_oil_ratio_grid,
+            bubble_point_pressure=new_oil_bubble_point_pressure_grid,
         )
 
     new_oil_effective_viscosity_grid = new_oil_viscosity_grid
     # If there are miscible injections, update the effective oil viscosity and density grids
-    if miscibility_model == "todd_longstaff":
+    if miscibility_model == "todd-longstaff":
         for well in wells.injection_wells:
             injected_fluid = well.injected_fluid
             if injected_fluid is not None and injected_fluid.is_miscible:
@@ -689,7 +688,7 @@ def apply_solution_gas_updates(
     gas can re-dissolve into oil and water.
 
     Physics:
-    
+
     - Oil shrinks when Rs decreases: So_new = So_old * Bo_new / Bo_old
     - Water shrinks when Rsw decreases: Sw_new = Sw_old * Bw_new / Bw_old
     - Gas appears from oil: dSg_oil = (Rs_old - Rs_new) * So_old * [Bg_new / (Bo_old * bbl_to_ft3)]
@@ -697,8 +696,7 @@ def apply_solution_gas_updates(
     - Re-dissolution is capped at available free gas
     - Rs and Rsw are corrected if the PVT update assumed more gas could dissolve than exists
 
-    :param fluid_properties: Fluid properties with updated PVT (new Rs, Rsw, Bo, Bw, Bg)
-        but old saturations.
+    :param fluid_properties: Fluid properties with updated PVT (new Rs, Rsw, Bo, Bw, Bg) but old saturations.
     :param old_solution_gas_to_oil_ratio_grid: Solution gas-oil ratio grid before PVT update (SCF/STB).
     :param old_oil_formation_volume_factor_grid: Oil FVF grid before PVT update (bbl/STB).
     :param old_gas_solubility_in_water_grid: Gas solubility in water grid before PVT update (SCF/STB).
