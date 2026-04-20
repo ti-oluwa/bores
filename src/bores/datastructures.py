@@ -1006,6 +1006,26 @@ class Rates(Serializable, typing.Generic[DType, ShapeT]):
         """
         return self.water[key], self.oil[key], self.gas[key]
 
+    def __setitem__(
+        self,
+        key: ShapeT,
+        value: typing.Tuple[
+            typing.Union[DType, float],
+            typing.Union[DType, float],
+            typing.Union[DType, float],
+        ],
+    ) -> None:
+        """
+        Set the water, oil and gas rates at the specified cell.
+
+        :param key: The N-dimensional cell index typed as `ShapeT`.
+        :param value: A three-tuple `(water_rate, oil_rate, gas_rate)`.
+        """
+        water, oil, gas = value
+        self.oil[key] = oil
+        self.water[key] = water
+        self.gas[key] = gas
+
     def abs(self) -> Self:
         return Rates(  # type: ignore[return-value]
             oil=abs(self.oil),

@@ -18,7 +18,6 @@ from bores.datastructures import (
     BottomHolePressure,
     BottomHolePressures,
     FormationVolumeFactors,
-    PhaseTensorsProxy,
     Rates,
     SparseTensor,
 )
@@ -290,24 +289,6 @@ def _make_bhps(grid_shape: NDimension) -> BottomHolePressures[float, NDimension]
     )
 
 
-def _rates_proxy(
-    rates: Rates[float, NDimension],
-) -> PhaseTensorsProxy[float, NDimension]:
-    return PhaseTensorsProxy(oil=rates.oil, water=rates.water, gas=rates.gas)
-
-
-def _fvfs_proxy(
-    fvfs: FormationVolumeFactors[float, NDimension],
-) -> PhaseTensorsProxy[float, NDimension]:
-    return PhaseTensorsProxy(oil=fvfs.oil, water=fvfs.water, gas=fvfs.gas)
-
-
-def _bhps_proxy(
-    bhps: BottomHolePressures[float, NDimension],
-) -> PhaseTensorsProxy[float, NDimension]:
-    return PhaseTensorsProxy(oil=bhps.oil, water=bhps.water, gas=bhps.gas)
-
-
 def _rebuild_rock_fluid_grids(
     fluid_properties: FluidProperties[ThreeDimensions],
     rock_properties: RockProperties[ThreeDimensions],
@@ -447,8 +428,8 @@ def _run_impes_step(
         config=config,
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
-        injection_bhps=_bhps_proxy(injection_bhps),
-        production_bhps=_bhps_proxy(production_bhps),
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
         well_indices_cache=well_indices_cache,
         dtype=dtype,
     )
@@ -562,12 +543,12 @@ def _run_impes_step(
         wells=wells,
         config=config,
         well_indices_cache=well_indices_cache,
-        injection_bhps=_bhps_proxy(injection_bhps),
-        production_bhps=_bhps_proxy(production_bhps),
-        injection_rates=_rates_proxy(injection_rates),
-        production_rates=_rates_proxy(production_rates),
-        injection_fvfs=_fvfs_proxy(injection_fvfs),
-        production_fvfs=_fvfs_proxy(production_fvfs),
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        injection_fvfs=injection_fvfs,
+        production_fvfs=production_fvfs,
     )
 
     # Refresh boundary conditions after pressure update so that dynamic BCs (Robin,
@@ -597,8 +578,8 @@ def _run_impes_step(
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
             well_indices_cache=well_indices_cache,
-            injection_rates=_rates_proxy(injection_rates),
-            production_rates=_rates_proxy(production_rates),
+            injection_rates=injection_rates,
+            production_rates=production_rates,
             pressure_change_grid=pressure_change_grid,
             dtype=dtype,
         )
@@ -619,8 +600,8 @@ def _run_impes_step(
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
             well_indices_cache=well_indices_cache,
-            injection_rates=_rates_proxy(injection_rates),
-            production_rates=_rates_proxy(production_rates),
+            injection_rates=injection_rates,
+            production_rates=production_rates,
             pressure_change_grid=pressure_change_grid,
             dtype=dtype,
         )
@@ -926,8 +907,8 @@ def _run_sequential_implicit_step(
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
         well_indices_cache=well_indices_cache,
-        injection_bhps=_bhps_proxy(injection_bhps),
-        production_bhps=_bhps_proxy(production_bhps),
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
         dtype=dtype,
     )
     if not pressure_result.success:
@@ -1037,12 +1018,12 @@ def _run_sequential_implicit_step(
         wells=wells,
         config=config,
         well_indices_cache=well_indices_cache,
-        injection_bhps=_bhps_proxy(injection_bhps),
-        production_bhps=_bhps_proxy(production_bhps),
-        injection_rates=_rates_proxy(injection_rates),
-        production_rates=_rates_proxy(production_rates),
-        injection_fvfs=_fvfs_proxy(injection_fvfs),
-        production_fvfs=_fvfs_proxy(production_fvfs),
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        injection_fvfs=injection_fvfs,
+        production_fvfs=production_fvfs,
     )
 
     # Refresh boundary conditions so the saturation solve sees post-pressure BC values.
@@ -1066,10 +1047,10 @@ def _run_sequential_implicit_step(
         well_indices_cache=well_indices_cache,
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
-        injection_rates=_rates_proxy(injection_rates),
-        production_rates=_rates_proxy(production_rates),
-        injection_bhps=_bhps_proxy(injection_bhps),
-        production_bhps=_bhps_proxy(production_bhps),
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
         pressure_change_grid=pressure_change_grid,
         dtype=dtype,
     )
@@ -1400,8 +1381,8 @@ def _run_full_sequential_implicit_step(
             well_indices_cache=well_indices_cache,
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
-            injection_bhps=_bhps_proxy(injection_bhps),
-            production_bhps=_bhps_proxy(production_bhps),
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
             dtype=dtype,
         )
 
@@ -1526,12 +1507,12 @@ def _run_full_sequential_implicit_step(
             wells=wells,
             config=config,
             well_indices_cache=well_indices_cache,
-            injection_bhps=_bhps_proxy(injection_bhps),
-            production_bhps=_bhps_proxy(production_bhps),
-            injection_rates=_rates_proxy(injection_rates),
-            production_rates=_rates_proxy(production_rates),
-            injection_fvfs=_fvfs_proxy(injection_fvfs),
-            production_fvfs=_fvfs_proxy(production_fvfs),
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
+            injection_rates=injection_rates,
+            production_rates=production_rates,
+            injection_fvfs=injection_fvfs,
+            production_fvfs=production_fvfs,
         )
 
         # Refresh boundary conditions with updated pressure for the saturation solve.
@@ -1558,10 +1539,10 @@ def _run_full_sequential_implicit_step(
             well_indices_cache=well_indices_cache,
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
-            injection_rates=_rates_proxy(injection_rates),
-            production_rates=_rates_proxy(production_rates),
-            injection_bhps=_bhps_proxy(injection_bhps),
-            production_bhps=_bhps_proxy(production_bhps),
+            injection_rates=injection_rates,
+            production_rates=production_rates,
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
             pressure_change_grid=pressure_change_grid,
             dtype=dtype,
         )
@@ -1980,12 +1961,12 @@ def _run_explicit_step(
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
         well_indices_cache=well_indices_cache,
-        injection_rates=_rates_proxy(injection_rates),
-        production_rates=_rates_proxy(production_rates),
-        injection_fvfs=_fvfs_proxy(injection_fvfs),
-        production_fvfs=_fvfs_proxy(production_fvfs),
-        injection_bhps=_bhps_proxy(injection_bhps),
-        production_bhps=_bhps_proxy(production_bhps),
+        injection_rates=injection_rates,
+        production_rates=production_rates,
+        injection_fvfs=injection_fvfs,
+        production_fvfs=production_fvfs,
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
         dtype=dtype,
     )
     pressure_solution = pressure_result.value
@@ -2078,8 +2059,8 @@ def _run_explicit_step(
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
             well_indices_cache=well_indices_cache,
-            injection_rates=_rates_proxy(injection_rates),
-            production_rates=_rates_proxy(production_rates),
+            injection_rates=injection_rates,
+            production_rates=production_rates,
             pressure_change_grid=pressure_change_grid,
             dtype=dtype,
         )
@@ -2100,8 +2081,8 @@ def _run_explicit_step(
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
             well_indices_cache=well_indices_cache,
-            injection_rates=_rates_proxy(injection_rates),
-            production_rates=_rates_proxy(production_rates),
+            injection_rates=injection_rates,
+            production_rates=production_rates,
             pressure_change_grid=pressure_change_grid,
             dtype=dtype,
         )

@@ -9,7 +9,7 @@ from scipy.sparse import coo_matrix
 
 from bores.config import Config
 from bores.constants import c
-from bores.datastructures import PhaseTensorsProxy
+from bores.datastructures import BottomHolePressures, Rates
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
@@ -757,8 +757,8 @@ def _compute_residual(
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
     well_indices_cache: WellIndicesCache,
-    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
@@ -880,8 +880,8 @@ def compute_residual(
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     well_indices_cache: WellIndicesCache,
-    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
@@ -992,8 +992,8 @@ def assemble_numerical_jacobian(
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     well_indices_cache: WellIndicesCache,
-    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
@@ -1838,8 +1838,8 @@ def _assemble_jacobian_well_contributions(
     dkrg_dSo_grid: ThreeDimensionalGrid,
     dkrg_dSg_grid: ThreeDimensionalGrid,
     well_indices_cache: WellIndicesCache,
-    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
     md_per_cp_to_ft2_per_psi_per_day: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
@@ -2035,8 +2035,8 @@ def assemble_analytical_jacobian(
     gas_viscosity_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
-    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     elevation_grid: ThreeDimensionalGrid,
@@ -2205,10 +2205,10 @@ def assemble_jacobian(
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     well_indices_cache: WellIndicesCache,
-    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
@@ -2335,10 +2335,10 @@ def evolve_saturation(
     config: Config,
     well_indices_cache: WellIndicesCache,
     pressure_change_grid: ThreeDimensionalGrid,
-    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
     dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
@@ -2378,10 +2378,10 @@ def evolve_saturation(
     :param config: Simulation configuration.
     :param well_indices_cache: Cache of well indices for rate look-up.
     :param pressure_change_grid: `P_new - P_old` (psi) for PVT volume correction.
-    :param injection_rates: Injection rates proxy (ft³/day per phase per cell).
-    :param production_rates: Production rates proxy (ft³/day per phase per cell).
-    :param injection_bhps: Injection bottom-hole pressures proxy (psi per phase per cell).
-    :param production_bhps: Production bottom-hole pressures proxy (psi per phase per cell).
+    :param injection_rates: Injection rates (ft³/day per phase per cell).
+    :param production_rates: Production rates (ft³/day per phase per cell).
+    :param injection_bhps: Injection bottom-hole pressures (psi per phase per cell).
+    :param production_bhps: Production bottom-hole pressures (psi per phase per cell).
     :param dtype: NumPy dtype for numerical arrays.
     :return: `EvolutionResult` containing an `ImplicitSaturationSolution` and a list of
         `NewtonConvergenceInfo` records.

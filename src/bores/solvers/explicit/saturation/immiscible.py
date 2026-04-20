@@ -8,7 +8,7 @@ import numpy.typing as npt
 
 from bores.config import Config
 from bores.constants import c
-from bores.datastructures import PhaseTensorsProxy
+from bores.datastructures import Rates
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import EvolutionResult
@@ -85,8 +85,8 @@ def evolve_saturation(
     flux_boundaries: ThreeDimensionalGrid,
     config: Config,
     well_indices_cache: WellIndicesCache,
-    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
     pressure_change_grid: typing.Optional[ThreeDimensionalGrid] = None,
     dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ExplicitSaturationSolution, SaturationEvolutionMeta]:
@@ -106,8 +106,8 @@ def evolve_saturation(
     :param capillary_pressure_grids: Tuple of capillary pressure grids for (oil-water, gas-oil)
     :param config: Simulation config and parameters.
     :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
-    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
-    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
+    :param injection_rates: Injection rates for each phase and cell.
+    :param production_rates: Production rates for each phase and cell.
     :param pressure_change_grid: Pressure change grid (P_new - P_old) in psi for PVT volume correction.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: `EvolutionResult` containing updated saturations.
@@ -1007,8 +1007,8 @@ def compute_well_rate_grids(
     cell_count_y: int,
     cell_count_z: int,
     well_indices_cache: WellIndicesCache,
-    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
     dtype: npt.DTypeLike,
 ) -> typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid]:
     """
@@ -1018,8 +1018,8 @@ def compute_well_rate_grids(
     :param cell_count_y: Number of cells in the y-direction.
     :param cell_count_z: Number of cells in the z-direction.
     :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
-    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
-    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
+    :param injection_rates: Injection rates for each phase and cell.
+    :param production_rates: Production rates for each phase and cell.
     :param dtype: Numpy data type for computations.
     :return: (net_water_well_rate_grid, net_oil_well_rate_grid, net_gas_well_rate_grid) (ft³/day)
     """

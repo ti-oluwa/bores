@@ -8,7 +8,7 @@ import numpy.typing as npt
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
-from bores.datastructures import PhaseTensorsProxy
+from bores.datastructures import BottomHolePressures, FormationVolumeFactors, Rates
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
@@ -51,12 +51,12 @@ def evolve_pressure(
     wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
-    injection_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    injection_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
+    injection_fvfs: FormationVolumeFactors[float, ThreeDimensions],
+    production_fvfs: FormationVolumeFactors[float, ThreeDimensions],
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
     dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ExplicitPressureSolution, None]:
     """
@@ -77,12 +77,12 @@ def evolve_pressure(
     :param wells: `Wells` object containing well parameters for injection and production wells
     :param config: Simulation config.
     :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
-    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
-    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
-    :param injection_fvfs: Optional `PhaseTensorsProxy` of injection formation volume factors for each phase and cell.
-    :param production_fvfs: Optional `PhaseTensorsProxy` of production formation volume factors for each phase and cell.
-    :param injection_bhps: Optional `PhaseTensorsProxy` of injection bottom hole pressures for each phase and cell.
-    :param production_bhps: Optional `PhaseTensorsProxy` of production bottom hole pressures for each phase and cell.
+    :param injection_rates: injection rates for each phase and cell.
+    :param production_rates: production rates for each phase and cell.
+    :param injection_fvfs: injection formation volume factors for each phase and cell.
+    :param production_fvfs: production formation volume factors for each phase and cell.
+    :param injection_bhps: injection bottom hole pressures for each phase and cell.
+    :param production_bhps: production bottom hole pressures for each phase and cell.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: A N-Dimensional numpy array representing the updated oil phase pressure field (psi).
     """
@@ -921,13 +921,13 @@ def compute_well_rate_grid(
     time: float,
     config: Config,
     well_indices_cache: WellIndicesCache,
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
+    injection_fvfs: FormationVolumeFactors[float, ThreeDimensions],
+    production_fvfs: FormationVolumeFactors[float, ThreeDimensions],
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
     dtype: npt.DTypeLike,
-    injection_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    injection_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
 ) -> ThreeDimensionalGrid:
     """
     Compute well rates for all cells (injection + production).
@@ -950,12 +950,12 @@ def compute_well_rate_grid(
     :param config: Simulation config
     :param dtype: NumPy dtype for array allocation (np.float32 or np.float64)
     :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
-    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
-    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
-    :param injection_fvfs: Optional `PhaseTensorsProxy` of injection formation volume factors for each phase and cell.
-    :param production_fvfs: Optional `PhaseTensorsProxy` of production formation volume factors for each phase and cell.
-    :param injection_bhps: Optional `PhaseTensorsProxy` of injection bottom hole pressures for each phase and cell.
-    :param production_bhps: Optional `PhaseTensorsProxy` of production bottom hole pressures for each phase and cell.
+    :param injection_rates: injection rates for each phase and cell.
+    :param production_rates: production rates for each phase and cell.
+    :param injection_fvfs: injection formation volume factors for each phase and cell.
+    :param production_fvfs: production formation volume factors for each phase and cell.
+    :param injection_bhps: injection bottom hole pressures for each phase and cell.
+    :param production_bhps: production bottom hole pressures for each phase and cell.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: 3D grid of net well flow rates (ft³/day), positive = injection, negative = production
     """
@@ -1014,18 +1014,18 @@ def compute_well_rate_grid(
                 **compressibility_kwargs,
             )
             phase_compressibility = typing.cast(float, phase_compressibility)
-            phase_mobility = typing.cast(
+            total_mobility = typing.cast(
                 float,
-                injected_fluid.get_mobility(
-                    pressure=cell_oil_pressure, temperature=cell_temperature
-                ),
+                water_relative_mobility_grid[i, j, k]
+                + oil_relative_mobility_grid[i, j, k]
+                + gas_relative_mobility_grid[i, j, k],
             )
 
             flow_rate, effective_bhp = well.get_control(
                 pressure=cell_oil_pressure,
                 temperature=cell_temperature,
                 well_index=well_index,
-                phase_mobility=phase_mobility,
+                phase_mobility=total_mobility,
                 fluid=injected_fluid,
                 fluid_compressibility=phase_compressibility,
                 use_pseudo_pressure=use_pseudo_pressure,
@@ -1051,23 +1051,20 @@ def compute_well_rate_grid(
 
             well_rate_grid[i, j, k] += flow_rate
 
-            if injection_rates is not None:
-                if injected_phase == FluidPhase.GAS:
-                    injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
-                else:
-                    injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
+            if injected_phase == FluidPhase.GAS:
+                injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
+            else:
+                injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
 
-            if injection_fvfs is not None:
-                if injected_phase == FluidPhase.GAS:
-                    injection_fvfs[i, j, k] = (np.nan, np.nan, phase_fvf)
-                else:
-                    injection_fvfs[i, j, k] = (phase_fvf, np.nan, np.nan)
+            if injected_phase == FluidPhase.GAS:
+                injection_fvfs[i, j, k] = (np.nan, np.nan, phase_fvf)
+            else:
+                injection_fvfs[i, j, k] = (phase_fvf, np.nan, np.nan)
 
-            if injection_bhps is not None:
-                if injected_phase == FluidPhase.GAS:
-                    injection_bhps[i, j, k] = (np.nan, np.nan, effective_bhp)
-                else:
-                    injection_bhps[i, j, k] = (effective_bhp, np.nan, np.nan)
+            if injected_phase == FluidPhase.GAS:
+                injection_bhps[i, j, k] = (np.nan, np.nan, effective_bhp)
+            else:
+                injection_bhps[i, j, k] = (effective_bhp, np.nan, np.nan)
 
     # Process production wells
     for well in wells.production_wells:
@@ -1222,14 +1219,9 @@ def compute_well_rate_grid(
                     oil_fvf = phase_fvf
                     oil_bhp = effective_bhp
 
-            if production_rates is not None:
-                production_rates[i, j, k] = (water_rate, oil_rate, gas_rate)
-
-            if production_fvfs is not None:
-                production_fvfs[i, j, k] = (water_fvf, oil_fvf, gas_fvf)
-
-            if production_bhps is not None:
-                production_bhps[i, j, k] = (water_bhp, oil_bhp, gas_bhp)
+            production_rates[i, j, k] = (water_rate, oil_rate, gas_rate)
+            production_fvfs[i, j, k] = (water_fvf, oil_fvf, gas_fvf)
+            production_bhps[i, j, k] = (water_bhp, oil_bhp, gas_bhp)
 
     return well_rate_grid
 

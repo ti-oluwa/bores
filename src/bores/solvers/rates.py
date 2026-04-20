@@ -4,7 +4,7 @@ import numpy as np
 
 from bores.config import Config
 from bores.constants import c
-from bores.datastructures import PhaseTensorsProxy
+from bores.datastructures import BottomHolePressures, FormationVolumeFactors, Rates
 from bores.models import FluidProperties
 from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.base import Wells
@@ -29,12 +29,12 @@ def compute_well_rates(
     wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
-    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    injection_fvfs: PhaseTensorsProxy[float, ThreeDimensions],
-    production_fvfs: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
+    injection_rates: Rates[float, ThreeDimensions],
+    production_rates: Rates[float, ThreeDimensions],
+    injection_fvfs: FormationVolumeFactors[float, ThreeDimensions],
+    production_fvfs: FormationVolumeFactors[float, ThreeDimensions],
 ) -> None:
     """
     Compute well flow rates and update them in-place using the new pressure

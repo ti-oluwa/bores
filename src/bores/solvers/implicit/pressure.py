@@ -10,7 +10,7 @@ from scipy.sparse import coo_matrix
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
-from bores.datastructures import PhaseTensorsProxy
+from bores.datastructures import BottomHolePressures
 from bores.errors import PreconditionerError, SolverError
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
@@ -59,8 +59,8 @@ def evolve_pressure(
     wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
-    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
     dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ImplicitPressureSolution, None]:
     """
@@ -84,8 +84,8 @@ def evolve_pressure(
     :param config: `Config` object containing simulation config
     :param boundary_conditions: Model boundary conditions.
     :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
-    :param injection_bhps: `PhaseTensorsProxy` of injection bottom hole pressures for each phase and cell.
-    :param production_bhps: `PhaseTensorsProxy` of production bottom hole pressures for each phase and cell.
+    :param injection_bhps: `BottomHolePressures` of injection bottom hole pressures for each phase and cell.
+    :param production_bhps: `BottomHolePressures` of production bottom hole pressures for each phase and cell.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: `EvolutionResult` containing the new pressure grid and scheme used
     """
@@ -327,7 +327,7 @@ def evolve_pressure(
     D = np.where(D > 0, D, 1.0)
     jacobian = jacobian / D[:, None]
     residual_vector = residual_vector / D
-    
+
     # Solve the linear system A·pⁿ⁺¹ = b
     try:
         new_1D_pressure_grid, _ = solve_linear_system(
@@ -1328,9 +1328,9 @@ def compute_well_contributions(
     config: Config,
     well_indices_cache: WellIndicesCache,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
     dtype: npt.DTypeLike,
-    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Compute well contributions to the implicit pressure linear system A·p = b
