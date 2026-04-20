@@ -2,7 +2,6 @@ import typing
 
 import bores
 
-# Set precision
 # bores.use_32bit_precision()
 
 # Grid dimensions: 10x10x3 cells, each 1000 ft x 1000 ft, 100 ft thick
@@ -11,12 +10,12 @@ cell_dimension = (1000.0, 1000.0)
 
 # Build property grids
 thickness = bores.uniform_grid(grid_shape, value=100.0)  # ft
-pressure = bores.uniform_grid(grid_shape, value=3000.0)  # psi
 porosity = bores.uniform_grid(grid_shape, value=0.20)  # fraction
 temperature = bores.uniform_grid(grid_shape, value=180.0)  # deg F
 oil_viscosity = bores.uniform_grid(grid_shape, value=1.5)  # cP
 bubble_point = bores.uniform_grid(grid_shape, value=2500.0)  # psi
 oil_specific_gravity = bores.uniform_grid(grid_shape, value=0.85)
+gas_gravity_grid = bores.uniform_grid(grid_shape, value=0.792)
 
 # Residual and irreducible saturations
 residual_oil_saturation_water = bores.uniform_grid(grid_shape, value=0.12)
@@ -29,13 +28,24 @@ connate_water_saturation = bores.uniform_grid(grid_shape, value=0.06)
 depth = bores.depth_grid(thickness, datum=5000.0)  # Top at 5000 ft
 water_saturation, oil_saturation, gas_saturation = bores.build_saturation_grids(
     depth_grid=depth,
-    gas_oil_contact=5050.0,  # Above reservoir (no gas cap)
-    oil_water_contact=5280.0,  # Below reservoir (all oil zone)
+    gas_oil_contact=5050.0,
+    oil_water_contact=5280.0,
     connate_water_saturation_grid=connate_water_saturation,
     residual_oil_saturation_water_grid=residual_oil_saturation_water,
     residual_oil_saturation_gas_grid=residual_oil_saturation_gas,
     residual_gas_saturation_grid=residual_gas_saturation,
     porosity_grid=porosity,
+)
+
+pressure = bores.build_pressure_grid(
+    depth_grid=depth,
+    datum_depth=5150.0,
+    datum_pressure=3000.0,
+    oil_specific_gravity=0.85,
+    water_specific_gravity=1.0,
+    gas_specific_gravity=0.792,
+    gas_oil_contact=5050.0,
+    oil_water_contact=5280.0,
 )
 
 # Isotropic permeability: 100 mD
@@ -63,6 +73,7 @@ model = bores.reservoir_model(
     irreducible_water_saturation_grid=irreducible_water_saturation,
     connate_water_saturation_grid=connate_water_saturation,
     oil_specific_gravity_grid=oil_specific_gravity,
+    gas_gravity_grid=gas_gravity_grid,
     datum_depth=5000.0,
 )
 

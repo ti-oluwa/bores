@@ -26,6 +26,7 @@ def build_saturation_grids(
     gas_oil_transition_thickness: float = 5.0,
     oil_water_transition_thickness: float = 5.0,
     transition_curvature_exponent: float = 2.0,
+    dtype: typing.Optional[npt.DTypeLike] = None,
 ) -> typing.Tuple[
     NDimensionalGrid[NDimension],
     NDimensionalGrid[NDimension],
@@ -49,41 +50,41 @@ def build_saturation_grids(
 
     ### Sharp Contacts (use_transition_zones=False):
     ```markdown
-        ┌─────────────────────────────────────┐
-        │   GAS CAP (depth < GOC)            │  Sg = 1 - Sor_gas - Swc
-        │   Sg + So + Sw = 1.0               │  So = Sor_gas
-        │   Gas has displaced oil            │  Sw = Swc
-        ├─────────────────────────────────────┤ ← Gas-Oil Contact (GOC)
-        │   OIL ZONE (GOC ≤ depth < OWC)    │  So = 1 - Swc - Sgr
-        │   So + Sw + Sg = 1.0               │  Sw = Swc
-        │   Original accumulation            │  Sg = Sgr
-        ├─────────────────────────────────────┤ ← Oil-Water Contact (OWC)
-        │   WATER ZONE (depth ≥ OWC)        │  Sw = 1 - Sor_water
-        │   Sw + So + Sg = 1.0               │  So = Sor_water
-        │   Water has displaced oil          │  Sg = 0
-        └─────────────────────────────────────┘
+    ┌─────────────────────────────────────┐
+    │   GAS CAP (depth < GOC)            │  Sg = 1 - Sor_gas - Swc
+    │   Sg + So + Sw = 1.0               │  So = Sor_gas
+    │   Gas has displaced oil            │  Sw = Swc
+    ├─────────────────────────────────────┤ ← Gas-Oil Contact (GOC)
+    │   OIL ZONE (GOC ≤ depth < OWC)    │  So = 1 - Swc - Sgr
+    │   So + Sw + Sg = 1.0               │  Sw = Swc
+    │   Original accumulation            │  Sg = Sgr
+    ├─────────────────────────────────────┤ ← Oil-Water Contact (OWC)
+    │   WATER ZONE (depth ≥ OWC)        │  Sw = 1 - Sor_water
+    │   Sw + So + Sg = 1.0               │  So = Sor_water
+    │   Water has displaced oil          │  Sg = 0
+    └─────────────────────────────────────┘
     ```
 
     ### Transition Zones (use_transition_zones=True):
     ```markdown
-        ┌─────────────────────────────────────┐
-        │   GAS CAP                          │  Pure gas zone
-        │   (depth < GOC - h_go/2)           │
-        ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
-        │   GAS-OIL TRANSITION               │  Smooth blend:
-        │   (GOC - h_go/2 to GOC + h_go/2)   │  Sg: high → low
-        │                                     │  So: low → high
-        ├─────────────────────────────────────┤ ← Gas-Oil Contact (GOC)
-        │   OIL ZONE                         │  Pure oil zone
-        │   (GOC + h_go/2 to OWC - h_ow/2)   │
-        ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
-        │   OIL-WATER TRANSITION             │  Smooth blend:
-        │   (OWC - h_ow/2 to OWC + h_ow/2)   │  Sw: low → high
-        │                                     │  So: high → low
-        ├─────────────────────────────────────┤ ← Oil-Water Contact (OWC)
-        │   WATER ZONE                       │  Pure water zone
-        │   (depth > OWC + h_ow/2)           │
-        └─────────────────────────────────────┘
+    ┌─────────────────────────────────────┐
+    │   GAS CAP                          │  Pure gas zone
+    │   (depth < GOC - h_go/2)           │
+    ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+    │   GAS-OIL TRANSITION               │  Smooth blend:
+    │   (GOC - h_go/2 to GOC + h_go/2)   │  Sg: high → low
+    │                                     │  So: low → high
+    ├─────────────────────────────────────┤ ← Gas-Oil Contact (GOC)
+    │   OIL ZONE                         │  Pure oil zone
+    │   (GOC + h_go/2 to OWC - h_ow/2)   │
+    ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+    │   OIL-WATER TRANSITION             │  Smooth blend:
+    │   (OWC - h_ow/2 to OWC + h_ow/2)   │  Sw: low → high
+    │                                     │  So: high → low
+    ├─────────────────────────────────────┤ ← Oil-Water Contact (OWC)
+    │   WATER ZONE                       │  Pure water zone
+    │   (depth > OWC + h_ow/2)           │
+    └─────────────────────────────────────┘
     ```
 
     ### Transition Zone Physics
@@ -127,9 +128,9 @@ def build_saturation_grids(
         where k=0 is the shallowest (top) layer and k=-1 is the deepest (bottom) layer.
         Shape: (nx, ny, nz).
     :param gas_oil_contact: Gas-oil contact depth (ft). Cells at depths less than this
-        value are in the gas cap. Must be less than oil_water_contact.
+        value are in the gas cap. Must be less than `oil_water_contact`.
     :param oil_water_contact: Oil-water contact depth (ft). Cells at depths greater than
-        or equal to this value are in the water zone. Must be greater than gas_oil_contact.
+        or equal to this value are in the water zone. Must be greater than `gas_oil_contact`.
     :param connate_water_saturation_grid: Connate (irreducible) water saturation for each
         cell (fraction, 0-1). This is the minimum water saturation that remains in the
         pore space even in the presence of hydrocarbons. Typical: 0.15-0.30.
@@ -232,27 +233,27 @@ def build_saturation_grids(
     ```
 
     Notes:
-        - Depth increases downward: smaller depth = shallower (top), larger depth = deeper (bottom)
-        - Gas cap: depth < GOC (shallowest zone, uses Sor_gas)
-        - Oil zone: GOC ≤ depth < OWC (middle zone, uses Sgr)
-        - Water zone: depth ≥ OWC (deepest zone, uses Sor_water)
-        - Inactive cells (porosity ≤ 0 or NaN) have zero saturation for all phases
-        - All saturations are normalized to sum to exactly 1.0 in active cells
-        - For heterogeneous reservoirs, provide spatially varying property grids
-        - Transition zones should not overlap: ensure (OWC - OWC) > (h_go + h_ow)/2
+    - Depth increases downward: smaller depth = shallower (top), larger depth = deeper (bottom)
+    - Gas cap: depth < GOC (shallowest zone, uses Sor_gas)
+    - Oil zone: GOC ≤ depth < OWC (middle zone, uses Sgr)
+    - Water zone: depth ≥ OWC (deepest zone, uses Sor_water)
+    - Inactive cells (porosity ≤ 0 or NaN) have zero saturation for all phases
+    - All saturations are normalized to sum to exactly 1.0 in active cells
+    - For heterogeneous reservoirs, provide spatially varying property grids
+    - Transition zones should not overlap: ensure (OWC - OWC) > (h_go + h_ow)/2
 
     See Also:
-        - `build_depth_grid()`: Create depth grid from layer thicknesses
-        - `build_elevation_grid()`: Create elevation grid (upward-positive)
-        - Relative permeability models: Define how saturations affect flow
+    - `build_depth_grid()`: Create depth grid from layer thicknesses
+    - `build_elevation_grid()`: Create elevation grid (upward-positive)
+    - Relative permeability models: Define how saturations affect flow
 
     References:
-        - Craig, F. F. (1971). "The Reservoir Engineering Aspects of Waterflooding."
-            Society of Petroleum Engineers. (Residual saturations)
-        - Lake, L. W. (1989). "Enhanced Oil Recovery." Prentice Hall.
-            (Wettability effects on Sor)
-        - Leverett, M. C. (1941). "Capillary Behavior in Porous Solids."
-            Transactions of the AIME, 142(01), 152-169. (Transition zones)
+    - Craig, F. F. (1971). "The Reservoir Engineering Aspects of Waterflooding."
+        Society of Petroleum Engineers. (Residual saturations)
+    - Lake, L. W. (1989). "Enhanced Oil Recovery." Prentice Hall.
+        (Wettability effects on Sor)
+    - Leverett, M. C. (1941). "Capillary Behavior in Porous Solids."
+        Transactions of the AIME, 142(01), 152-169. (Transition zones)
     """
     # Identify active cells based on porosity
     # If porosity is NaN or <= 0, cell is inactive
@@ -273,7 +274,7 @@ def build_saturation_grids(
         active=active_mask,
     )
 
-    dtype = get_dtype()
+    dtype = dtype if dtype is not None else get_dtype()
     water_saturation = np.zeros_like(depth_grid, dtype=dtype)
     oil_saturation = np.zeros_like(depth_grid, dtype=dtype)
     gas_saturation = np.zeros_like(depth_grid, dtype=dtype)

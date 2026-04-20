@@ -56,17 +56,6 @@ pressure_interpolation_fraction = (reference_pressure - 4014.7) / (9014.7 - 4014
 initial_oil_density = (
     density_at_pb + (density_at_9015 - density_at_pb) * pressure_interpolation_fraction
 )
-oil_gradient = initial_oil_density / 144.0  # psi/ft
-
-layer_centre_depths = np.array([8335.0, 8360.0, 8400.0])  # ft TVDSS
-layer_pressures = (
-    reference_pressure + (layer_centre_depths - reference_depth) * oil_gradient
-)
-pressure_grid = bores.layered_grid(
-    grid_shape=grid_shape,
-    layer_values=layer_pressures,
-    orientation=bores.Orientation.Z,
-)
 
 # Temperature: 200°F (Table 1, constant throughout)
 temperature_grid = bores.uniform_grid(grid_shape=grid_shape, value=200.0)
@@ -76,10 +65,7 @@ temperature_grid = bores.uniform_grid(grid_shape=grid_shape, value=200.0)
 # From Table 2: Pb = 4014.7 psia (highest saturated Rs table pressure)
 # Pi = 4800 psia > Pb → reservoir initially UNDERSATURATED
 # -------------------------------------------------------------------------
-oil_bubble_point_pressure_grid = bores.uniform_grid(
-    grid_shape=grid_shape,
-    value=4014.7,  # psia — constant bubble point (Case 1)
-)
+oil_bubble_point_pressure_grid = bores.uniform_grid(grid_shape=grid_shape, value=4014.7)
 
 # -------------------------------------------------------------------------
 # Rock properties (Table 1, Odeh 1981)
@@ -154,6 +140,17 @@ water_saturation_grid, oil_saturation_grid, gas_saturation_grid = (
         use_transition_zones=True,
         transition_curvature_exponent=2.0,
     )
+)
+
+pressure_grid = bores.build_pressure_grid(
+    depth_grid=depth_grid,
+    datum_depth=8400.0,
+    datum_pressure=4800.0,
+    oil_density=initial_oil_density,
+    gas_specific_gravity=0.792,
+    water_specific_gravity=1.0,
+    gas_oil_contact=8200.0,
+    oil_water_contact=8500.0,
 )
 
 # Fluid properties (initial estimates, will be overridden by PVT tables)
@@ -381,7 +378,7 @@ gas_solubility_in_water_table = typing.cast(
 pvt_dataset = bores.build_pvt_dataset(
     pressures=pvt_pressures,
     temperatures=pvt_temperatures,
-    salinities=bores.array([0.0]),  # fresh water
+    salinities=bores.array([0.0]),
     bubble_point_pressures=bores.array([4014.7, 4014.7]),
     oil_specific_gravity=oil_specific_gravity,
     gas_gravity=0.792,

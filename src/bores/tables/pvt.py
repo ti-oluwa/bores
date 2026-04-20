@@ -914,7 +914,7 @@ class PVTTable(StoreSerializable):
         s = np.atleast_1d(salinity)
         p, t, s = np.broadcast_arrays(p, t, s)
         points = np.column_stack([p.ravel(), t.ravel(), s.ravel()])
-        result = interp(points).reshape(p.shape).astype(get_dtype(), copy=False)
+        result = interp(points).reshape(p.shape).astype(p.dtype, copy=False)
 
         clamps = self.clamps
         if name in clamps:
