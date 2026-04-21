@@ -532,7 +532,7 @@ def _run_impes_step(
 
     logger.debug("Computing well rates from new pressure and stored BHPs...")
     compute_well_rates(
-        new_pressure_grid=pressure_grid,
+        pressure_grid=pressure_grid,
         temperature_grid=fluid_properties.temperature_grid,
         water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
         oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
@@ -1007,7 +1007,7 @@ def _run_sequential_implicit_step(
 
     logger.debug("Computing well rates from new pressure and stored BHPs...")
     compute_well_rates(
-        new_pressure_grid=pressure_grid,
+        pressure_grid=pressure_grid,
         temperature_grid=fluid_properties.temperature_grid,
         water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
         oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
@@ -1496,7 +1496,7 @@ def _run_full_sequential_implicit_step(
             "Computing well rates from new pressure and stored BHPs for outer iteration saturation solve..."
         )
         compute_well_rates(
-            new_pressure_grid=pressure_grid,
+            pressure_grid=pressure_grid,
             temperature_grid=iter_fluid_properties.temperature_grid,
             water_relative_mobility_grid=iter_relative_mobility_grids.water_relative_mobility,
             oil_relative_mobility_grid=iter_relative_mobility_grids.oil_relative_mobility,

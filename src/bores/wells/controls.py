@@ -134,7 +134,6 @@ def _compute_required_bhp(
         # Setup pseudo-pressure if needed
         use_pp, pp_table = get_pseudo_pressure_table(
             fluid=fluid,
-            pressure=pressure,
             temperature=temperature,
             use_pseudo_pressure=use_pseudo_pressure,
             pvt_tables=pvt_tables,
@@ -603,7 +602,6 @@ class BHPControl(WellControl[WellFluidTcon]):
             # Setup pseudo-pressure if needed
             use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
-                pressure=pressure,
                 temperature=temperature,
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,
@@ -783,7 +781,6 @@ class BHPControl(WellControl[WellFluidTcon]):
         if fluid.phase == FluidPhase.GAS:
             use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
-                pressure=pressure,
                 temperature=temperature,
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,
@@ -1461,7 +1458,6 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         if fluid.phase == FluidPhase.GAS:
             use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
-                pressure=pressure,
                 temperature=temperature,
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,
@@ -1803,7 +1799,6 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         if fluid.phase == FluidPhase.GAS:
             use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
-                pressure=pressure,
                 temperature=temperature,
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,
@@ -2139,7 +2134,6 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         if fluid.phase == FluidPhase.GAS:
             use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
-                pressure=pressure,
                 temperature=temperature,
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,
@@ -2322,7 +2316,6 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         if fluid.phase == FluidPhase.GAS:
             use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
-                pressure=pressure,
                 temperature=temperature,
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,

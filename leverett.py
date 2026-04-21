@@ -194,7 +194,6 @@ config = bores.Config(
     scheme="impes",
     pressure_solver="direct",
     saturation_solver="direct",
-    # maximum_pressure_change=500.0,
     maximum_saturation_change=0.1,  # Control numerical diffusion
     disable_capillary_effects=True,  # Classic BL has no Pc
     normalize_saturations=True,

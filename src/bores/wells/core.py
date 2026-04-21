@@ -667,9 +667,7 @@ def compute_required_bhp_for_gas_rate(
         )
         try:
             return float(
-                pseudo_pressure_table.inverse(
-                    pseudo_pressure=required_pseudo_pressure
-                )
+                pseudo_pressure_table.inverse(pseudo_pressure=required_pseudo_pressure)
             )
         except ValidationError as exc:
             min_pseudo_pressure = pseudo_pressure_table.pseudo_pressures[0]
@@ -1387,17 +1385,16 @@ def compute_effective_permeability_for_well(
 
 def get_pseudo_pressure_table(
     fluid: WellFluid,
-    pressure: float,
     temperature: float,
     use_pseudo_pressure: bool,
     pvt_tables: typing.Optional[PVTTables] = None,
-) -> typing.Tuple[bool, typing.Optional[typing.Any]]:
+) -> typing.Tuple[bool, typing.Optional[PseudoPressureTable]]:
     """
     Get existing pseudo-pressure table or setup a new one for gas well fluid if needed.
 
     :return: Tuple of (use_pseudo_pressure, pseudo_pressure_table)
     """
-    if not use_pseudo_pressure or pressure <= c.GAS_PSEUDO_PRESSURE_THRESHOLD:
+    if not use_pseudo_pressure:
         return False, None
 
     pseudo_pressure_table = fluid.get_pseudo_pressure_table(

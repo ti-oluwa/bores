@@ -18,7 +18,7 @@ from bores.wells.indices import WellIndicesCache
 
 
 def compute_well_rates(
-    new_pressure_grid: ThreeDimensionalGrid,
+    pressure_grid: ThreeDimensionalGrid,
     temperature_grid: ThreeDimensionalGrid,
     water_relative_mobility_grid: ThreeDimensionalGrid,
     oil_relative_mobility_grid: ThreeDimensionalGrid,
@@ -45,7 +45,7 @@ def compute_well_rates(
     physically accurate rates consistent with the BHP established during the
     pressure solve.
 
-    :param new_pressure_grid: New oil pressure grid after pressure solve (psi)
+    :param pressure_grid: New oil pressure grid after pressure solve (psi)
     :param temperature_grid: Temperature grid (°F)
     :param water_relative_mobility_grid: Water relative mobility grid (1/cP)
     :param oil_relative_mobility_grid: Oil relative mobility grid (1/cP)
@@ -88,7 +88,7 @@ def compute_well_rates(
         for perforation_index in well_indices:
             i, j, k = perforation_index.cell
             well_index = perforation_index.well_index
-            new_pressure = typing.cast(float, new_pressure_grid[i, j, k])
+            cell_pressure = typing.cast(float, pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
 
             # Retrieve BHP stored during pressure solve.
@@ -102,25 +102,18 @@ def compute_well_rates(
                 # Perforation was skipped during pressure solve, skip here too.
                 continue
 
-            # Compute FVF at new pressure
             phase_fvf = typing.cast(
                 float,
                 injected_fluid.get_formation_volume_factor(
-                    pressure=new_pressure,
+                    pressure=cell_pressure,
                     temperature=cell_temperature,
                 ),
             )
-            total_mobility = typing.cast(
-                float,
-                gas_relative_mobility_grid[i, j, k]
-                + water_relative_mobility_grid[i, j, k]
-                + oil_relative_mobility_grid[i, j, k],
-            )
             if injected_phase == FluidPhase.GAS:
                 # Build pseudo-pressure table if needed
+                phase_mobility = gas_relative_mobility_grid[i, j, k]
                 use_pp, pp_table = get_pseudo_pressure_table(
                     fluid=injected_fluid,
-                    pressure=new_pressure,
                     temperature=cell_temperature,
                     use_pseudo_pressure=use_pseudo_pressure,
                     pvt_tables=config.pvt_tables,
@@ -128,22 +121,22 @@ def compute_well_rates(
                 specific_gravity = typing.cast(
                     float,
                     injected_fluid.get_specific_gravity(
-                        pressure=new_pressure,
+                        pressure=cell_pressure,
                         temperature=cell_temperature,
                     ),
                 )
                 avg_z_factor = compute_average_compressibility_factor(
-                    pressure=new_pressure,
+                    pressure=cell_pressure,
                     temperature=cell_temperature,
                     gas_gravity=specific_gravity,
                     bottom_hole_pressure=bhp,
                 )
                 flow_rate = compute_gas_well_rate(
                     well_index=well_index,
-                    pressure=new_pressure,
+                    pressure=cell_pressure,
                     temperature=cell_temperature,
                     bottom_hole_pressure=bhp,
-                    phase_mobility=total_mobility,
+                    phase_mobility=phase_mobility,
                     use_pseudo_pressure=use_pp,
                     pseudo_pressure_table=pp_table,
                     average_compressibility_factor=avg_z_factor,
@@ -154,25 +147,18 @@ def compute_well_rates(
 
             else:
                 # Water injection
-                if well.injected_fluid.phase == FluidPhase.WATER:
-                    compressibility_kwargs = {
-                        "bubble_point_pressure": water_bubble_point_pressure_grid[
-                            i, j, k
-                        ],
-                        "gas_formation_volume_factor": gas_formation_volume_factor_grid[
-                            i, j, k
-                        ],
-                        "gas_solubility_in_water": gas_solubility_in_water_grid[
-                            i, j, k
-                        ],
-                    }
-                else:
-                    compressibility_kwargs = {}
-
+                compressibility_kwargs = {
+                    "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
+                    "gas_formation_volume_factor": gas_formation_volume_factor_grid[
+                        i, j, k
+                    ],
+                    "gas_solubility_in_water": gas_solubility_in_water_grid[i, j, k],
+                }
+                phase_mobility = gas_relative_mobility_grid[i, j, k]
                 phase_compressibility = typing.cast(
                     float,
                     injected_fluid.get_compressibility(
-                        pressure=new_pressure,
+                        pressure=cell_pressure,
                         temperature=cell_temperature,
                         **compressibility_kwargs,
                     ),
@@ -180,9 +166,9 @@ def compute_well_rates(
                 flow_rate = (
                     compute_oil_well_rate(
                         well_index=well_index,
-                        pressure=new_pressure,
+                        pressure=cell_pressure,
                         bottom_hole_pressure=bhp,
-                        phase_mobility=total_mobility,
+                        phase_mobility=phase_mobility,
                         fluid_compressibility=phase_compressibility,
                         incompressibility_threshold=incompressibility_threshold,
                     )
@@ -200,7 +186,7 @@ def compute_well_rates(
         for perforation_index in well_indices:
             i, j, k = perforation_index.cell
             well_index = perforation_index.well_index
-            new_pressure = typing.cast(float, new_pressure_grid[i, j, k])
+            cell_pressure = typing.cast(float, pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
 
             if (
@@ -233,7 +219,6 @@ def compute_well_rates(
                     bhp = production_bhps.gas[i, j, k]
                     use_pp, pp_table = get_pseudo_pressure_table(
                         fluid=produced_fluid,
-                        pressure=new_pressure,
                         temperature=cell_temperature,
                         use_pseudo_pressure=use_pseudo_pressure,
                         pvt_tables=config.pvt_tables,
@@ -241,19 +226,19 @@ def compute_well_rates(
                     specific_gravity = typing.cast(
                         float,
                         produced_fluid.get_specific_gravity(
-                            pressure=new_pressure,
+                            pressure=cell_pressure,
                             temperature=cell_temperature,
                         ),
                     )
                     avg_z_factor = compute_average_compressibility_factor(
-                        pressure=new_pressure,
+                        pressure=cell_pressure,
                         temperature=cell_temperature,
                         gas_gravity=specific_gravity,
                         bottom_hole_pressure=bhp,
                     )
                     flow_rate = compute_gas_well_rate(
                         well_index=well_index,
-                        pressure=new_pressure,
+                        pressure=cell_pressure,
                         temperature=cell_temperature,
                         bottom_hole_pressure=bhp,
                         phase_mobility=phase_mobility,
@@ -277,7 +262,7 @@ def compute_well_rates(
                     flow_rate = (
                         compute_oil_well_rate(
                             well_index=well_index,
-                            pressure=new_pressure,
+                            pressure=cell_pressure,
                             bottom_hole_pressure=bhp,
                             phase_mobility=phase_mobility,
                             fluid_compressibility=phase_compressibility,
@@ -300,7 +285,7 @@ def compute_well_rates(
                     flow_rate = (
                         compute_oil_well_rate(
                             well_index=well_index,
-                            pressure=new_pressure,
+                            pressure=cell_pressure,
                             bottom_hole_pressure=bhp,
                             phase_mobility=phase_mobility,
                             fluid_compressibility=phase_compressibility,

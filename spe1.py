@@ -687,7 +687,7 @@ config = bores.Config(
     wells=wells,
     disable_capillary_effects=True,
     # freeze_saturation_pressure=True,
-    # maximum_gas_saturation_change=0.05,
+    maximum_gas_saturation_change=0.05,
     # maximum_oil_saturation_change=0.05,
     # maximum_water_saturation_change=0.05,
     maximum_saturation_change=0.5,
@@ -697,7 +697,7 @@ config = bores.Config(
     phase_appearance_tolerance=1e-6,
     saturation_convergence_tolerance=1e-4,
     saturation_cfl_threshold=0.8,
-    # minimum_injector_gas_saturation=1e-4,
+    # minimum_injector_gas_saturation=1e-3,
 )
 
 # Run and monitor the simulation and collect states
