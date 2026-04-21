@@ -257,7 +257,7 @@ oil_density_values = bores.array(
 # Raw values from paper (RB/MSCF):
 gas_fvf_values_bbl_per_mscf = bores.array(
     [
-        166.666,  # 14.7     (note: 1/6 × 1000 ≈ atmospheric)
+        166.666,  # 14.7 
         12.093,  # 264.7
         6.274,  # 514.7
         3.197,  # 1014.7
@@ -668,7 +668,7 @@ timer = bores.Timer(
     minimum_step_size=bores.Time(minutes=10.0),
     simulation_time=bores.Time(years=10.0),
     maximum_cfl_number=0.9,
-    ramp_up_factor=1.5,
+    ramp_up_factor=1.3,
     backoff_factor=0.5,
     aggressive_backoff_factor=0.25,
     maximum_rejections=20,
@@ -687,17 +687,16 @@ config = bores.Config(
     wells=wells,
     disable_capillary_effects=True,
     # freeze_saturation_pressure=True,
-    maximum_gas_saturation_change=0.05,
+    # maximum_gas_saturation_change=0.05,
     # maximum_oil_saturation_change=0.05,
     # maximum_water_saturation_change=0.05,
-    maximum_saturation_change=0.5,
-    maximum_pressure_change=1500.0,
+    maximum_pressure_change=2000.0,
     use_pseudo_pressure=True,
     normalize_saturations=True,
     phase_appearance_tolerance=1e-6,
     saturation_convergence_tolerance=1e-4,
     saturation_cfl_threshold=0.8,
-    # minimum_injector_gas_saturation=1e-3,
+    minimum_injector_gas_saturation=0.1,
 )
 
 # Run and monitor the simulation and collect states
@@ -705,5 +704,5 @@ states = list(bores.monitor(model, config))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
-    f"Final avg pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi"
+    f"Final average pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi"
 )

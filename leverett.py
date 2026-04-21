@@ -90,9 +90,7 @@ bubble_point_grid = bores.uniform_grid(grid_shape, value=bubble_point)
 
 
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.BrooksCoreyRelPermModel(
-        water_exponent=4.0, oil_exponent=2.0
-    )
+    relative_permeability_table=bores.LETThreePhaseRelPermModel()
 )
 
 model = bores.reservoir_model(
@@ -191,13 +189,14 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="impes",
+    scheme="full-si",
     pressure_solver="direct",
     saturation_solver="direct",
     maximum_saturation_change=0.1,  # Control numerical diffusion
     disable_capillary_effects=True,  # Classic BL has no Pc
     normalize_saturations=True,
     output_frequency=5,  # Save every 5th step for analysis
+    minimum_injector_water_saturation=0.1,
 )
 
 print("=" * 70)

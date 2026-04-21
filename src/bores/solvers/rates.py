@@ -19,12 +19,9 @@ from bores.wells.indices import WellIndicesCache
 
 def compute_well_rates(
     pressure_grid: ThreeDimensionalGrid,
-    temperature_grid: ThreeDimensionalGrid,
     water_relative_mobility_grid: ThreeDimensionalGrid,
     oil_relative_mobility_grid: ThreeDimensionalGrid,
     gas_relative_mobility_grid: ThreeDimensionalGrid,
-    water_compressibility_grid: ThreeDimensionalGrid,
-    oil_compressibility_grid: ThreeDimensionalGrid,
     fluid_properties: FluidProperties[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     config: Config,
@@ -37,23 +34,14 @@ def compute_well_rates(
     production_fvfs: FormationVolumeFactors[float, ThreeDimensions],
 ) -> None:
     """
-    Compute well flow rates and update them in-place using the new pressure
-    from the pressure solve and the BHPs stored during the Jacobian assembly step.
+    Compute well flow rates and update them in-place using the pressure and the
+    BHPs stored during the Jacobian assembly step.
 
-    Rates are computed using per-phase mobility (not total mobility) and with
-    pseudo-pressure enabled for gas phases where appropriate. This gives
-    physically accurate rates consistent with the BHP established during the
-    pressure solve.
-
-    :param pressure_grid: New oil pressure grid after pressure solve (psi)
-    :param temperature_grid: Temperature grid (°F)
+    :param pressure_grid: Oil pressure grid (psi)
+    :param fluid_properties: Fluid properties container
     :param water_relative_mobility_grid: Water relative mobility grid (1/cP)
     :param oil_relative_mobility_grid: Oil relative mobility grid (1/cP)
     :param gas_relative_mobility_grid: Gas relative mobility grid (1/cP)
-    :param water_compressibility_grid: Water compressibility grid (1/psi)
-    :param oil_compressibility_grid: Oil compressibility grid (1/psi)
-    :param gas_compressibility_grid: Gas compressibility grid (1/psi)
-    :param fluid_properties: Full fluid properties container
     :param wells: Wells container with injection and production wells
     :param config: Simulation configuration
     :param well_indices_cache: Cache of well indices
@@ -67,6 +55,9 @@ def compute_well_rates(
     bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
     incompressibility_threshold = c.FLUID_INCOMPRESSIBILITY_THRESHOLD
 
+    temperature_grid = fluid_properties.temperature_grid
+    water_compressibility_grid = fluid_properties.water_compressibility_grid
+    oil_compressibility_grid = fluid_properties.oil_compressibility_grid
     gas_formation_volume_factor_grid = fluid_properties.gas_formation_volume_factor_grid
     water_fvf_grid = fluid_properties.water_formation_volume_factor_grid
     oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid
@@ -154,7 +145,7 @@ def compute_well_rates(
                     ],
                     "gas_solubility_in_water": gas_solubility_in_water_grid[i, j, k],
                 }
-                phase_mobility = gas_relative_mobility_grid[i, j, k]
+                phase_mobility = water_relative_mobility_grid[i, j, k]
                 phase_compressibility = typing.cast(
                     float,
                     injected_fluid.get_compressibility(

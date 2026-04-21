@@ -1506,36 +1506,26 @@ def compute_well_contributions(
                 )
 
             phase_index = well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
-            if is_gas:
-                if use_pseudo_pressure:
-                    _, pp_table = get_pseudo_pressure_table(
-                        fluid=injected_fluid,
-                        temperature=cell_temperature,
-                        use_pseudo_pressure=use_pseudo_pressure,
-                        pvt_tables=config.pvt_tables,
-                    )
-                    assert pp_table is not None
-                    m_cell = pp_table(cell_pressure)
-                    dm_dp = pp_table.gradient(cell_pressure)
-                    m_bhp = pp_table(effective_bhp)
-                    _add_bhp_contribution(
-                        cell_1d_index,
-                        phase_index,
-                        (m_bhp - m_cell + dm_dp * cell_pressure),
-                        dm_dp,
-                    )
-                else:
-                    _add_bhp_contribution(
-                        cell_1d_index,
-                        phase_index,
-                        effective_bhp + gas_oil_capillary_pressure_grid[i, j, k],
-                    )
-            else:
+            if is_gas and use_pseudo_pressure:
+                # Use linearized pseudo pressure term
+                _, pp_table = get_pseudo_pressure_table(
+                    fluid=injected_fluid,
+                    temperature=cell_temperature,
+                    use_pseudo_pressure=use_pseudo_pressure,
+                    pvt_tables=config.pvt_tables,
+                )
+                assert pp_table is not None
+                m_cell = pp_table(cell_pressure)
+                dm_dp = pp_table.gradient(cell_pressure)
+                m_bhp = pp_table(effective_bhp)
                 _add_bhp_contribution(
                     cell_1d_index,
                     phase_index,
-                    effective_bhp - oil_water_capillary_pressure_grid[i, j, k],
+                    (m_bhp - m_cell + dm_dp * cell_pressure),  # type: ignore[arg-type]
+                    dm_dp,  # type: ignore[arg-type]
                 )
+            else:
+                _add_bhp_contribution(cell_1d_index, phase_index, effective_bhp)
 
             if injected_phase == FluidPhase.GAS:
                 injection_bhps[i, j, k] = (np.nan, np.nan, effective_bhp)
@@ -1654,35 +1644,22 @@ def compute_well_contributions(
                 phase_index = (
                     well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
                 )
-                if is_gas:
-                    if use_pseudo_pressure:
-                        _, pp_table = get_pseudo_pressure_table(
-                            fluid=produced_fluid,
-                            temperature=cell_temperature,
-                            use_pseudo_pressure=use_pseudo_pressure,
-                            pvt_tables=config.pvt_tables,
-                        )
-                        assert pp_table is not None
-                        m_cell = pp_table(cell_pressure)
-                        dm_dp = pp_table.gradient(cell_pressure)
-                        m_bhp = pp_table(effective_bhp)
-                        _add_bhp_contribution(
-                            cell_1d_index,
-                            phase_index,
-                            (m_bhp - m_cell + dm_dp * cell_pressure),
-                            dm_dp,
-                        )
-                    else:
-                        _add_bhp_contribution(
-                            cell_1d_index,
-                            phase_index,
-                            effective_bhp + gas_oil_capillary_pressure_grid[i, j, k],
-                        )
-                elif is_water:
+                if is_gas and use_pseudo_pressure:
+                    _, pp_table = get_pseudo_pressure_table(
+                        fluid=produced_fluid,
+                        temperature=cell_temperature,
+                        use_pseudo_pressure=use_pseudo_pressure,
+                        pvt_tables=config.pvt_tables,
+                    )
+                    assert pp_table is not None
+                    m_cell = pp_table(cell_pressure)
+                    dm_dp = pp_table.gradient(cell_pressure)
+                    m_bhp = pp_table(effective_bhp)
                     _add_bhp_contribution(
                         cell_1d_index,
                         phase_index,
-                        effective_bhp - oil_water_capillary_pressure_grid[i, j, k],
+                        (m_bhp - m_cell + dm_dp * cell_pressure),  # type: ignore[arg-type]
+                        dm_dp,  # type: ignore[arg-type]
                     )
                 else:
                     _add_bhp_contribution(cell_1d_index, phase_index, effective_bhp)
