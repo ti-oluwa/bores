@@ -21,7 +21,7 @@ from bores.solvers.base import (
     to_1D_index,
 )
 from bores.solvers.explicit.saturation.immiscible import (
-    compute_fluxes_from_neighbour,
+    _compute_face_volumetric_fluxes,
     compute_well_rate_grids,
 )
 from bores.tables.rock_fluid import RockFluidTables
@@ -244,7 +244,7 @@ def _compute_saturation_residual(
     ```
 
     All six faces are examined per cell.  Interior faces use
-    `compute_fluxes_from_neighbour` with full upwinding.
+    `_compute_face_volumetric_fluxes` with full upwinding.
     Boundary faces read from the padded `pressure_boundaries` /
     `flux_boundaries` arrays using the `i_ghost = i_oob + 1` offset
     convention, identical to the explicit saturation solver.
@@ -339,7 +339,7 @@ def _compute_saturation_residual(
                 # EAST (i+1, j, k)
                 east_i = i + 1
                 if east_i < cell_count_x:
-                    water_flux, _, gas_flux = compute_fluxes_from_neighbour(
+                    water_flux, _, gas_flux = _compute_face_volumetric_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(east_i, j, k),
                         oil_pressure_grid=oil_pressure_grid,
@@ -388,7 +388,7 @@ def _compute_saturation_residual(
                 west_i = i - 1
                 pwi, pwj, pwk = west_i + 1, j + 1, k + 1
                 if west_i >= 0:
-                    water_flux, _, gas_flux = compute_fluxes_from_neighbour(
+                    water_flux, _, gas_flux = _compute_face_volumetric_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(west_i, j, k),
                         oil_pressure_grid=oil_pressure_grid,
@@ -433,7 +433,7 @@ def _compute_saturation_residual(
                 # SOUTH (i, j+1, k)
                 south_j = j + 1
                 if south_j < cell_count_y:
-                    water_flux, _, gas_flux = compute_fluxes_from_neighbour(
+                    water_flux, _, gas_flux = _compute_face_volumetric_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, south_j, k),
                         oil_pressure_grid=oil_pressure_grid,
@@ -481,7 +481,7 @@ def _compute_saturation_residual(
                 north_j = j - 1
                 pni, pnj, pnk = i + 1, north_j + 1, k + 1
                 if north_j >= 0:
-                    water_flux, _, gas_flux = compute_fluxes_from_neighbour(
+                    water_flux, _, gas_flux = _compute_face_volumetric_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, north_j, k),
                         oil_pressure_grid=oil_pressure_grid,
@@ -525,7 +525,7 @@ def _compute_saturation_residual(
                 # BOTTOM (i, j, k+1)
                 bottom_k = k + 1
                 if bottom_k < cell_count_z:
-                    water_flux, _, gas_flux = compute_fluxes_from_neighbour(
+                    water_flux, _, gas_flux = _compute_face_volumetric_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, j, bottom_k),
                         oil_pressure_grid=oil_pressure_grid,
@@ -573,7 +573,7 @@ def _compute_saturation_residual(
                 top_k = k - 1
                 pti, ptj, ptk = i + 1, j + 1, top_k + 1
                 if top_k >= 0:
-                    water_flux, _, gas_flux = compute_fluxes_from_neighbour(
+                    water_flux, _, gas_flux = _compute_face_volumetric_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, j, top_k),
                         oil_pressure_grid=oil_pressure_grid,
@@ -1536,7 +1536,7 @@ def _assemble_jacobian_flux_contributions(
                         oil_pressure_difference + gas_oil_capillary_pressure_difference
                     )
 
-                    # Density upwinding (match `compute_fluxes_from_neighbour`)
+                    # Density upwinding (match `_compute_face_volumetric_fluxes`)
                     upwind_water_density = (
                         water_density_grid[ni, nj, nk]
                         if water_pressure_difference > 0

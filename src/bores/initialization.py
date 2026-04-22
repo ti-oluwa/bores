@@ -9,10 +9,11 @@ import numpy.typing as npt
 
 from bores.config import Config
 from bores.constants import c
-from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
-from bores.solvers.explicit.saturation.immiscible import compute_net_flux_contributions
+from bores.solvers.explicit.saturation.immiscible import (
+    compute_net_mass_flux_contributions,
+)
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.base import Wells
@@ -30,19 +31,19 @@ class ZeroFlowViolation:
 
     cell: typing.Tuple[int, int, int]
     """`(i, j, k)` index of the offending cell."""
-    net_water_flux_grid: float
-    """Net water flux into the cell (ft³/day). Positive = net inflow."""
-    net_oil_flux_grid: float
-    """Net oil flux into the cell (ft³/day)."""
-    net_gas_flux_grid: float
-    """Net gas flux into the cell (ft³/day)."""
-    net_total_flux_grid: float
-    """`|net_water_flux_grid| + |net_oil_flux_grid| + |net_gas_flux_grid|` (ft³/day)."""
+    net_water_flux: float
+    """Net water flux into the cell (lbm/day). Positive = net inflow."""
+    net_oil_flux: float
+    """Net oil flux into the cell (lbm/day)."""
+    net_gas_flux: float
+    """Net gas flux into the cell (lbm/day)."""
+    net_total_flux: float
+    """`|net_water_flux| + |net_oil_flux| + |net_gas_flux|` (lbm/day)."""
     pore_volume: float
-    """Cell pore volume (ft³). Used to normalise the flux for comparison against the relative tolerance."""
+    """Cell pore volume (lbm). Used to normalise the flux for comparison against the relative tolerance."""
     relative_flux: float
     """
-    `net_total_flux_grid / pore_volume` (day⁻¹). This is the quantity compared against
+    `net_total_flux / pore_volume` (day⁻¹). This is the quantity compared against
     `relative_tolerance` in `check_zero_flow_initialization`.
     """
 
@@ -56,7 +57,7 @@ class ZeroFlowCheckResult:
     max_relative_flux: float
     """Maximum `|net_flux| / pore_volume` observed across all cells (day⁻¹)."""
     max_absolute_flux: float
-    """Maximum `sum(|phase_fluxes|)` across all cells (ft³/day)."""
+    """Maximum `sum(|phase_fluxes|)` across all cells (lbm/day)."""
     worst_cell: typing.Optional[typing.Tuple[int, int, int]]
     """`(i, j, k)` index of the cell with the highest relative flux, or `None` when the grid is empty."""
     violation_count: int
@@ -449,7 +450,7 @@ def check_zero_flow_initialization(
     :param elevation_grid: Cell elevation grid (ft).
     :param config: Simulation configuration.
     :param cell_dimension: `(cell_size_x, cell_size_y)` in feet.
-    :param thickness_grid: Cell thickness grid (ft). 
+    :param thickness_grid: Cell thickness grid (ft).
     :param relative_tolerance: Maximum acceptable `|net_flux| / pore_volume` (day⁻¹) for a
         cell to be considered "at rest". Default `1e-6` day⁻¹. A value of `1e-6` means that
         the spurious flux would change the saturation by at most 1e-6 per day, which is
@@ -542,9 +543,20 @@ def check_zero_flow_initialization(
         c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
     )
 
+    water_density_grid = fluid_properties.water_density_grid
+    oil_density_grid = fluid_properties.oil_effective_density_grid
+    gas_density_grid = fluid_properties.gas_density_grid
+    solution_gas_to_oil_ratio_grid = fluid_properties.solution_gas_to_oil_ratio_grid
+    gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
+    gas_formation_volume_factor_grid = fluid_properties.gas_formation_volume_factor_grid
+    oil_formation_volume_factor_grid = fluid_properties.oil_formation_volume_factor_grid
+    water_formation_volume_factor_grid = (
+        fluid_properties.water_formation_volume_factor_grid
+    )
+
     # Compute per-phase net fluxes using the same kernel as the explicit saturation solver.
-    net_water_flux_grid, net_oil_flux_grid, net_gas_flux_grid = (
-        compute_net_flux_contributions(
+    net_water_mass_flux_grid, net_oil_mass_flux_grid, net_gas_mass_flux_grid = (
+        compute_net_mass_flux_contributions(
             oil_pressure_grid=pressure_grid,
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
@@ -559,15 +571,24 @@ def check_zero_flow_initialization(
             face_transmissibilities_z=face_transmissibilities.z,
             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-            oil_density_grid=fluid_properties.oil_effective_density_grid,
-            water_density_grid=fluid_properties.water_density_grid,
-            gas_density_grid=fluid_properties.gas_density_grid,
+            oil_density_grid=oil_density_grid,
+            water_density_grid=water_density_grid,
+            gas_density_grid=gas_density_grid,
+            solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
+            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+            gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
+            oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
+            water_formation_volume_factor_grid=water_formation_volume_factor_grid,
             elevation_grid=elevation_grid,
             gravitational_constant=gravitational_constant,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             dtype=dtype,
         )
     )
+
+    water_saturation_grid = fluid_properties.water_saturation_grid
+    oil_saturation_grid = fluid_properties.oil_saturation_grid
+    gas_saturation_grid = fluid_properties.gas_saturation_grid
 
     # Compute per-cell pore volumes for relative-flux normalisation
     pore_volume_grid = (
@@ -577,15 +598,21 @@ def check_zero_flow_initialization(
         * rock_properties.net_to_gross_grid
         * rock_properties.porosity_grid
     )
-
-    # Total absolute flux per cell (ft³/day)
-    net_total_flux_grid = (
-        np.abs(net_water_flux_grid)
-        + np.abs(net_oil_flux_grid)
-        + np.abs(net_gas_flux_grid)
+    total_density_grid = (
+        oil_density_grid * oil_saturation_grid
+        + water_density_grid * water_saturation_grid
+        + gas_density_grid * gas_saturation_grid
     )
-    safe_pore_volume_grid = np.where(pore_volume_grid > 0.0, pore_volume_grid, np.inf)
-    relative_flux_grid = net_total_flux_grid / safe_pore_volume_grid  # day⁻¹
+    total_mass_grid = total_density_grid * pore_volume_grid
+
+    # Total absolute flux per cell (lbm/day)
+    net_total_mass_flux_grid = (
+        np.abs(net_water_mass_flux_grid)
+        + np.abs(net_oil_mass_flux_grid)
+        + np.abs(net_gas_mass_flux_grid)
+    )
+    safe_total_mass_grid = np.where(total_mass_grid > 0.0, total_mass_grid, np.inf)
+    relative_mass_flux_grid = net_total_mass_flux_grid / safe_total_mass_grid  # day⁻¹
 
     # Identify active cells (non-zero porosity)
     active_mask = rock_properties.porosity_grid > 0.0
@@ -604,14 +631,14 @@ def check_zero_flow_initialization(
             cells_checked=0,
         )
 
-    active_relative_flux = relative_flux_grid[active_mask]
-    active_absolute_flux = net_total_flux_grid[active_mask]
+    active_relative_flux = relative_mass_flux_grid[active_mask]
+    active_absolute_flux = net_total_mass_flux_grid[active_mask]
 
     max_relative_flux = float(np.max(active_relative_flux))
     max_absolute_flux = float(np.max(active_absolute_flux))
 
     # Locate the worst cell
-    flat_worst = int(np.argmax(relative_flux_grid * active_mask.astype(dtype)))
+    flat_worst = int(np.argmax(relative_mass_flux_grid * active_mask.astype(dtype)))
     worst_i, worst_j, worst_k = np.unravel_index(
         flat_worst,
         (cell_count_x, cell_count_y, cell_count_z),
@@ -619,34 +646,35 @@ def check_zero_flow_initialization(
     worst_cell = (int(worst_i), int(worst_j), int(worst_k))
 
     # Collect violation cells sorted by descending relative flux
-    violation_mask = (relative_flux_grid > relative_tolerance) & active_mask
-    n_violations = int(np.sum(violation_mask))
-    passed = n_violations == 0
+    violation_mask = (relative_mass_flux_grid > relative_tolerance) & active_mask
+    violation_count = int(np.sum(violation_mask))
+    passed = violation_count == 0
 
     violations: typing.List[ZeroFlowViolation] = []
-    if n_violations > 0:
+    if violation_count > 0:
         violation_indices = np.argwhere(violation_mask)
         # Sort by descending relative flux
-        violation_rel_fluxes = relative_flux_grid[violation_mask]
-        sort_order = np.argsort(violation_rel_fluxes)[::-1]
+        violation_relative_fluxes = relative_mass_flux_grid[violation_mask]
+        sort_order = np.argsort(violation_relative_fluxes)[::-1]
         sorted_indices = violation_indices[sort_order]
 
         for idx in sorted_indices[:max_reported_violations]:
             vi, vj, vk = int(idx[0]), int(idx[1]), int(idx[2])
-            pv = float(pore_volume_grid[vi, vj, vk])
-            nwf = float(net_water_flux_grid[vi, vj, vk])
-            nof = float(net_oil_flux_grid[vi, vj, vk])
-            ngf = float(net_gas_flux_grid[vi, vj, vk])
-            ntf = abs(nwf) + abs(nof) + abs(ngf)
+            pore_volume = float(pore_volume_grid[vi, vj, vk])
+            net_water_flux = float(net_water_mass_flux_grid[vi, vj, vk])
+            net_oil_flux = float(net_oil_mass_flux_grid[vi, vj, vk])
+            net_gas_flux = float(net_gas_mass_flux_grid[vi, vj, vk])
+            net_total_flux = abs(net_water_flux) + abs(net_oil_flux) + abs(net_gas_flux)
+            relative_flux = float(relative_mass_flux_grid[vi, vj, vk])
             violations.append(
                 ZeroFlowViolation(
                     cell=(vi, vj, vk),
-                    net_water_flux_grid=nwf,
-                    net_oil_flux_grid=nof,
-                    net_gas_flux_grid=ngf,
-                    net_total_flux_grid=ntf,
-                    pore_volume=pv,
-                    relative_flux=float(relative_flux_grid[vi, vj, vk]),
+                    net_water_flux=net_water_flux,
+                    net_oil_flux=net_oil_flux,
+                    net_gas_flux=net_gas_flux,
+                    net_total_flux=net_total_flux,
+                    pore_volume=pore_volume,
+                    relative_flux=relative_flux,
                 )
             )
 
@@ -656,7 +684,7 @@ def check_zero_flow_initialization(
         max_absolute_flux=max_absolute_flux,
         worst_cell=worst_cell,
         violations=violations,
-        violation_count=n_violations,
+        violation_count=violation_count,
         relative_tolerance=relative_tolerance,
         cells_checked=cells_checked,
     )

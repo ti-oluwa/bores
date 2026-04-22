@@ -997,8 +997,14 @@ def compute_well_rate_grid(
 
             # Get phase mobility
             if injected_phase == FluidPhase.GAS:
+                phase_mobility = typing.cast(
+                    float, water_relative_mobility_grid[i, j, k]
+                )
                 compressibility_kwargs = {}
             else:  # Water injection
+                phase_mobility = typing.cast(
+                    float, water_relative_mobility_grid[i, j, k]
+                )
                 compressibility_kwargs = {
                     "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
                     "gas_formation_volume_factor": gas_formation_volume_factor_grid[
@@ -1014,18 +1020,11 @@ def compute_well_rate_grid(
                 **compressibility_kwargs,
             )
             phase_compressibility = typing.cast(float, phase_compressibility)
-            total_mobility = typing.cast(
-                float,
-                water_relative_mobility_grid[i, j, k]
-                + oil_relative_mobility_grid[i, j, k]
-                + gas_relative_mobility_grid[i, j, k],
-            )
-
             flow_rate, effective_bhp = well.get_control(
                 pressure=cell_oil_pressure,
                 temperature=cell_temperature,
                 well_index=well_index,
-                phase_mobility=total_mobility,
+                phase_mobility=phase_mobility,
                 fluid=injected_fluid,
                 fluid_compressibility=phase_compressibility,
                 use_pseudo_pressure=use_pseudo_pressure,

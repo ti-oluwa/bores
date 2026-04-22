@@ -678,7 +678,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="si",
+    scheme="impes",
     output_frequency=1,
     pressure_solver="direct",
     saturation_solver="direct",
@@ -696,7 +696,7 @@ config = bores.Config(
     phase_appearance_tolerance=1e-6,
     saturation_convergence_tolerance=1e-4,
     saturation_cfl_threshold=0.8,
-    minimum_injector_gas_saturation=0.1,
+    minimum_injector_gas_saturation=0.2,
 )
 
 # Run and monitor the simulation and collect states

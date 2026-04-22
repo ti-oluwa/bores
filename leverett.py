@@ -148,7 +148,7 @@ producer = bores.production_well(
     control=bores.CoupledRateControl(
         primary_phase=bores.FluidPhase.OIL,
         primary_control=bores.AdaptiveRateControl(
-            target_rate=-10000.0,  # large negative (effectively BHP control)
+            target_rate=-1000.0,  # large negative (effectively BHP control)
             bhp_limit=1000.0,  # min BHP
             clamp=bores.ProductionClamp(),
         ),
@@ -189,14 +189,15 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="full-si",
+    scheme="impes",
     pressure_solver="direct",
     saturation_solver="direct",
     maximum_saturation_change=0.1,  # Control numerical diffusion
     disable_capillary_effects=True,  # Classic BL has no Pc
     normalize_saturations=True,
     output_frequency=5,  # Save every 5th step for analysis
-    minimum_injector_water_saturation=0.1,
+    # minimum_injector_water_saturation=0.1,
+    saturation_cfl_threshold=0.8
 )
 
 print("=" * 70)
