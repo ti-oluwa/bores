@@ -399,7 +399,7 @@ class RunStats:
         table.add_section()
         table.add_row(
             "Total absolute MBE",
-            f"{last.total_absolute_mbe:.3e} res ft³",
+            f"{last.total_absolute_mbe:.3e} lbm",
         )
         table.add_row(
             "Total relative MBE",
@@ -456,7 +456,7 @@ class RunStats:
             )
         lines.append("")
         lines.append(
-            f"  Total absolute MBE        : {last.total_absolute_mbe:.3e} res ft³"
+            f"  Total absolute MBE        : {last.total_absolute_mbe:.3e} lbm"
         )
         lines.append(
             f"  Total relative MBE        : {last.total_relative_mbe * 100:.2e}%"

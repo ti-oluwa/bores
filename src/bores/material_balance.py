@@ -17,75 +17,63 @@ class MaterialBalanceErrors:
     """
     Material balance errors computed at the end of a time step.
 
-    All volumetric quantities are in reservoir cubic feet (ft³).
-    Relative errors are dimensionless fractions; multiply by 100 for percent.
+    All quantities are in pounds-mass (lb). Relative errors are dimensionless
+    fractions; multiply by 100 for percent.
 
     The gas phase accounts for free gas plus solution gas dissolved in oil
-    (via Rs, SCF/STB) and solution gas dissolved in water (via Rsw, SCF/STB),
-    converted to a common ft³ basis using the mean cell gas FVF (Bg).
+    (via Rs, SCF/STB) and in water (via Rsw, SCF/STB), all converted to a
+    mass basis using the grid-cell gas density (lb/ft³).
     """
 
     absolute_oil_mbe: float
     """
-    Absolute oil material balance error (ft³).
+    Absolute oil material balance error (lb).
 
-    Defined as ΔVp·So - (Q_inj_o - Q_prod_o)·Δt, where all rates are in
-    ft³/day and Δt is in days. Positive means more oil accumulated in
-    the reservoir than the net inflow accounts for; negative means a deficit.
+    Defined as (mass_oil_new - mass_oil_old) - net_mass_oil_inflow.
+    Positive means more oil mass accumulated than the net inflow accounts for;
+    negative means a deficit.
     """
 
     absolute_water_mbe: float
     """
-    Absolute water material balance error (ft³).
+    Absolute water material balance error (lb).
 
     Analogous to `absolute_oil_mbe` for the water phase.
     """
 
     absolute_gas_mbe: float
     """
-    Absolute gas material balance error (ft³).
+    Absolute gas material balance error (lb).
 
-    Computed in surface SCF (free gas + Rs·oil + Rsw·water) then converted
-    to ft³ via the grid-mean gas FVF (Bg) for unit consistency with the
-    oil and water MBEs. Positive means more gas remains in place than the
-    net surface inflow accounts for.
+    Covers free gas plus dissolved gas in both oil and water phases.
     """
 
     total_absolute_mbe: float
     """
-    Sum of absolute oil, water, and gas material balance errors (ft³).
-
-    Provides a single scalar to assess overall volumetric closure.
+    Sum of absolute oil, water, and gas material balance errors (lb).
     """
 
     relative_oil_mbe: float
     """
-    Oil MBE normalised by the previous-step oil pore volume (dimensionless fraction).
+    Oil MBE normalised by the previous-step oil mass in place (dimensionless fraction).
 
-    `relative_oil_mbe = absolute_oil_mbe / max(|previous_oil_pore_volume|, 1)`.
-    Multiply by 100 for percent. Typical acceptance threshold: |value| < 0.01 (1 %).
+    `relative_oil_mbe = absolute_oil_mbe / max(|previous_oil_mass|, 1)`.
+    Multiply by 100 for percent.
     """
 
     relative_water_mbe: float
     """
-    Water MBE normalised by the previous-step water pore volume (dimensionless fraction).
-
-    Analogous to `relative_oil_mbe` for the water phase.
+    Water MBE normalised by the previous-step water mass in place (dimensionless fraction).
     """
 
     relative_gas_mbe: float
     """
-    Gas MBE normalised by the previous-step gas-in-place equivalent volume (dimensionless fraction).
-
-    Reference volume is `|previous_gas_SCF| x mean_Bg` so the denominator is
-    in the same ft³ basis as `absolute_gas_mbe`.
+    Gas MBE normalised by the previous-step total gas mass in place (dimensionless fraction).
     """
 
     total_relative_mbe: float
     """
-    Total MBE normalised by the sum of previous-step phase reference volumes (dimensionless fraction).
-
-    `total_relative_mbe = total_absolute_mbe / max(|Vo_prev| + |Vw_prev| + |Vg_ref_prev|, 1)`.
+    Total MBE normalised by the sum of previous-step phase mass references (dimensionless fraction).
     """
 
     @classmethod
@@ -108,198 +96,234 @@ def compute_material_balance_errors(
     rock: RockProperties[ThreeDimensions],
     thickness_grid: NDimensionalGrid[ThreeDimensions],
     cell_dimension: typing.Tuple[float, float],
-    injection_rates: Rates[float, ThreeDimensions],
-    production_rates: Rates[float, ThreeDimensions],
+    injection_mass_rates: Rates[float, ThreeDimensions],
+    production_mass_rates: Rates[float, ThreeDimensions],
     time_step_size: float,
 ) -> MaterialBalanceErrors:
     """
-    Compute per-phase material balance errors for a timestep.
+    Compute per-phase material balance errors for a timestep using the mass formulation.
+    
+    The MBE for each phase is:
 
-    All rate tensors hold values in ft³/day (reservoir condition).
-
-    MBE = ΔV_reservoir - (Q_inj - Q_prod) * Δt
-
-    Gas MBE includes free gas plus solution gas dissolved in oil (Rs) and water (Rsw).
+        MBE = (mass_new - mass_old) - net_mass_inflow * dt
 
     :param current_fluid_properties: Fluid properties at end of time step.
     :param previous_fluid_properties: Fluid properties at start of time step.
-    :param rock: Rock properties (porosity, NTG, etc.).
+    :param rock: Rock properties (porosity, NTG).
     :param thickness_grid: Cell thickness grid (ft).
     :param cell_dimension: (dx, dy) in ft.
-    :param injection_rates: Injection rate sparse tensors (ft³/day, res cond).
-    :param production_rates: Production rate sparse tensors (ft³/day, res cond).
+    :param injection_mass_rates: Injection rate sparse tensors (lbm/day, reservoir condition).
+    :param production_mass_rates: Production rate sparse tensors (lbm/day, reservoir condition).
     :param time_step_size: Time step size in seconds.
-    :return: `MaterialBalanceErrors` instance.
+    :return: `MaterialBalanceErrors` instance with mass-based errors in lbm.
     """
     cell_size_x, cell_size_y = cell_dimension
+    time_step_in_days = time_step_size * c.DAYS_PER_SECOND
+
     # Cell pore volume in ft³
-    pore_volume = (
+    pore_volume_grid = (
         rock.porosity_grid
         * rock.net_to_gross_grid
         * thickness_grid
         * cell_size_x
         * cell_size_y
     )
-    time_step_size_in_days = time_step_size * c.DAYS_PER_SECOND
 
-    # OIL
-    current_oil_volume = float(
-        np.sum(pore_volume * current_fluid_properties.oil_saturation_grid)
+    # Oil mass = oil_density * So * phi * V
+    current_oil_mass = float(
+        np.sum(
+            pore_volume_grid
+            * current_fluid_properties.oil_effective_density_grid
+            * current_fluid_properties.oil_saturation_grid
+        )
     )
-    previous_oil_volume = float(
-        np.sum(pore_volume * previous_fluid_properties.oil_saturation_grid)
+    previous_oil_mass = float(
+        np.sum(
+            pore_volume_grid
+            * previous_fluid_properties.oil_effective_density_grid
+            * previous_fluid_properties.oil_saturation_grid
+        )
     )
-    oil_volume_change = current_oil_volume - previous_oil_volume
+    oil_mass_change = current_oil_mass - previous_oil_mass
 
-    net_oil_inflow = 0.0
-    for key in injection_rates.oil:
-        net_oil_inflow += float(injection_rates.oil[key])
-    for key in production_rates.oil:
-        net_oil_inflow -= float(production_rates.oil[key])
-    net_oil_inflow *= time_step_size_in_days  # ft³
+    # Net mass oil inflow: injection - production (lbm)
+    # Well rates are volumetric (ft³/day, res. condition); multiply by current
+    # oil density to get lb/day. Use current density as the best estimate of the
+    # density at which fluid entered/left the reservoir this step.
+    net_mass_oil_inflow = 0.0
+    for key in injection_mass_rates.oil:
+        net_mass_oil_inflow += float(injection_mass_rates.oil[key])
+    for key in production_mass_rates.oil:
+        net_mass_oil_inflow += float(production_mass_rates.oil[key])
+    net_mass_oil_inflow *= time_step_in_days  # lb
 
-    absolute_oil_mbe = oil_volume_change - net_oil_inflow
-    reference_oil = max(abs(previous_oil_volume), 1.0)
+    absolute_oil_mbe = oil_mass_change - net_mass_oil_inflow
+    reference_oil = max(abs(previous_oil_mass), 1.0)
     relative_oil_mbe = absolute_oil_mbe / reference_oil
 
-    # WATER
-    current_water_volume = float(
-        np.sum(pore_volume * current_fluid_properties.water_saturation_grid)
+    # Water mass = water_density * Sw * phi * V
+    current_water_mass = float(
+        np.sum(
+            pore_volume_grid
+            * current_fluid_properties.water_density_grid
+            * current_fluid_properties.water_saturation_grid
+        )
     )
-    previous_water_volume = float(
-        np.sum(pore_volume * previous_fluid_properties.water_saturation_grid)
+    previous_water_mass = float(
+        np.sum(
+            pore_volume_grid
+            * previous_fluid_properties.water_density_grid
+            * previous_fluid_properties.water_saturation_grid
+        )
     )
-    water_volume_change = current_water_volume - previous_water_volume
+    water_mass_change = current_water_mass - previous_water_mass
 
-    net_water_inflow = 0.0
-    for key in injection_rates.water:
-        net_water_inflow += float(injection_rates.water[key])
-    for key in production_rates.water:
-        net_water_inflow -= float(production_rates.water[key])
-    net_water_inflow *= time_step_size_in_days
+    net_mass_water_inflow = 0.0
+    for key in injection_mass_rates.water:
+        net_mass_water_inflow += float(injection_mass_rates.water[key])
+    for key in production_mass_rates.water:
+        net_mass_water_inflow += float(production_mass_rates.water[key])
+    net_mass_water_inflow *= time_step_in_days  # lbm
 
-    absolute_water_mbe = water_volume_change - net_water_inflow
-    reference_water = max(abs(previous_water_volume), 1.0)
+    absolute_water_mbe = water_mass_change - net_mass_water_inflow
+    reference_water = max(abs(previous_water_mass), 1.0)
     relative_water_mbe = absolute_water_mbe / reference_water
 
-    # GAS
-    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
+    # GAS (total: free + dissolved in oil + dissolved in water)
+    # M_g = phi*V * (gas_density*Sg + oil_density*alpha_Rs*So + water_density*alpha_Rsw*Sw)
+    # alpha_Rs  = Rs * Bg / Bo   [dimensionless, reservoir vol. of dissolved gas per res. vol. oil]
+    # alpha_Rsw = Rsw * Bg / Bw   [same for water]
+    def _safe_divide(a: np.ndarray, b: np.ndarray, floor: float = 1e-30) -> np.ndarray:
+        return a / np.maximum(b, floor)
 
-    # Bg in ft³/SCF  (gas_formation_volume_factor_grid is in ft³/SCF already per models.py)
-    current_gas_fvf = current_fluid_properties.gas_formation_volume_factor_grid
-    previous_gas_fvf = previous_fluid_properties.gas_formation_volume_factor_grid
-
-    # Bo in ft³/STB
-    current_oil_fvf = (
-        current_fluid_properties.oil_formation_volume_factor_grid * bbl_to_ft3
-    )
-    previous_oil_fvf = (
-        previous_fluid_properties.oil_formation_volume_factor_grid * bbl_to_ft3
-    )
-
-    # Bw in ft³/STB
-    current_water_fvf = (
-        current_fluid_properties.water_formation_volume_factor_grid * bbl_to_ft3
-    )
-    previous_water_fvf = (
-        previous_fluid_properties.water_formation_volume_factor_grid * bbl_to_ft3
-    )
-
-    # Rs in SCF/STB, Rsw in SCF/STB
+    # Current conditions
+    current_gas_density = current_fluid_properties.gas_density_grid
+    current_oil_density = current_fluid_properties.oil_effective_density_grid
+    current_water_density = current_fluid_properties.water_density_grid
+    current_gas_saturation = current_fluid_properties.gas_saturation_grid
+    current_oil_saturation = current_fluid_properties.oil_saturation_grid
+    current_water_saturation = current_fluid_properties.water_saturation_grid
     current_solution_gor = current_fluid_properties.solution_gas_to_oil_ratio_grid
-    previous_solution_gor = previous_fluid_properties.solution_gas_to_oil_ratio_grid
     current_gas_solubility_in_water = (
         current_fluid_properties.gas_solubility_in_water_grid
     )
+    # Bg in bbl/SCF; Bo and Bw in bbl/STB - ratio Bg/Bo and Bg/Bw is dimensionless
+    current_gas_fvf = current_fluid_properties.gas_formation_volume_factor_grid
+    current_oil_fvf = current_fluid_properties.oil_formation_volume_factor_grid
+    current_water_fvf = current_fluid_properties.water_formation_volume_factor_grid
+    current_alpha_solution_gor = current_solution_gor * _safe_divide(
+        current_gas_fvf, current_oil_fvf
+    )
+    current_alpha_gas_solubility_in_water = (
+        current_gas_solubility_in_water
+        * _safe_divide(current_gas_fvf, current_water_fvf)
+    )
+
+    current_gas_mass = float(
+        np.sum(
+            pore_volume_grid
+            * (
+                current_gas_density * current_gas_saturation
+                + current_oil_density
+                * current_alpha_solution_gor
+                * current_oil_saturation
+                + current_water_density
+                * current_alpha_gas_solubility_in_water
+                * current_water_saturation
+            )
+        )
+    )
+
+    # Previous conditions
+    previous_gas_density = previous_fluid_properties.gas_density_grid
+    previous_oil_density = previous_fluid_properties.oil_effective_density_grid
+    previous_water_density = previous_fluid_properties.water_density_grid
+    previous_gas_saturation = previous_fluid_properties.gas_saturation_grid
+    previous_oil_saturation = previous_fluid_properties.oil_saturation_grid
+    previous_water_saturation = previous_fluid_properties.water_saturation_grid
+    previous_solution_gor = previous_fluid_properties.solution_gas_to_oil_ratio_grid
     previous_gas_solubility_in_water = (
         previous_fluid_properties.gas_solubility_in_water_grid
     )
+    previous_gas_fvf = previous_fluid_properties.gas_formation_volume_factor_grid
+    previous_oil_fvf = previous_fluid_properties.oil_formation_volume_factor_grid
+    previous_water_fvf = previous_fluid_properties.water_formation_volume_factor_grid
+    previous_alpha_solution_gor = previous_solution_gor * _safe_divide(
+        previous_gas_fvf, previous_oil_fvf
+    )
+    previous_alpha_gas_solubility_in_water = (
+        previous_gas_solubility_in_water
+        * _safe_divide(previous_gas_fvf, previous_water_fvf)
+    )
 
-    # Total gas in place in surface SCF
-    # free gas: (Vp * Sg) / Bg
-    # dissolved in oil: (Vp * So / Bo) * Rs
-    # dissolved in water: (Vp * Sw / Bw) * Rsw
-    current_gas_volume_scf = float(
+    previous_gas_mass = float(
         np.sum(
-            (
-                pore_volume
-                * current_fluid_properties.gas_saturation_grid
-                / np.maximum(current_gas_fvf, 1e-30)
-            )
-            + (
-                pore_volume
-                * current_fluid_properties.oil_saturation_grid
-                / np.maximum(current_oil_fvf, 1e-30)
-                * current_solution_gor
-            )
-            + (
-                pore_volume
-                * current_fluid_properties.water_saturation_grid
-                / np.maximum(current_water_fvf, 1e-30)
-                * current_gas_solubility_in_water
+            pore_volume_grid
+            * (
+                previous_gas_density * previous_gas_saturation
+                + previous_oil_density
+                * previous_alpha_solution_gor
+                * previous_oil_saturation
+                + previous_water_density
+                * previous_alpha_gas_solubility_in_water
+                * previous_water_saturation
             )
         )
     )
-    previous_gas_volume_scf = float(
-        np.sum(
-            (
-                pore_volume
-                * previous_fluid_properties.gas_saturation_grid
-                / np.maximum(previous_gas_fvf, 1e-30)
-            )
-            + (
-                pore_volume
-                * previous_fluid_properties.oil_saturation_grid
-                / np.maximum(previous_oil_fvf, 1e-30)
-                * previous_solution_gor
-            )
-            + (
-                pore_volume
-                * previous_fluid_properties.water_saturation_grid
-                / np.maximum(previous_water_fvf, 1e-30)
-                * previous_gas_solubility_in_water
-            )
-        )
-    )
-    gas_volume_change_scf = current_gas_volume_scf - previous_gas_volume_scf
+    gas_mass_change = current_gas_mass - previous_gas_mass
 
-    # Net gas inflow: injection_rates.gas and production_rates.gas are in ft³/day.
-    # Convert to SCF/day using Bg at current conditions (cell-averaged).
-    # For simplicity use grid-mean Bg; or sum cell-by-cell for accuracy.
-    net_gas_inflow_scf = 0.0
-    for key in injection_rates.gas:
-        cell_idx = key
-        gas_fvf = (
-            float(current_gas_fvf[cell_idx])
-            if current_gas_fvf[cell_idx] > 0
-            else float(np.mean(current_gas_fvf))
-        )
-        net_gas_inflow_scf += float(injection_rates.gas[key]) / gas_fvf
-    
-    for key in production_rates.gas:
-        cell_idx = key
-        gas_fvf = (
-            float(current_gas_fvf[cell_idx])
-            if current_gas_fvf[cell_idx] > 0
-            else float(np.mean(current_gas_fvf))
-        )
-        net_gas_inflow_scf -= float(production_rates.gas[key]) / gas_fvf
+    # Net mass gas inflow: includes free gas from the gas well rate stream, plus
+    # solution gas carried by produced/injected oil and water.
+    net_mass_gas_inflow = 0.0
+    for key in injection_mass_rates.gas:
+        net_mass_gas_inflow += float(injection_mass_rates.gas[key])
+    for key in production_mass_rates.gas:
+        net_mass_gas_inflow += float(production_mass_rates.gas[key])
 
-    net_gas_inflow_scf *= time_step_size_in_days  # SCF
+    # Solution gas carried in oil stream
+    for key in injection_mass_rates.oil:
+        i, j, k = key
+        alpha_solution_gor = float(current_alpha_solution_gor[i, j, k])
+        net_mass_gas_inflow += float(injection_mass_rates.oil[key]) * alpha_solution_gor
+    for key in production_mass_rates.oil:
+        i, j, k = key
+        alpha_solution_gor = float(current_alpha_solution_gor[i, j, k])
+        net_mass_gas_inflow += (
+            float(production_mass_rates.oil[key]) * alpha_solution_gor
+        )
 
-    absolute_gas_mbe_scf = gas_volume_change_scf - net_gas_inflow_scf  # SCF
-    # Convert to ft³ using mean current Bg for consistent reporting units
-    mean_gas_fvf = float(np.mean(current_gas_fvf))
-    absolute_gas_mbe = absolute_gas_mbe_scf * mean_gas_fvf  # ft³
-    reference_gas = max(abs(previous_gas_volume_scf) * mean_gas_fvf, 1.0)
+    # Solution gas carried in water stream
+    for key in injection_mass_rates.water:
+        i, j, k = key
+        alpha_gas_solubility_in_water = float(
+            current_alpha_gas_solubility_in_water[i, j, k]
+        )
+        net_mass_gas_inflow += (
+            float(injection_mass_rates.water[key]) * alpha_gas_solubility_in_water
+        )
+    for key in production_mass_rates.water:
+        i, j, k = key
+        alpha_gas_solubility_in_water = float(
+            current_alpha_gas_solubility_in_water[i, j, k]
+        )
+        net_mass_gas_inflow += (
+            float(production_mass_rates.water[key]) * alpha_gas_solubility_in_water
+        )
+
+    net_mass_gas_inflow *= time_step_in_days  # lbm
+
+    absolute_gas_mbe = gas_mass_change - net_mass_gas_inflow
+    reference_gas = max(abs(previous_gas_mass), 1.0)
     relative_gas_mbe = absolute_gas_mbe / reference_gas
 
     # TOTAL
     total_absolute_mbe = absolute_oil_mbe + absolute_water_mbe + absolute_gas_mbe
     total_reference = max(
-        abs(previous_oil_volume) + abs(previous_water_volume) + reference_gas, 1.0
+        abs(previous_oil_mass) + abs(previous_water_mass) + abs(previous_gas_mass),
+        1.0,
     )
     total_relative_mbe = total_absolute_mbe / total_reference
+
     return MaterialBalanceErrors(
         absolute_oil_mbe=absolute_oil_mbe,
         absolute_water_mbe=absolute_water_mbe,

@@ -30,6 +30,8 @@ def compute_well_rates(
     production_bhps: BottomHolePressures[float, ThreeDimensions],
     injection_rates: Rates[float, ThreeDimensions],
     production_rates: Rates[float, ThreeDimensions],
+    injection_mass_rates: Rates[float, ThreeDimensions],
+    production_mass_rates: Rates[float, ThreeDimensions],
     injection_fvfs: FormationVolumeFactors[float, ThreeDimensions],
     production_fvfs: FormationVolumeFactors[float, ThreeDimensions],
 ) -> None:
@@ -63,6 +65,9 @@ def compute_well_rates(
     oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid
     water_bubble_point_pressure_grid = fluid_properties.water_bubble_point_pressure_grid
     gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
+    water_density_grid = fluid_properties.water_density_grid
+    oil_density_grid = fluid_properties.oil_density_grid
+    gas_density_grid = fluid_properties.gas_density_grid
 
     # Injection wells
     for well in wells.injection_wells:
@@ -95,8 +100,13 @@ def compute_well_rates(
             phase_fvf = typing.cast(
                 float,
                 injected_fluid.get_formation_volume_factor(
-                    pressure=cell_pressure,
-                    temperature=cell_temperature,
+                    pressure=cell_pressure, temperature=cell_temperature
+                ),
+            )
+            phase_density = typing.cast(
+                float,
+                injected_fluid.get_density(
+                    pressure=cell_pressure, temperature=cell_temperature
                 ),
             )
             if is_gas:
@@ -133,6 +143,7 @@ def compute_well_rates(
                     formation_volume_factor=phase_fvf,
                 )
                 injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
+                injection_mass_rates[i, j, k] = (0.0, 0.0, flow_rate * phase_density)
                 injection_fvfs[i, j, k] = (np.nan, np.nan, phase_fvf)
 
             else:
@@ -165,6 +176,7 @@ def compute_well_rates(
                     * bbl_to_ft3
                 )
                 injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
+                injection_mass_rates[i, j, k] = (flow_rate * phase_density, 0.0, 0.0)
                 injection_fvfs[i, j, k] = (phase_fvf, np.nan, np.nan)
 
     # Production wells
@@ -189,6 +201,9 @@ def compute_well_rates(
             water_rate = 0.0
             oil_rate = 0.0
             gas_rate = 0.0
+            water_mass_rate = 0.0
+            oil_mass_rate = 0.0
+            gas_mass_rate = 0.0
             water_fvf = np.nan
             oil_fvf = np.nan
             gas_fvf = np.nan
@@ -205,6 +220,7 @@ def compute_well_rates(
                     phase_fvf = typing.cast(
                         float, gas_formation_volume_factor_grid[i, j, k]
                     )
+                    phase_density = typing.cast(float, gas_density_grid[i, j, k])
                     bhp = production_bhps.gas[i, j, k]
                     use_pp, pp_table = get_pseudo_pressure_table(
                         fluid=produced_fluid,
@@ -237,6 +253,7 @@ def compute_well_rates(
                         formation_volume_factor=phase_fvf,
                     )
                     gas_rate += flow_rate
+                    gas_mass_rate += flow_rate * phase_density
                     gas_fvf = phase_fvf
 
                 elif produced_phase == FluidPhase.WATER:
@@ -247,6 +264,7 @@ def compute_well_rates(
                     phase_compressibility = typing.cast(
                         float, water_compressibility_grid[i, j, k]
                     )
+                    phase_density = typing.cast(float, water_density_grid[i, j, k])
                     bhp = production_bhps.water[i, j, k]
                     flow_rate = (
                         compute_oil_well_rate(
@@ -260,6 +278,7 @@ def compute_well_rates(
                         * bbl_to_ft3
                     )
                     water_rate += flow_rate
+                    water_mass_rate += flow_rate * phase_density
                     water_fvf = phase_fvf
 
                 else:  # oil
@@ -270,6 +289,7 @@ def compute_well_rates(
                     phase_compressibility = typing.cast(
                         float, oil_compressibility_grid[i, j, k]
                     )
+                    phase_density = typing.cast(float, oil_density_grid[i, j, k])
                     bhp = production_bhps.oil[i, j, k]
                     flow_rate = (
                         compute_oil_well_rate(
@@ -283,7 +303,13 @@ def compute_well_rates(
                         * bbl_to_ft3
                     )
                     oil_rate += flow_rate
+                    oil_mass_rate += flow_rate * phase_density
                     oil_fvf = phase_fvf
 
             production_rates[i, j, k] = (water_rate, oil_rate, gas_rate)
+            production_mass_rates[i, j, k] = (
+                water_mass_rate,
+                oil_mass_rate,
+                gas_mass_rate,
+            )
             production_fvfs[i, j, k] = (water_fvf, oil_fvf, gas_fvf)

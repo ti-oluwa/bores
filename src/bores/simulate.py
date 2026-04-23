@@ -104,6 +104,10 @@ class StepResult(typing.Generic[NDimension]):
     """Phase injection rates during the time step."""
     production_rates: typing.Optional[Rates[float, NDimension]] = None
     """Phase production rates during the time step."""
+    injection_mass_rates: typing.Optional[Rates[float, NDimension]] = None
+    """Phase injection mass rates during the time step."""
+    production_mass_rates: typing.Optional[Rates[float, NDimension]] = None
+    """Phase production mass rates during the time step."""
     injection_fvfs: typing.Optional[FormationVolumeFactors[float, NDimension]] = None
     """Phase injection formation volume factors during the time step."""
     production_fvfs: typing.Optional[FormationVolumeFactors[float, NDimension]] = None
@@ -406,6 +410,8 @@ def _run_impes_step(
     logger.debug("Evolving pressure (implicit)...")
     injection_rates = _make_rates(grid_shape)
     production_rates = _make_rates(grid_shape)
+    injection_mass_rates = _make_rates(grid_shape)
+    production_mass_rates = _make_rates(grid_shape)
     injection_fvfs = _make_fvfs(grid_shape)
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
@@ -500,6 +506,8 @@ def _run_impes_step(
         production_bhps=production_bhps,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         injection_fvfs=injection_fvfs,
         production_fvfs=production_fvfs,
     )
@@ -551,6 +559,8 @@ def _run_impes_step(
             well_indices_cache=well_indices_cache,
             injection_rates=injection_rates,
             production_rates=production_rates,
+            injection_mass_rates=injection_mass_rates,
+            production_mass_rates=production_mass_rates,
             dtype=dtype,
         )
     else:
@@ -681,8 +691,8 @@ def _run_impes_step(
         rock=rock_properties,
         thickness_grid=thickness_grid,
         cell_dimension=cell_dimension,
-        injection_rates=injection_rates,
-        production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         time_step_size=time_step_size,
     )
     timer_kwargs.update(
@@ -704,6 +714,8 @@ def _run_impes_step(
         saturation_history=saturation_history,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         injection_fvfs=injection_fvfs,
         production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,
@@ -795,6 +807,8 @@ def _run_sequential_implicit_step(
     logger.debug("Evolving pressure (implicit)...")
     injection_rates = _make_rates(grid_shape)
     production_rates = _make_rates(grid_shape)
+    injection_mass_rates = _make_rates(grid_shape)
+    production_mass_rates = _make_rates(grid_shape)
     injection_fvfs = _make_fvfs(grid_shape)
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
@@ -889,6 +903,8 @@ def _run_sequential_implicit_step(
         production_bhps=production_bhps,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         injection_fvfs=injection_fvfs,
         production_fvfs=production_fvfs,
     )
@@ -896,15 +912,10 @@ def _run_sequential_implicit_step(
     fluid_properties = attrs.evolve(fluid_properties, pressure_grid=new_pressure_grid)
     logger.debug("Pressure evolution completed.")
 
-    old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
-    old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
-    old_gas_solubility_in_water_grid = (
-        fluid_properties.gas_solubility_in_water_grid.copy()
-    )
-    old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
-    old_oil_saturation_grid = fluid_properties.oil_saturation_grid.copy()
-    old_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
-    old_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
+    # Copy before PVT updates
+    old_water_density_grid = fluid_properties.water_density_grid.copy()
+    old_oil_density_grid = fluid_properties.oil_effective_density_grid.copy()
+    old_gas_density_grid = fluid_properties.gas_density_grid.copy()
 
     logger.debug("Updating PVT fluid properties to reflect pressure changes...")
     fluid_properties = update_fluid_properties(
@@ -922,8 +933,6 @@ def _run_sequential_implicit_step(
     )
 
     logger.debug("Evolving saturation (implicit, Newton-Raphson)...")
-    pressure_change_grid = new_pressure_grid - old_pressure_grid
-
     saturation_result = implicit.evolve_saturation(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
@@ -931,16 +940,18 @@ def _run_sequential_implicit_step(
         time_step_size=time_step_size,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
+        old_water_density_grid=old_water_density_grid,
+        old_oil_density_grid=old_oil_density_grid,
+        old_gas_density_grid=old_gas_density_grid,
         face_transmissibilities=face_transmissibilities,
         config=config,
         well_indices_cache=well_indices_cache,
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
-        injection_rates=injection_rates,
-        production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         injection_bhps=injection_bhps,
         production_bhps=production_bhps,
-        pressure_change_grid=pressure_change_grid,
         dtype=dtype,
     )
     saturation_solution = saturation_result.value
@@ -1008,67 +1019,6 @@ def _run_sequential_implicit_step(
         gas_saturation_grid=gas_saturation_grid,
     )
 
-    logger.debug(
-        "Applying solution gas liberation updates for thermodynamic consistency..."
-    )
-    fluid_properties = apply_solution_gas_updates(
-        fluid_properties=fluid_properties,
-        old_solution_gas_to_oil_ratio_grid=old_solution_gor_grid,
-        old_oil_formation_volume_factor_grid=old_oil_fvf_grid,
-        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
-        old_water_formation_volume_factor_grid=old_water_fvf_grid,
-    )
-    flash_check = _check_saturation_changes(
-        maximum_oil_saturation_change=float(
-            np.max(
-                np.abs(fluid_properties.oil_saturation_grid - old_oil_saturation_grid)
-            )
-        ),
-        maximum_water_saturation_change=float(
-            np.max(
-                np.abs(
-                    fluid_properties.water_saturation_grid - old_water_saturation_grid
-                )
-            )
-        ),
-        maximum_gas_saturation_change=float(
-            np.max(
-                np.abs(fluid_properties.gas_saturation_grid - old_gas_saturation_grid)
-            )
-        ),
-        max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
-        max_allowed_water_saturation_change=config.maximum_water_saturation_change,
-        max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
-    )
-    if flash_check.violated:
-        message = (
-            f"Solution gas liberation flash at time step {time_step} violated "
-            f"saturation change limits: {flash_check.message}"
-        )
-        logger.debug(message)
-        return StepResult(
-            fluid_properties=fluid_properties,
-            rock_properties=rock_properties,
-            saturation_history=saturation_history,
-            success=False,
-            message=message,
-            timer_kwargs={
-                "maximum_saturation_change": flash_check.max_phase_saturation_change,
-                "maximum_allowed_saturation_change": flash_check.max_allowed_phase_saturation_change,
-            },
-        )
-
-    logger.debug(
-        "Updating fluid properties to reflect PVT changes from flash/liberation..."
-    )
-    fluid_properties = update_fluid_properties(
-        fluid_properties=fluid_properties,
-        wells=wells,
-        miscibility_model=miscibility_model,
-        pvt_tables=config.pvt_tables,
-        freeze_saturation_pressure=config.freeze_saturation_pressure,
-    )
-
     if config.normalize_saturations:
         normalize_saturations(
             oil_saturation_grid=fluid_properties.oil_saturation_grid,
@@ -1094,8 +1044,8 @@ def _run_sequential_implicit_step(
         rock=rock_properties,
         thickness_grid=thickness_grid,
         cell_dimension=cell_dimension,
-        injection_rates=injection_rates,
-        production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         time_step_size=time_step_size,
     )
     timer_kwargs.update(
@@ -1117,6 +1067,8 @@ def _run_sequential_implicit_step(
         saturation_history=saturation_history,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         injection_fvfs=injection_fvfs,
         production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,
@@ -1210,6 +1162,8 @@ def _run_full_sequential_implicit_step(
 
     injection_rates = _make_rates(grid_shape)
     production_rates = _make_rates(grid_shape)
+    injection_mass_rates = _make_rates(grid_shape)
+    production_mass_rates = _make_rates(grid_shape)
     injection_fvfs = _make_fvfs(grid_shape)
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
@@ -1342,6 +1296,8 @@ def _run_full_sequential_implicit_step(
             production_bhps=production_bhps,
             injection_rates=injection_rates,
             production_rates=production_rates,
+            injection_mass_rates=injection_mass_rates,
+            production_mass_rates=production_mass_rates,
             injection_fvfs=injection_fvfs,
             production_fvfs=production_fvfs,
         )
@@ -1353,19 +1309,10 @@ def _run_full_sequential_implicit_step(
             "Pressure updated in fluid properties for outer iteration saturation solve."
         )
 
-        old_solution_gor_grid = (
-            iter_fluid_properties.solution_gas_to_oil_ratio_grid.copy()
-        )
-        old_oil_fvf_grid = iter_fluid_properties.oil_formation_volume_factor_grid.copy()
-        old_gas_solubility_in_water_grid = (
-            iter_fluid_properties.gas_solubility_in_water_grid.copy()
-        )
-        old_water_fvf_grid = (
-            iter_fluid_properties.water_formation_volume_factor_grid.copy()
-        )
-        old_oil_saturation_grid = iter_fluid_properties.oil_saturation_grid.copy()
-        old_gas_saturation_grid = iter_fluid_properties.gas_saturation_grid.copy()
-        old_water_saturation_grid = iter_fluid_properties.water_saturation_grid.copy()
+        # Copy before PVT updates
+        old_water_density_grid = iter_fluid_properties.water_density_grid.copy()
+        old_oil_density_grid = iter_fluid_properties.oil_effective_density_grid.copy()
+        old_gas_density_grid = iter_fluid_properties.gas_density_grid.copy()
 
         logger.debug(
             "Updating fluid properties to reflect pressure change for outer iteration..."
@@ -1384,7 +1331,6 @@ def _run_full_sequential_implicit_step(
             metadata=metadata
         )
 
-        pressure_change_grid = new_pressure_grid - fluid_properties.pressure_grid
         logger.debug(
             "Evolving saturation (implicit, Newton-Raphson) for outer iteration %d/%d...",
             iteration + 1,
@@ -1397,16 +1343,18 @@ def _run_full_sequential_implicit_step(
             time_step_size=time_step_size,
             rock_properties=rock_properties,
             fluid_properties=iter_fluid_properties,
+            old_water_density_grid=old_water_density_grid,
+            old_oil_density_grid=old_oil_density_grid,
+            old_gas_density_grid=old_gas_density_grid,
             face_transmissibilities=face_transmissibilities,
             config=config,
             well_indices_cache=well_indices_cache,
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
-            injection_rates=injection_rates,
-            production_rates=production_rates,
+            injection_mass_rates=injection_mass_rates,
+            production_mass_rates=production_mass_rates,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
-            pressure_change_grid=pressure_change_grid,
             dtype=dtype,
         )
 
@@ -1468,74 +1416,6 @@ def _run_full_sequential_implicit_step(
             water_saturation_grid=water_saturation_grid,
             oil_saturation_grid=oil_saturation_grid,
             gas_saturation_grid=gas_saturation_grid,
-        )
-
-        logger.debug(
-            "Applying solution gas liberation updates for thermodynamic consistency..."
-        )
-        iter_fluid_properties = apply_solution_gas_updates(
-            fluid_properties=iter_fluid_properties,
-            old_solution_gas_to_oil_ratio_grid=old_solution_gor_grid,
-            old_oil_formation_volume_factor_grid=old_oil_fvf_grid,
-            old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
-            old_water_formation_volume_factor_grid=old_water_fvf_grid,
-        )
-        flash_check = _check_saturation_changes(
-            maximum_oil_saturation_change=float(
-                np.max(
-                    np.abs(
-                        iter_fluid_properties.oil_saturation_grid
-                        - old_oil_saturation_grid
-                    )
-                )
-            ),
-            maximum_water_saturation_change=float(
-                np.max(
-                    np.abs(
-                        iter_fluid_properties.water_saturation_grid
-                        - old_water_saturation_grid
-                    )
-                )
-            ),
-            maximum_gas_saturation_change=float(
-                np.max(
-                    np.abs(
-                        iter_fluid_properties.gas_saturation_grid
-                        - old_gas_saturation_grid
-                    )
-                )
-            ),
-            max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
-            max_allowed_water_saturation_change=config.maximum_water_saturation_change,
-            max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
-        )
-        if flash_check.violated:
-            message = (
-                f"Solution gas flash at time step {time_step}, outer iteration "
-                f"{iteration + 1} violated saturation change limits: {flash_check.message}"
-            )
-            logger.warning(message)
-            return StepResult(
-                fluid_properties=fluid_properties,
-                rock_properties=rock_properties,
-                saturation_history=saturation_history,
-                success=False,
-                message=message,
-                timer_kwargs={
-                    "maximum_saturation_change": flash_check.max_phase_saturation_change,
-                    "maximum_allowed_saturation_change": flash_check.max_allowed_phase_saturation_change,
-                },
-            )
-
-        logger.debug(
-            "Updating fluid properties to reflect PVT changes from flash/liberation..."
-        )
-        iter_fluid_properties = update_fluid_properties(
-            fluid_properties=iter_fluid_properties,
-            wells=wells,
-            miscibility_model=miscibility_model,
-            pvt_tables=config.pvt_tables,
-            freeze_saturation_pressure=config.freeze_saturation_pressure,
         )
 
         if config.normalize_saturations:
@@ -1615,9 +1495,9 @@ def _run_full_sequential_implicit_step(
                 np.max(np.abs(iter_fluid_properties.gas_saturation_grid - previous_sg))
             ),
         )
-        reference_pressure = max(float(np.mean(np.abs(pressure_grid))), 1.0)
+        reference_pressure = max(float(np.mean(np.abs(new_pressure_grid))), 1.0)
         relative_outer_pressure_change = (
-            float(np.max(np.abs(pressure_grid - previous_pressure_grid)))
+            float(np.max(np.abs(new_pressure_grid - previous_pressure_grid)))
             / reference_pressure
         )
 
@@ -1650,12 +1530,14 @@ def _run_full_sequential_implicit_step(
             iter_capillary_pressure_grids,
         ) = _rebuild_rock_fluid_grids(iter_fluid_properties, rock_properties, config)
 
-        previous_pressure_grid = pressure_grid.copy()
+        previous_pressure_grid = new_pressure_grid.copy()
         previous_sw = iter_fluid_properties.water_saturation_grid.copy()
         previous_so = iter_fluid_properties.oil_saturation_grid.copy()
         previous_sg = iter_fluid_properties.gas_saturation_grid.copy()
         injection_rates = _make_rates(grid_shape)
         production_rates = _make_rates(grid_shape)
+        injection_mass_rates = _make_rates(grid_shape)
+        production_mass_rates = _make_rates(grid_shape)
         injection_fvfs = _make_fvfs(grid_shape)
         production_fvfs = _make_fvfs(grid_shape)
         injection_bhps = _make_bhps(grid_shape)
@@ -1688,8 +1570,8 @@ def _run_full_sequential_implicit_step(
         rock=rock_properties,
         thickness_grid=thickness_grid,
         cell_dimension=cell_dimension,
-        injection_rates=injection_rates,
-        production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         time_step_size=time_step_size,
     )
     final_timer_kwargs.update(
@@ -1711,6 +1593,8 @@ def _run_full_sequential_implicit_step(
         saturation_history=saturation_history,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         injection_fvfs=injection_fvfs,
         production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,
@@ -1802,6 +1686,8 @@ def _run_explicit_step(
     logger.debug("Evolving pressure (explicit)...")
     injection_rates = _make_rates(grid_shape)
     production_rates = _make_rates(grid_shape)
+    injection_mass_rates = _make_rates(grid_shape)
+    production_mass_rates = _make_rates(grid_shape)
     injection_fvfs = _make_fvfs(grid_shape)
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
@@ -1826,6 +1712,8 @@ def _run_explicit_step(
         well_indices_cache=well_indices_cache,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         injection_fvfs=injection_fvfs,
         production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,
@@ -1946,6 +1834,8 @@ def _run_explicit_step(
             well_indices_cache=well_indices_cache,
             injection_rates=injection_rates,
             production_rates=production_rates,
+            injection_mass_rates=injection_mass_rates,
+            production_mass_rates=production_mass_rates,
             dtype=dtype,
         )
     else:
@@ -2078,8 +1968,8 @@ def _run_explicit_step(
         rock=rock_properties,
         thickness_grid=thickness_grid,
         cell_dimension=cell_dimension,
-        injection_rates=injection_rates,
-        production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         time_step_size=time_step_size,
     )
     timer_kwargs.update(
@@ -2100,6 +1990,8 @@ def _run_explicit_step(
         saturation_history=saturation_history,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        injection_mass_rates=injection_mass_rates,
+        production_mass_rates=production_mass_rates,
         injection_fvfs=injection_fvfs,
         production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,

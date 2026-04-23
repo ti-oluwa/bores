@@ -53,6 +53,8 @@ def evolve_pressure(
     well_indices_cache: WellIndicesCache,
     injection_rates: Rates[float, ThreeDimensions],
     production_rates: Rates[float, ThreeDimensions],
+    injection_mass_rates: Rates[float, ThreeDimensions],
+    production_mass_rates: Rates[float, ThreeDimensions],
     injection_fvfs: FormationVolumeFactors[float, ThreeDimensions],
     production_fvfs: FormationVolumeFactors[float, ThreeDimensions],
     injection_bhps: BottomHolePressures[float, ThreeDimensions],
@@ -216,12 +218,17 @@ def evolve_pressure(
             water_compressibility_grid=water_compressibility_grid,
             oil_compressibility_grid=oil_compressibility_grid,
             gas_compressibility_grid=gas_compressibility_grid,
+            oil_density_grid=oil_density_grid,
+            water_density_grid=water_density_grid,
+            gas_density_grid=gas_density_grid,
             fluid_properties=fluid_properties,
             time=time,
             config=config,
             well_indices_cache=well_indices_cache,
             injection_rates=injection_rates,
             production_rates=production_rates,
+            injection_mass_rates=injection_mass_rates,
+            production_mass_rates=production_mass_rates,
             injection_fvfs=injection_fvfs,
             production_fvfs=production_fvfs,
             injection_bhps=injection_bhps,
@@ -268,14 +275,19 @@ def evolve_pressure(
             water_compressibility_grid=water_compressibility_grid,
             oil_compressibility_grid=oil_compressibility_grid,
             gas_compressibility_grid=gas_compressibility_grid,
+            oil_density_grid=oil_density_grid,
+            water_density_grid=water_density_grid,
+            gas_density_grid=gas_density_grid,
             fluid_properties=fluid_properties,
             time=time,
             config=config,
             well_indices_cache=well_indices_cache,
             injection_rates=injection_rates,
+            production_rates=production_rates,
+            injection_mass_rates=injection_mass_rates,
+            production_mass_rates=production_mass_rates,
             injection_fvfs=injection_fvfs,
             production_fvfs=production_fvfs,
-            production_rates=production_rates,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
             dtype=dtype,
@@ -661,9 +673,9 @@ def compute_net_flux_contributions(
     :param face_transmissibilities_z: Geometric face transmissibilities in z-direction (mD·ft)
     :param oil_water_capillary_pressure_grid: Oil-water capillary pressure grid (psi)
     :param gas_oil_capillary_pressure_grid: Gas-oil capillary pressure grid (psi)
-    :param oil_density_grid: Oil density grid (lb/ft³)
-    :param water_density_grid: Water density grid (lb/ft³)
-    :param gas_density_grid: Gas density grid (lb/ft³)
+    :param oil_density_grid: Oil density grid (lbm/ft³)
+    :param water_density_grid: Water density grid (lbm/ft³)
+    :param gas_density_grid: Gas density grid (lbm/ft³)
     :param elevation_grid: Cell elevation grid (ft)
     :param gravitational_constant: Gravitational constant conversion factor (lbf/lbm)
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor
@@ -917,12 +929,17 @@ def compute_well_rate_grid(
     water_compressibility_grid: ThreeDimensionalGrid,
     oil_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
+    oil_density_grid: ThreeDimensionalGrid,
+    water_density_grid: ThreeDimensionalGrid,
+    gas_density_grid: ThreeDimensionalGrid,
     fluid_properties: FluidProperties[ThreeDimensions],
     time: float,
     config: Config,
     well_indices_cache: WellIndicesCache,
     injection_rates: Rates[float, ThreeDimensions],
     production_rates: Rates[float, ThreeDimensions],
+    injection_mass_rates: Rates[float, ThreeDimensions],
+    production_mass_rates: Rates[float, ThreeDimensions],
     injection_fvfs: FormationVolumeFactors[float, ThreeDimensions],
     production_fvfs: FormationVolumeFactors[float, ThreeDimensions],
     injection_bhps: BottomHolePressures[float, ThreeDimensions],
@@ -987,11 +1004,10 @@ def compute_well_rate_grid(
             well_index = perforation_index.well_index
             allocation_fraction = well_indices.allocation_fraction(perforation_index)
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
-            cell_oil_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
+            cell_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
 
             phase_fvf = injected_fluid.get_formation_volume_factor(
-                pressure=cell_oil_pressure,
-                temperature=cell_temperature,
+                pressure=cell_pressure, temperature=cell_temperature
             )
             phase_fvf = typing.cast(float, phase_fvf)
 
@@ -1015,13 +1031,17 @@ def compute_well_rate_grid(
 
             # Get fluid properties
             phase_compressibility = injected_fluid.get_compressibility(
-                pressure=cell_oil_pressure,
+                pressure=cell_pressure,
                 temperature=cell_temperature,
                 **compressibility_kwargs,
             )
+            phase_density = injected_fluid.get_density(
+                pressure=cell_pressure, temperature=cell_temperature
+            )
             phase_compressibility = typing.cast(float, phase_compressibility)
+            phase_density = typing.cast(float, phase_density)
             flow_rate, effective_bhp = well.get_control(
-                pressure=cell_oil_pressure,
+                pressure=cell_pressure,
                 temperature=cell_temperature,
                 well_index=well_index,
                 phase_mobility=phase_mobility,
@@ -1052,8 +1072,10 @@ def compute_well_rate_grid(
 
             if injected_phase == FluidPhase.GAS:
                 injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
+                injection_mass_rates[i, j, k] = (0.0, 0.0, flow_rate * phase_density)
             else:
                 injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
+                injection_mass_rates[i, j, k] = (flow_rate * phase_density, 0.0, 0.0)
 
             if injected_phase == FluidPhase.GAS:
                 injection_fvfs[i, j, k] = (np.nan, np.nan, phase_fvf)
@@ -1088,7 +1110,7 @@ def compute_well_rate_grid(
             well_index = perforation_index.well_index
             allocation_fraction = well_indices.allocation_fraction(perforation_index)
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
-            cell_oil_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
+            cell_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
 
             context: dict = {}
             if is_couple_controlled:
@@ -1126,6 +1148,9 @@ def compute_well_rate_grid(
             water_rate = 0.0
             oil_rate = 0.0
             gas_rate = 0.0
+            water_mass_rate = 0.0
+            oil_mass_rate = 0.0
+            gas_mass_rate = 0.0
             water_fvf = np.nan
             oil_fvf = np.nan
             gas_fvf = np.nan
@@ -1140,6 +1165,7 @@ def compute_well_rate_grid(
                     phase_mobility = typing.cast(
                         float, gas_relative_mobility_grid[i, j, k]
                     )
+                    phase_density = typing.cast(float, gas_density_grid[i, j, k])
                     phase_compressibility = typing.cast(
                         float, gas_compressibility_grid[i, j, k]
                     )
@@ -1150,6 +1176,7 @@ def compute_well_rate_grid(
                     phase_mobility = typing.cast(
                         float, water_relative_mobility_grid[i, j, k]
                     )
+                    phase_density = typing.cast(float, water_density_grid[i, j, k])
                     phase_compressibility = typing.cast(
                         float, water_compressibility_grid[i, j, k]
                     )
@@ -1160,6 +1187,7 @@ def compute_well_rate_grid(
                     phase_mobility = typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]
                     )
+                    phase_density = typing.cast(float, oil_density_grid[i, j, k])
                     phase_compressibility = typing.cast(
                         float, oil_compressibility_grid[i, j, k]
                     )
@@ -1173,7 +1201,7 @@ def compute_well_rate_grid(
                 # Compute production rate (bbls/day for liquids, ft³/day for gas)
                 # Note: Production rates are negative by convention
                 flow_rate, effective_bhp = well.get_control(
-                    pressure=cell_oil_pressure,
+                    pressure=cell_pressure,
                     temperature=cell_temperature,
                     well_index=well_index,
                     phase_mobility=phase_mobility,
@@ -1207,18 +1235,26 @@ def compute_well_rate_grid(
 
                 if produced_phase == FluidPhase.GAS:
                     gas_rate += flow_rate
+                    gas_mass_rate += flow_rate * phase_density
                     gas_fvf = phase_fvf
                     gas_bhp = effective_bhp
                 elif produced_phase == FluidPhase.WATER:
                     water_rate += flow_rate
+                    water_mass_rate += flow_rate * phase_density
                     water_fvf = phase_fvf
                     water_bhp = effective_bhp
                 else:
                     oil_rate += flow_rate
+                    oil_mass_rate += flow_rate * phase_density
                     oil_fvf = phase_fvf
                     oil_bhp = effective_bhp
 
             production_rates[i, j, k] = (water_rate, oil_rate, gas_rate)
+            production_mass_rates[i, j, k] = (
+                water_mass_rate,
+                oil_mass_rate,
+                gas_mass_rate,
+            )
             production_fvfs[i, j, k] = (water_fvf, oil_fvf, gas_fvf)
             production_bhps[i, j, k] = (water_bhp, oil_bhp, gas_bhp)
 
@@ -1292,70 +1328,3 @@ def apply_updates(
                 updated_grid[i, j, k] += change_in_pressure
 
     return updated_grid
-
-
-"""
-Explicit finite difference formulation for pressure diffusion in a 3D reservoir
-(slightly compressible three-phase fluid):
-
-The governing equation is the 3D linear-flow diffusivity equation:
-
-    ∂p/∂t * (φ·c_t) * V = ∇ · (λ_t · ∇Φ) * A + q * V
-
-where:
-    - ∂p/∂t * (φ·c_t) * V is the accumulation term (ft³/day)
-    - ∇ · (λ_t · ∇Φ) * A is the diffusion term including gravity and capillary effects
-    - q * V is the source/sink term (injection/production) (ft³/day)
-
-    λ_t = total mobility = Σ_phases (k · kr_phase / μ_phase)  (ft²/psi·day)
-    Φ_phase = phase potential = P_phase + ρ_phase · (g/gc) · Δz / 144  (psi)
-
-    Phase pressures:
-        P_water = P_oil - P_cow  (capillary correction)
-        P_gas   = P_oil + P_cgo  (capillary correction)
-
-Assumptions:
-    - Slightly compressible fluids (properties frozen at current time level)
-    - Cartesian grid (structured)
-    - Mobility and density are evaluated at old time level (explicit)
-
-The diffusion term is expanded as:
-
-    ∇ · (λ_t · ∇Φ) = ∂/∂x (λ_t · ∂Φ/∂x) + ∂/∂y (λ_t · ∂Φ/∂y) + ∂/∂z (λ_t · ∂Φ/∂z)
-
-    The total flux across each face sums phase contributions:
-        q_face = Σ_phases [λ_phase · (ΔP_phase + ρ_phase · g/gc · Δelevation / 144)]
-
-Explicit Discretization (Forward Euler in time, central difference in space):
-
-    ∂p/∂t ≈ (pⁿ⁺¹_ijk - pⁿ_ijk) / Δt
-
-    ∂/∂x (λ·∂Φ/∂x) ≈ (λ_{i+½}·Φⁿ_{i+1} - λ_{i+½}·Φⁿ_i - λ_{i-½}·Φⁿ_i + λ_{i-½}·Φⁿ_{i-1}) / Δx²
-
-Final explicit update formula:
-
-    pⁿ⁺¹_ijk = pⁿ_ijk + (Δt / (φ·c_t·V)) * [
-        Σ_neighbours [λ_harmonic · (ΔP + capillary + gravity) · A_face / ΔL] + q_{i,j,k} * V
-    ]
-
-    Gravity potential at each face:
-        gravity_potential_phase = harmonic_ρ_phase · (g/gc) · Δelevation / 144   (psi)
-
-Where:
-    - Δt is time step (s)
-    - Δx, Δy, Δz are cell dimensions (ft)
-    - A_x = Δy · h_face; A_y = Δx · h_face; A_z = Δx · Δy (ft²)
-    - V = Δx · Δy · Δz (ft³)
-    - h_face = harmonic mean of adjacent cell thicknesses (ft)
-    - λ_{i±½,...} = harmonic average of total mobility between adjacent cells
-    - q_{i,j,k} = well injection/production rate (ft³/day)
-
-Stability Condition:
-    Explicit scheme is conditionally stable. The 3D diffusion CFL criterion requires:
-    Δt ≤ min( (φ·c_t·V) / (2 · λ_max · (A_x/Δx + A_y/Δy + A_z/Δz)) )
-
-Notes:
-    - Harmonic averaging is used for both λ and ρ at cell interfaces.
-    - Gravity and capillary effects are included in the phase potential difference.
-    - Volume-normalized source/sink terms only affect the cell where the well is located.
-"""

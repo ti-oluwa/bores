@@ -128,7 +128,7 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 # Rock-fluid tables (Brooks-Corey relative permeability + capillary pressure)
 rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=bores.BrooksCoreyRelPermModel(
-        water_exponent=4.0,
+        water_exponent=2.0,
         oil_exponent=2.0,
         gas_exponent=1.5,
         wettability=bores.Wettability.WATER_WET,
@@ -157,8 +157,9 @@ config = bores.Config(
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     maximum_pressure_change=800,
-    # freeze_saturation_pressure=True,
+    freeze_saturation_pressure=True,
     # disable_capillary_effects=True,
+    minimum_injector_water_saturation=0.1
 )
 
 # Run and monitor the simulation and collect states
