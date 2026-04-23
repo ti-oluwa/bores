@@ -276,6 +276,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         net_to_gross: float = 1.0,
         well_location: typing.Optional[Coordinates] = None,
         grid_shape: typing.Optional[Coordinates] = None,
+        regime_constant: float = -3 / 4,
         boundary_conditions: typing.Optional[BoundaryConditions[Coordinates]] = None,
     ) -> float:
         """
@@ -290,6 +291,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
             Reduces the effective thickness of the reservoir contributing to flow into the well.
         :param well_location: Grid indices (i, j, k) of the well. Required for boundary correction.
         :param grid_shape: Grid dimensions (nx, ny, nz). Required for boundary correction.
+        :param regime_constant: The flow regime constant. 0 for steady, -3/4 for pseudo steady, 1/2 for transient regime
         :param boundary_conditions: `BoundaryConditions` defining BC on each face. Required for boundary correction.
         :return: The well index (md*ft).
         """
@@ -327,6 +329,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
             effective_drainage_radius=effective_drainage_radius,
             skin_factor=skin_factor,
             net_to_gross=net_to_gross,
+            regime_constant=regime_constant,
         )
 
     def get_flow_rate(
@@ -336,6 +339,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         well_index: float,
         fluid: WellFluidT,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         use_pseudo_pressure: bool = False,
@@ -348,6 +352,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
 
         :param pressure: The reservoir pressure at the well location (psi).
         :param temperature: The reservoir temperature at the well location (°F).
+        :param phase_viscosity: The viscosity of the fluid phase being produced or injected.
         :param phase_mobility: The relative mobility of the fluid phase being produced or injected.
         :param well_index: The well index (md*ft).
         :param fluid: The fluid being produced or injected.
@@ -362,6 +367,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         return self.control.get_flow_rate(
             pressure=pressure,
             temperature=temperature,
+            phase_viscosity=phase_viscosity,
             phase_mobility=phase_mobility,
             well_index=well_index,
             fluid=fluid,
@@ -381,6 +387,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         well_index: float,
         fluid: WellFluidT,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         use_pseudo_pressure: bool = False,
@@ -393,6 +400,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
 
         :param pressure: The reservoir pressure at the well location (psi).
         :param temperature: The reservoir temperature at the well location (°F).
+        :param phase_viscosity: The viscosity of the fluid phase being produced or injected.
         :param phase_mobility: The relative mobility of the fluid phase being produced or injected.
         :param well_index: The well index (md*ft).
         :param fluid: The fluid being produced or injected.
@@ -407,6 +415,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         return self.control.get_bottom_hole_pressure(
             pressure=pressure,
             temperature=temperature,
+            phase_viscosity=phase_viscosity,
             phase_mobility=phase_mobility,
             well_index=well_index,
             fluid=fluid,
@@ -426,6 +435,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         well_index: float,
         fluid: WellFluidT,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         use_pseudo_pressure: bool = False,
@@ -439,6 +449,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
 
         :param pressure: The reservoir pressure at the well location (psi).
         :param temperature: The reservoir temperature at the well location (°F).
+        :param phase_viscosity: The viscosity of the fluid phase being produced or injected.
         :param phase_mobility: The relative mobility of the fluid phase being produced or injected.
         :param well_index: The well index (md*ft).
         :param fluid: The fluid being produced or injected.
@@ -454,6 +465,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         return self.control.get_control(
             pressure=pressure,
             temperature=temperature,
+            phase_viscosity=phase_viscosity,
             phase_mobility=phase_mobility,
             well_index=well_index,
             fluid=fluid,
@@ -544,6 +556,7 @@ class InjectionWell(Well[Coordinates, InjectedFluid]):
         well_index: float,
         fluid: InjectedFluid,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         use_pseudo_pressure: bool = False,
@@ -556,6 +569,7 @@ class InjectionWell(Well[Coordinates, InjectedFluid]):
 
         :param pressure: The reservoir pressure at the well location (psi).
         :param temperature: The reservoir temperature at the well location (°F).
+        :param phase_viscosity: The viscosity of the fluid phase being injected.
         :param phase_mobility: The relative mobility of the fluid phase being injected.
         :param well_index: The well index (md*ft).
         :param fluid: The fluid being injected into the well. If None, uses the well's injected_fluid property.
@@ -568,6 +582,7 @@ class InjectionWell(Well[Coordinates, InjectedFluid]):
         return super().get_flow_rate(
             pressure=pressure,
             temperature=temperature,
+            phase_viscosity=phase_viscosity,
             phase_mobility=phase_mobility,
             well_index=well_index,
             fluid=fluid,

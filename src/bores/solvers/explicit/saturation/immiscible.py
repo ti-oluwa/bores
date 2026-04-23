@@ -79,6 +79,11 @@ def evolve_saturation(
     old_water_density_grid: ThreeDimensionalGrid,
     old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     face_transmissibilities: FaceTransmissibilities,
@@ -318,6 +323,11 @@ def evolve_saturation(
         gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
         oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
         water_formation_volume_factor_grid=water_formation_volume_factor_grid,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
+        old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
@@ -1568,6 +1578,11 @@ def apply_mass_updates(
     gas_formation_volume_factor_grid: ThreeDimensionalGrid,
     oil_formation_volume_factor_grid: ThreeDimensionalGrid,
     water_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
@@ -1718,20 +1733,37 @@ def apply_mass_updates(
                 if safe_gas_fvf < 1e-30:
                     safe_gas_fvf = 1e-30
 
-                new_alpha_solution_gor = (
+                current_oil_density_grid_alpha_solution_gor = (
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_oil_fvf
                 )
-                new_alpha_gas_solubility_in_water = (
+                current_alpha_gas_solubility_in_water = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_water_fvf
                 )
 
-                # Old-time alpha factors for computing M_g_old
-                old_alpha_solution_gor = new_alpha_solution_gor  # Rs is function of pressure only (frozen in SI)
-                old_alpha_gas_solubility_in_water = new_alpha_gas_solubility_in_water
+                safe_old_oil_fvf = old_oil_formation_volume_factor_grid[i, j, k]
+                safe_old_water_fvf = old_water_formation_volume_factor_grid[i, j, k]
+                safe_old_gas_fvf = old_gas_formation_volume_factor_grid[i, j, k]
+                if safe_old_oil_fvf < 1e-30:
+                    safe_old_oil_fvf = 1e-30
+                if safe_old_water_fvf < 1e-30:
+                    safe_old_water_fvf = 1e-30
+                if safe_old_gas_fvf < 1e-30:
+                    safe_old_gas_fvf = 1e-30
+
+                old_alpha_solution_gor = (
+                    old_solution_gas_to_oil_ratio_grid[i, j, k]
+                    * safe_old_gas_fvf
+                    / safe_old_oil_fvf
+                )
+                old_alpha_gas_solubility_in_water = (
+                    old_gas_solubility_in_water_grid[i, j, k]
+                    * safe_old_gas_fvf
+                    / safe_old_water_fvf
+                )
 
                 old_water_saturation = old_water_saturation_grid[i, j, k]
                 old_oil_saturation = old_oil_saturation_grid[i, j, k]
@@ -1775,8 +1807,9 @@ def apply_mass_updates(
                 # Mass well rate for total gas: includes solution gas in produced/injected oil and water
                 well_gas_mass_rate = (
                     net_gas_well_mass_rate_grid[i, j, k]
-                    + new_alpha_solution_gor * net_oil_well_mass_rate_grid[i, j, k]
-                    + new_alpha_gas_solubility_in_water
+                    + current_oil_density_grid_alpha_solution_gor
+                    * net_oil_well_mass_rate_grid[i, j, k]
+                    + current_alpha_gas_solubility_in_water
                     * net_water_well_mass_rate_grid[i, j, k]
                 )
 
@@ -1805,10 +1838,10 @@ def apply_mass_updates(
                 # the denominator is positive. We guard against degenerate cases.
                 gas_mass_dissolved_in_oil_and_water = (
                     current_oil_density
-                    * new_alpha_solution_gor
+                    * current_oil_density_grid_alpha_solution_gor
                     * (1.0 - new_water_saturation)
                     + current_water_density
-                    * new_alpha_gas_solubility_in_water
+                    * current_alpha_gas_solubility_in_water
                     * new_water_saturation
                 )
                 free_gas_mass = new_total_gas_mass - gas_mass_dissolved_in_oil_and_water

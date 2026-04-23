@@ -219,6 +219,11 @@ def _compute_saturation_residual(
     gas_formation_volume_factor_grid: ThreeDimensionalGrid,
     oil_formation_volume_factor_grid: ThreeDimensionalGrid,
     water_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
     net_to_gross_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
@@ -237,7 +242,7 @@ def _compute_saturation_residual(
     Water:
 
         R_w = (phi*V/dt) * (current_water_density*Sw_new - old_water_density*Sw_old)
-              - sum_faces(upwind_water_densitywind * F_w_face)
+              - sum_faces(upwind_water_density * F_w_face)
               - water_density_cell * q_w_well
 
     Gas (free + dissolved in oil + dissolved in water):
@@ -246,7 +251,7 @@ def _compute_saturation_residual(
         M_g_old = old_gas_density*Sg_old + old_oil_density*alpha_Rs_old*So_old + old_water_density*alpha_Rsw_old*Sw_old
 
         R_g = (phi*V/dt) * (M_g_new - M_g_old)
-              - sum_faces(upwind_gas_densitywind*F_g + upwind_oil_densitywind*alpha_Rs_upwind*F_o + upwind_water_densitywind*alpha_Rsw_upwind*F_w)
+              - sum_faces(upwind_gas_density*F_g + upwind_oil_density*alpha_Rs_upwind*F_o + upwind_water_density*alpha_Rsw_upwind*F_w)
               - (gas_density_cell*q_g + oil_density_cell*alpha_Rs_cell*q_o + water_density_cell*alpha_Rsw_cell*q_w)
 
     where `alpha_Rs = Rs * Bg / Bo` and `alpha_Rsw = Rsw * Bg / Bw` (both dimensionless).
@@ -360,20 +365,37 @@ def _compute_saturation_residual(
                 if safe_gas_fvf < 1e-30:
                     safe_gas_fvf = 1e-30
 
-                new_alpha_solution_gor = (
+                current_alpha_solution_gor = (
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_oil_fvf
                 )
-                new_alpha_gas_solubility_in_water = (
+                current_alpha_gas_solubility_in_water = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_water_fvf
                 )
 
-                # Use same alpha at old time (Rs is function of pressure only)
-                old_alpha_solution_gor = new_alpha_solution_gor
-                old_alpha_gas_solubility_in_water = new_alpha_gas_solubility_in_water
+                safe_old_oil_fvf = old_oil_formation_volume_factor_grid[i, j, k]
+                safe_old_water_fvf = old_water_formation_volume_factor_grid[i, j, k]
+                safe_old_gas_fvf = old_gas_formation_volume_factor_grid[i, j, k]
+                if safe_old_oil_fvf < 1e-30:
+                    safe_old_oil_fvf = 1e-30
+                if safe_old_water_fvf < 1e-30:
+                    safe_old_water_fvf = 1e-30
+                if safe_old_gas_fvf < 1e-30:
+                    safe_old_gas_fvf = 1e-30
+
+                old_alpha_solution_gor = (
+                    old_solution_gas_to_oil_ratio_grid[i, j, k]
+                    * safe_old_gas_fvf
+                    / safe_old_oil_fvf
+                )
+                old_alpha_gas_solubility_in_water = (
+                    old_gas_solubility_in_water_grid[i, j, k]
+                    * safe_old_gas_fvf
+                    / safe_old_water_fvf
+                )
 
                 # Current Newton-iterate saturations
                 current_water_saturation = water_saturation_grid[i, j, k]
@@ -395,10 +417,10 @@ def _compute_saturation_residual(
                 current_gas_total_mass = (
                     current_gas_density * current_gas_saturation
                     + current_oil_density
-                    * new_alpha_solution_gor
+                    * current_alpha_solution_gor
                     * current_oil_saturation
                     + current_water_density
-                    * new_alpha_gas_solubility_in_water
+                    * current_alpha_gas_solubility_in_water
                     * current_water_saturation
                 )
                 old_gas_total_mass = (
@@ -425,8 +447,10 @@ def _compute_saturation_residual(
                 cell_pressure = oil_pressure_grid[i, j, k]
 
                 # Alpha factors for boundary cells (use interior cell values)
-                cell_alpha_solution_gor = new_alpha_solution_gor
-                cell_alpha_gas_solubility_in_water = new_alpha_gas_solubility_in_water
+                cell_alpha_solution_gor = current_alpha_solution_gor
+                cell_alpha_gas_solubility_in_water = (
+                    current_alpha_gas_solubility_in_water
+                )
 
                 # EAST (i+1, j, k)
                 east_i = i + 1
@@ -1030,7 +1054,6 @@ def _compute_saturation_residual(
                             )
 
                 # Well mass rates
-                # Volumetric rates (ft³/day) * cell density = mass rate (lbm/day)
                 well_water_mass_rate = net_water_well_mass_rate_grid[i, j, k]
                 well_gas_mass_rate = (
                     net_gas_well_mass_rate_grid[i, j, k]
@@ -1201,6 +1224,11 @@ def _compute_residual(
     old_water_density_grid: ThreeDimensionalGrid,
     old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     oil_pressure_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
@@ -1315,6 +1343,11 @@ def _compute_residual(
         gas_formation_volume_factor_grid=fluid_properties.gas_formation_volume_factor_grid,
         oil_formation_volume_factor_grid=fluid_properties.oil_formation_volume_factor_grid,
         water_formation_volume_factor_grid=fluid_properties.water_formation_volume_factor_grid,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
+        old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
         porosity_grid=porosity_grid,
         net_to_gross_grid=net_to_gross_grid,
         time_step_in_days=time_step_in_days,
@@ -1338,6 +1371,11 @@ def compute_residual(
     old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
     oil_pressure_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     face_transmissibilities: FaceTransmissibilities,
@@ -1413,6 +1451,11 @@ def compute_residual(
         old_water_density_grid=old_water_density_grid,
         old_oil_density_grid=old_oil_density_grid,
         old_gas_density_grid=old_gas_density_grid,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
+        old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
         oil_pressure_grid=oil_pressure_grid,
         face_transmissibilities=face_transmissibilities,
         capillary_pressure_grids=capillary_pressure_grids,
@@ -1454,6 +1497,11 @@ def assemble_numerical_jacobian(
     old_water_density_grid: ThreeDimensionalGrid,
     old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     oil_pressure_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
@@ -1533,6 +1581,11 @@ def assemble_numerical_jacobian(
         old_water_density_grid=old_water_density_grid,
         old_oil_density_grid=old_oil_density_grid,
         old_gas_density_grid=old_gas_density_grid,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
+        old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
         oil_pressure_grid=oil_pressure_grid,
         face_transmissibilities=face_transmissibilities,
         rock_properties=rock_properties,
@@ -1875,8 +1928,7 @@ def _assemble_jacobian_flux_contributions(
     is used as the scale factor — this is exact for the cell's own contribution
     and approximate (but consistent) for the neighbour's contribution.
 
-    Boundary faces have zero Jacobian w.r.t. saturation (prescribed flux), unchanged
-    from the volumetric formulation.
+    Boundary faces have zero Jacobian w.r.t. saturation (prescribed flux).
 
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
@@ -2222,7 +2274,7 @@ def _assemble_jacobian_flux_contributions(
                         * md_per_cp_to_ft2_per_psi_per_day
                     )
 
-                    # dR_w/dS = -upwind_water_densitywind * dF_w/dS
+                    # dR_w/dS = -upwind_water_density * dF_w/dS
                     dRw_dSw_i = -face_water_density * (dFw_mob_dSw_i + dFw_cap_dSw_i)
                     dRw_dSg_i = -face_water_density * (dFw_mob_dSg_i + dFw_cap_dSg_i)
                     dRw_dSw_n = -face_water_density * (dFw_mob_dSw_n + dFw_cap_dSw_n)
@@ -2304,7 +2356,7 @@ def _assemble_jacobian_flux_contributions(
                         * md_per_cp_to_ft2_per_psi_per_day
                     )
 
-                    # dR_g/dS = -upwind_gas_densitywind * dF_g/dS
+                    # dR_g/dS = -upwind_gas_density * dF_g/dS
                     dRg_dSw_i = -face_gas_density * (dFg_mob_dSw_i + dFg_cap_dSw_i)
                     dRg_dSg_i = -face_gas_density * (dFg_mob_dSg_i + dFg_cap_dSg_i)
                     dRg_dSw_n = -face_gas_density * (dFg_mob_dSw_n + dFg_cap_dSw_n)
@@ -2753,6 +2805,11 @@ def assemble_jacobian(
     old_water_density_grid: ThreeDimensionalGrid,
     old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     oil_pressure_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
@@ -2869,6 +2926,11 @@ def assemble_jacobian(
         old_water_density_grid=old_water_density_grid,
         old_oil_density_grid=old_oil_density_grid,
         old_gas_density_grid=old_gas_density_grid,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
+        old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
         oil_pressure_grid=oil_pressure_grid,
         face_transmissibilities=face_transmissibilities,
         rock_properties=rock_properties,
@@ -2899,6 +2961,11 @@ def evolve_saturation(
     old_water_density_grid: ThreeDimensionalGrid,
     old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
@@ -2917,13 +2984,13 @@ def evolve_saturation(
     For water:
 
         R_w = (phi*V/dt) * (current_water_density*Sw_new - old_water_density*Sw_old)
-              - sum_faces(upwind_water_densitywind * F_w_face)
+              - sum_faces(upwind_water_density * F_w_face)
               - water_density_cell * q_w_vol
 
     For total gas (free + dissolved in oil + water):
 
         R_g = (phi*V/dt) * (M_g_new - M_g_old)
-              - sum_faces(upwind_gas_densitywind*F_g + upwind_oil_densitywind*alpha_Rs_upwind*F_o + upwind_water_densitywind*alpha_Rsw_upwind*F_w)
+              - sum_faces(upwind_gas_density*F_g + upwind_oil_density*alpha_Rs_upwind*F_o + upwind_water_density*alpha_Rsw_upwind*F_w)
               - (gas_density_cell*q_g + oil_density_cell*alpha_Rs_cell*q_o + water_density_cell*alpha_Rsw_cell*q_w)
 
     Densities and Rs/Rsw are frozen during Newton (function of pressure only in
@@ -2998,6 +3065,11 @@ def evolve_saturation(
         old_water_density_grid=old_water_density_grid,
         old_oil_density_grid=old_oil_density_grid,
         old_gas_density_grid=old_gas_density_grid,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
+        old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
         oil_pressure_grid=oil_pressure_grid,
         face_transmissibilities=face_transmissibilities,
         fluid_properties=fluid_properties,
@@ -3058,6 +3130,11 @@ def evolve_saturation(
             old_water_density_grid=old_water_density_grid,
             old_oil_density_grid=old_oil_density_grid,
             old_gas_density_grid=old_gas_density_grid,
+            old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+            old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+            old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
+            old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+            old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
             oil_pressure_grid=oil_pressure_grid,
             face_transmissibilities=face_transmissibilities,
             capillary_pressure_grids=capillary_pressure_grids,
@@ -3149,6 +3226,11 @@ def evolve_saturation(
             old_water_density_grid=old_water_density_grid,
             old_oil_density_grid=old_oil_density_grid,
             old_gas_density_grid=old_gas_density_grid,
+            old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+            old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+            old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
+            old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+            old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
             oil_pressure_grid=oil_pressure_grid,
             face_transmissibilities=face_transmissibilities,
             rock_properties=rock_properties,

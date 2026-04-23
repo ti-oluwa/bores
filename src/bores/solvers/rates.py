@@ -66,8 +66,9 @@ def compute_well_rates(
     water_bubble_point_pressure_grid = fluid_properties.water_bubble_point_pressure_grid
     gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
     water_density_grid = fluid_properties.water_density_grid
-    oil_density_grid = fluid_properties.oil_density_grid
+    oil_density_grid = fluid_properties.oil_effective_density_grid
     gas_density_grid = fluid_properties.gas_density_grid
+    gas_viscosity_grid = fluid_properties.gas_viscosity_grid
 
     # Injection wells
     for well in wells.injection_wells:
@@ -121,8 +122,15 @@ def compute_well_rates(
                 specific_gravity = typing.cast(
                     float,
                     injected_fluid.get_specific_gravity(
+                        pressure=cell_pressure, temperature=cell_temperature
+                    ),
+                )
+                phase_viscosity = typing.cast(
+                    float,
+                    injected_fluid.get_viscosity(
                         pressure=cell_pressure,
                         temperature=cell_temperature,
+                        gas_density=phase_density,
                     ),
                 )
                 avg_z_factor = compute_average_compressibility_factor(
@@ -141,6 +149,7 @@ def compute_well_rates(
                     pseudo_pressure_table=pp_table,
                     average_compressibility_factor=avg_z_factor,
                     formation_volume_factor=phase_fvf,
+                    gas_viscosity=phase_viscosity,
                 )
                 injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
                 injection_mass_rates[i, j, k] = (0.0, 0.0, flow_rate * phase_density)
@@ -148,20 +157,17 @@ def compute_well_rates(
 
             else:
                 # Water injection
-                compressibility_kwargs = {
-                    "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
-                    "gas_formation_volume_factor": gas_formation_volume_factor_grid[
-                        i, j, k
-                    ],
-                    "gas_solubility_in_water": gas_solubility_in_water_grid[i, j, k],
-                }
                 phase_mobility = water_relative_mobility_grid[i, j, k]
                 phase_compressibility = typing.cast(
                     float,
                     injected_fluid.get_compressibility(
                         pressure=cell_pressure,
                         temperature=cell_temperature,
-                        **compressibility_kwargs,
+                        bubble_point_pressure=water_bubble_point_pressure_grid[i, j, k],
+                        gas_formation_volume_factor=gas_formation_volume_factor_grid[
+                            i, j, k
+                        ],
+                        gas_solubility_in_water=gas_solubility_in_water_grid[i, j, k],
                     ),
                 )
                 flow_rate = (
@@ -221,6 +227,7 @@ def compute_well_rates(
                         float, gas_formation_volume_factor_grid[i, j, k]
                     )
                     phase_density = typing.cast(float, gas_density_grid[i, j, k])
+                    phase_viscosity = typing.cast(float, gas_viscosity_grid[i, j, k])
                     bhp = production_bhps.gas[i, j, k]
                     use_pp, pp_table = get_pseudo_pressure_table(
                         fluid=produced_fluid,
@@ -251,6 +258,7 @@ def compute_well_rates(
                         pseudo_pressure_table=pp_table,
                         average_compressibility_factor=avg_z_factor,
                         formation_volume_factor=phase_fvf,
+                        gas_viscosity=phase_viscosity,
                     )
                     gas_rate += flow_rate
                     gas_mass_rate += flow_rate * phase_density

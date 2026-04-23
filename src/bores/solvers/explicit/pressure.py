@@ -129,6 +129,7 @@ def evolve_pressure(
     md_per_cp_to_ft2_per_psi_per_day = (
         c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
     )
+    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
 
     (
         water_relative_mobility_grid,
@@ -211,16 +212,9 @@ def evolve_pressure(
             cell_count_z=cell_count_z,
             wells=wells,
             current_oil_pressure_grid=current_oil_pressure_grid,
-            temperature_grid=fluid_properties.temperature_grid,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
             gas_relative_mobility_grid=gas_relative_mobility_grid,
-            water_compressibility_grid=water_compressibility_grid,
-            oil_compressibility_grid=oil_compressibility_grid,
-            gas_compressibility_grid=gas_compressibility_grid,
-            oil_density_grid=oil_density_grid,
-            water_density_grid=water_density_grid,
-            gas_density_grid=gas_density_grid,
             fluid_properties=fluid_properties,
             time=time,
             config=config,
@@ -233,6 +227,7 @@ def evolve_pressure(
             production_fvfs=production_fvfs,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
+            bbl_to_ft3=bbl_to_ft3,
             dtype=dtype,
         )
         net_flux_grid = flux_future.result()
@@ -268,16 +263,9 @@ def evolve_pressure(
             cell_count_z=cell_count_z,
             wells=wells,
             current_oil_pressure_grid=current_oil_pressure_grid,
-            temperature_grid=fluid_properties.temperature_grid,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
             gas_relative_mobility_grid=gas_relative_mobility_grid,
-            water_compressibility_grid=water_compressibility_grid,
-            oil_compressibility_grid=oil_compressibility_grid,
-            gas_compressibility_grid=gas_compressibility_grid,
-            oil_density_grid=oil_density_grid,
-            water_density_grid=water_density_grid,
-            gas_density_grid=gas_density_grid,
             fluid_properties=fluid_properties,
             time=time,
             config=config,
@@ -290,6 +278,7 @@ def evolve_pressure(
             production_fvfs=production_fvfs,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
+            bbl_to_ft3=bbl_to_ft3,
             dtype=dtype,
         )
 
@@ -922,16 +911,9 @@ def compute_well_rate_grid(
     cell_count_z: int,
     wells: Wells[ThreeDimensions],
     current_oil_pressure_grid: ThreeDimensionalGrid,
-    temperature_grid: ThreeDimensionalGrid,
     water_relative_mobility_grid: ThreeDimensionalGrid,
     oil_relative_mobility_grid: ThreeDimensionalGrid,
     gas_relative_mobility_grid: ThreeDimensionalGrid,
-    water_compressibility_grid: ThreeDimensionalGrid,
-    oil_compressibility_grid: ThreeDimensionalGrid,
-    gas_compressibility_grid: ThreeDimensionalGrid,
-    oil_density_grid: ThreeDimensionalGrid,
-    water_density_grid: ThreeDimensionalGrid,
-    gas_density_grid: ThreeDimensionalGrid,
     fluid_properties: FluidProperties[ThreeDimensions],
     time: float,
     config: Config,
@@ -944,6 +926,7 @@ def compute_well_rate_grid(
     production_fvfs: FormationVolumeFactors[float, ThreeDimensions],
     injection_bhps: BottomHolePressures[float, ThreeDimensions],
     production_bhps: BottomHolePressures[float, ThreeDimensions],
+    bbl_to_ft3: float,
     dtype: npt.DTypeLike,
 ) -> ThreeDimensionalGrid:
     """
@@ -954,14 +937,9 @@ def compute_well_rate_grid(
     :param cell_count_z: Number of cells in z-direction (including boundaries)
     :param wells: Wells grid containing injection and production wells
     :param current_oil_pressure_grid: Current oil pressure grid (psi)
-    :param temperature_grid: Temperature grid (°F or °R)
-    :param absolute_permeability: Absolute permeability in x, y, z directions (mD)
     :param water_relative_mobility_grid: Water relative mobility (1/cP)
     :param oil_relative_mobility_grid: Oil relative mobility (1/cP)
     :param gas_relative_mobility_grid: Gas relative mobility (1/cP)
-    :param water_compressibility_grid: Water compressibility grid (1/psi)
-    :param oil_compressibility_grid: Oil compressibility grid (1/psi)
-    :param gas_compressibility_grid: Gas compressibility grid (1/psi)
     :param fluid_properties: Fluid properties container
     :param time: Total simulation time elapsed. This time step inclusive.
     :param config: Simulation config
@@ -973,11 +951,20 @@ def compute_well_rate_grid(
     :param production_fvfs: production formation volume factors for each phase and cell.
     :param injection_bhps: injection bottom hole pressures for each phase and cell.
     :param production_bhps: production bottom hole pressures for each phase and cell.
-    :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: 3D grid of net well flow rates (ft³/day), positive = injection, negative = production
     """
     well_rate_grid = np.zeros((cell_count_x, cell_count_y, cell_count_z), dtype=dtype)
-    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
+    temperature_grid = fluid_properties.temperature_grid
+    water_compressibility_grid = fluid_properties.water_compressibility_grid
+    oil_compressibility_grid = fluid_properties.oil_compressibility_grid
+    gas_compressibility_grid = fluid_properties.gas_compressibility_grid
+    oil_density_grid = fluid_properties.oil_density_grid
+    water_density_grid = fluid_properties.water_density_grid
+    gas_density_grid = fluid_properties.gas_density_grid
+    oil_viscosity_grid = fluid_properties.oil_viscosity_grid
+    water_viscosity_grid = fluid_properties.water_viscosity_grid
+    gas_viscosity_grid = fluid_properties.gas_viscosity_grid
+    gas_fvf_grid = fluid_properties.gas_formation_volume_factor_grid
 
     for well in wells.injection_wells:
         if not well.is_open or well.injected_fluid is None:
@@ -985,17 +972,14 @@ def compute_well_rate_grid(
 
         injected_fluid = well.injected_fluid
         injected_phase = injected_fluid.phase
-        use_pseudo_pressure = (
-            config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
-        )
+        is_gas = injected_phase == FluidPhase.GAS
+        use_pseudo_pressure = config.use_pseudo_pressure and is_gas
 
         # Compute rates using cached well indices
         water_bubble_point_pressure_grid = (
             fluid_properties.water_bubble_point_pressure_grid
         )
-        gas_formation_volume_factor_grid = (
-            fluid_properties.gas_formation_volume_factor_grid
-        )
+        gas_fvf_grid = fluid_properties.gas_formation_volume_factor_grid
         gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
 
         well_indices = well_indices_cache.injection[well.name]
@@ -1006,44 +990,57 @@ def compute_well_rate_grid(
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
             cell_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
 
-            phase_fvf = injected_fluid.get_formation_volume_factor(
-                pressure=cell_pressure, temperature=cell_temperature
-            )
-            phase_fvf = typing.cast(float, phase_fvf)
-
             # Get phase mobility
-            if injected_phase == FluidPhase.GAS:
+            if is_gas:
                 phase_mobility = typing.cast(
                     float, water_relative_mobility_grid[i, j, k]
                 )
-                compressibility_kwargs = {}
+                phase_compressibility = typing.cast(
+                    float,
+                    injected_fluid.get_compressibility(
+                        pressure=cell_pressure, temperature=cell_temperature
+                    ),
+                )
             else:  # Water injection
                 phase_mobility = typing.cast(
                     float, water_relative_mobility_grid[i, j, k]
                 )
-                compressibility_kwargs = {
-                    "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
-                    "gas_formation_volume_factor": gas_formation_volume_factor_grid[
-                        i, j, k
-                    ],
-                    "gas_solubility_in_water": gas_solubility_in_water_grid[i, j, k],
-                }
+                phase_compressibility = typing.cast(
+                    float,
+                    injected_fluid.get_compressibility(
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        bubble_point_pressure=water_bubble_point_pressure_grid[i, j, k],
+                        gas_formation_volume_factor=gas_fvf_grid[i, j, k],
+                        gas_solubility_in_water=gas_solubility_in_water_grid[i, j, k],
+                    ),
+                )
 
             # Get fluid properties
-            phase_compressibility = injected_fluid.get_compressibility(
-                pressure=cell_pressure,
-                temperature=cell_temperature,
-                **compressibility_kwargs,
+            phase_fvf = typing.cast(
+                float,
+                injected_fluid.get_formation_volume_factor(
+                    pressure=cell_pressure, temperature=cell_temperature
+                ),
             )
-            phase_density = injected_fluid.get_density(
-                pressure=cell_pressure, temperature=cell_temperature
+            phase_density = typing.cast(
+                float,
+                injected_fluid.get_density(
+                    pressure=cell_pressure, temperature=cell_temperature
+                ),
             )
-            phase_compressibility = typing.cast(float, phase_compressibility)
-            phase_density = typing.cast(float, phase_density)
+            phase_viscosity = typing.cast(
+                float,
+                injected_fluid.get_viscosity(
+                    pressure=cell_pressure, temperature=cell_temperature
+                ),
+            )
+
             flow_rate, effective_bhp = well.get_control(
                 pressure=cell_pressure,
                 temperature=cell_temperature,
                 well_index=well_index,
+                phase_viscosity=phase_viscosity,
                 phase_mobility=phase_mobility,
                 fluid=injected_fluid,
                 fluid_compressibility=phase_compressibility,
@@ -1060,9 +1057,7 @@ def compute_well_rate_grid(
                     well_name=well.name,
                     time=time,
                     cell=(i, j, k),
-                    rate_unit="ft³/day"
-                    if injected_phase == FluidPhase.GAS
-                    else "bbls/day",
+                    rate_unit="ft³/day" if is_gas else "bbls/day",
                 )
 
             if injected_phase != FluidPhase.GAS:
@@ -1070,19 +1065,19 @@ def compute_well_rate_grid(
 
             well_rate_grid[i, j, k] += flow_rate
 
-            if injected_phase == FluidPhase.GAS:
+            if is_gas:
                 injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
                 injection_mass_rates[i, j, k] = (0.0, 0.0, flow_rate * phase_density)
             else:
                 injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
                 injection_mass_rates[i, j, k] = (flow_rate * phase_density, 0.0, 0.0)
 
-            if injected_phase == FluidPhase.GAS:
+            if is_gas:
                 injection_fvfs[i, j, k] = (np.nan, np.nan, phase_fvf)
             else:
                 injection_fvfs[i, j, k] = (phase_fvf, np.nan, np.nan)
 
-            if injected_phase == FluidPhase.GAS:
+            if is_gas:
                 injection_bhps[i, j, k] = (np.nan, np.nan, effective_bhp)
             else:
                 injection_bhps[i, j, k] = (effective_bhp, np.nan, np.nan)
@@ -1092,16 +1087,8 @@ def compute_well_rate_grid(
         if not well.is_open:
             continue
 
-        # Compute rates using cached well indices
-        water_formation_volume_factor_grid = (
-            fluid_properties.water_formation_volume_factor_grid
-        )
-        oil_formation_volume_factor_grid = (
-            fluid_properties.oil_formation_volume_factor_grid
-        )
-        gas_formation_volume_factor_grid = (
-            fluid_properties.gas_formation_volume_factor_grid
-        )
+        water_fvf_grid = fluid_properties.water_formation_volume_factor_grid
+        oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid
         is_couple_controlled = isinstance(well.control, CoupledRateControl)
         well_indices = well_indices_cache.production[well.name]
 
@@ -1116,33 +1103,18 @@ def compute_well_rate_grid(
             if is_couple_controlled:
                 context = well.control.build_primary_phase_context(  # type: ignore
                     produced_fluids=well.produced_fluids,
-                    oil_mobility=typing.cast(
-                        float, oil_relative_mobility_grid[i, j, k]
-                    ),
-                    water_mobility=typing.cast(
-                        float, water_relative_mobility_grid[i, j, k]
-                    ),
-                    gas_mobility=typing.cast(
-                        float, gas_relative_mobility_grid[i, j, k]
-                    ),
-                    oil_fvf=typing.cast(
-                        float, oil_formation_volume_factor_grid[i, j, k]
-                    ),
-                    water_fvf=typing.cast(
-                        float, water_formation_volume_factor_grid[i, j, k]
-                    ),
-                    gas_fvf=typing.cast(
-                        float, gas_formation_volume_factor_grid[i, j, k]
-                    ),
-                    oil_compressibility=typing.cast(
-                        float, oil_compressibility_grid[i, j, k]
-                    ),
-                    water_compressibility=typing.cast(
-                        float, water_compressibility_grid[i, j, k]
-                    ),
-                    gas_compressibility=typing.cast(
-                        float, gas_compressibility_grid[i, j, k]
-                    ),
+                    oil_mobility=oil_relative_mobility_grid[i, j, k],
+                    water_mobility=water_relative_mobility_grid[i, j, k],
+                    gas_mobility=gas_relative_mobility_grid[i, j, k],
+                    oil_fvf=oil_fvf_grid[i, j, k],
+                    water_fvf=water_fvf_grid[i, j, k],
+                    gas_fvf=gas_fvf_grid[i, j, k],
+                    oil_compressibility=oil_compressibility_grid[i, j, k],
+                    water_compressibility=water_compressibility_grid[i, j, k],
+                    gas_compressibility=gas_compressibility_grid[i, j, k],
+                    oil_viscosity=oil_viscosity_grid[i, j, k],
+                    gas_viscosity=gas_viscosity_grid[i, j, k],
+                    water_viscosity=water_viscosity_grid[i, j, k],
                 )
 
             water_rate = 0.0
@@ -1159,9 +1131,11 @@ def compute_well_rate_grid(
             gas_bhp = np.nan
             for produced_fluid in well.produced_fluids:
                 produced_phase = produced_fluid.phase
+                is_gas = produced_phase == FluidPhase.GAS
+                is_water = produced_phase == FluidPhase.WATER
 
                 # Get phase-specific properties
-                if produced_phase == FluidPhase.GAS:
+                if is_gas:
                     phase_mobility = typing.cast(
                         float, gas_relative_mobility_grid[i, j, k]
                     )
@@ -1169,10 +1143,9 @@ def compute_well_rate_grid(
                     phase_compressibility = typing.cast(
                         float, gas_compressibility_grid[i, j, k]
                     )
-                    phase_fvf = typing.cast(
-                        float, gas_formation_volume_factor_grid[i, j, k]
-                    )
-                elif produced_phase == FluidPhase.WATER:
+                    phase_fvf = typing.cast(float, gas_fvf_grid[i, j, k])
+                    phase_viscosity = typing.cast(float, gas_viscosity_grid[i, j, k])
+                elif is_water:
                     phase_mobility = typing.cast(
                         float, water_relative_mobility_grid[i, j, k]
                     )
@@ -1180,9 +1153,8 @@ def compute_well_rate_grid(
                     phase_compressibility = typing.cast(
                         float, water_compressibility_grid[i, j, k]
                     )
-                    phase_fvf = typing.cast(
-                        float, water_formation_volume_factor_grid[i, j, k]
-                    )
+                    phase_fvf = typing.cast(float, water_fvf_grid[i, j, k])
+                    phase_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
                 else:  # Oil
                     phase_mobility = typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]
@@ -1191,19 +1163,17 @@ def compute_well_rate_grid(
                     phase_compressibility = typing.cast(
                         float, oil_compressibility_grid[i, j, k]
                     )
-                    phase_fvf = typing.cast(
-                        float, oil_formation_volume_factor_grid[i, j, k]
-                    )
+                    phase_fvf = typing.cast(float, oil_fvf_grid[i, j, k])
+                    phase_viscosity = typing.cast(float, oil_viscosity_grid[i, j, k])
 
-                use_pseudo_pressure = (
-                    config.use_pseudo_pressure and produced_phase == FluidPhase.GAS
-                )
+                use_pseudo_pressure = config.use_pseudo_pressure and is_gas
                 # Compute production rate (bbls/day for liquids, ft³/day for gas)
                 # Note: Production rates are negative by convention
                 flow_rate, effective_bhp = well.get_control(
                     pressure=cell_pressure,
                     temperature=cell_temperature,
                     well_index=well_index,
+                    phase_viscosity=phase_viscosity,
                     phase_mobility=phase_mobility,
                     fluid=produced_fluid,
                     fluid_compressibility=phase_compressibility,
@@ -1221,9 +1191,7 @@ def compute_well_rate_grid(
                         well_name=well.name,
                         time=time,
                         cell=(i, j, k),
-                        rate_unit="ft³/day"
-                        if produced_phase == FluidPhase.GAS
-                        else "bbls/day",
+                        rate_unit="ft³/day" if is_gas else "bbls/day",
                     )
 
                 # Convert to ft³/day if not already
@@ -1233,12 +1201,12 @@ def compute_well_rate_grid(
                 # Production rates are already negative
                 well_rate_grid[i, j, k] += flow_rate
 
-                if produced_phase == FluidPhase.GAS:
+                if is_gas:
                     gas_rate += flow_rate
                     gas_mass_rate += flow_rate * phase_density
                     gas_fvf = phase_fvf
                     gas_bhp = effective_bhp
-                elif produced_phase == FluidPhase.WATER:
+                elif is_water:
                     water_rate += flow_rate
                     water_mass_rate += flow_rate * phase_density
                     water_fvf = phase_fvf

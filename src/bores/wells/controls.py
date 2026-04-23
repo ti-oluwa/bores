@@ -122,6 +122,7 @@ def _compute_required_bhp(
     fluid_compressibility: typing.Optional[float],
     incompressibility_threshold: float = 1e-6,
     pvt_tables: typing.Optional[PVTTables] = None,
+    phase_viscosity: typing.Optional[float] = None,
 ) -> float:
     """
     Compute required BHP to achieve target rate.
@@ -163,6 +164,7 @@ def _compute_required_bhp(
             use_pseudo_pressure=use_pp,
             pseudo_pressure_table=pp_table,
             formation_volume_factor=formation_volume_factor,
+            gas_viscosity=phase_viscosity,
         )
     # For oil/water
     return compute_required_bhp_for_oil_rate(
@@ -360,6 +362,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -373,6 +376,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
 
         :param pressure: The reservoir pressure at the well location (psi).
         :param temperature: The reservoir temperature at the well location (°F).
+        :param phase_viscosity: The viscosity of the fluid phase.
         :param phase_mobility: The relative mobility of the fluid phase.
             Not so relevant for rate controlled injection wells
         :param well_index: The well index (md*ft).
@@ -397,6 +401,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         well_index: float,
         fluid: WellFluid,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -416,6 +421,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
 
         :param pressure: Reservoir pressure at well location (psi)
         :param temperature: Reservoir temperature (°F)
+        :param phase_viscosity: The viscosity of the fluid phase.
         :param phase_mobility: Phase mobility (1/cP). Not so relevant for rate controlled injection wells
         :param well_index: Well index (md*ft)
         :param fluid: Fluid being produced/injected
@@ -438,6 +444,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -462,6 +469,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
 
         :param pressure: Reservoir pressure at the well location (psi).
         :param temperature: Reservoir temperature at the well location (°F).
+        :param phase_viscosity: The viscosity of the fluid phase.
         :param phase_mobility: Relative mobility of the fluid phase (cP⁻¹).
         :param well_index: Well index (md·ft).
         :param fluid: Fluid being produced or injected.
@@ -483,6 +491,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
             well_index=well_index,
             fluid=fluid,
             formation_volume_factor=formation_volume_factor,
+            phase_viscosity=phase_viscosity,
             phase_mobility=phase_mobility,
             allocation_fraction=allocation_fraction,
             is_active=is_active,
@@ -497,6 +506,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
             well_index=well_index,
             fluid=fluid,
             formation_volume_factor=formation_volume_factor,
+            phase_viscosity=phase_viscosity,
             phase_mobility=phase_mobility,
             allocation_fraction=allocation_fraction,
             is_active=is_active,
@@ -559,6 +569,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -631,6 +642,7 @@ class BHPControl(WellControl[WellFluidTcon]):
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
                 formation_volume_factor=formation_volume_factor,
+                gas_viscosity=phase_viscosity,
             )
         else:
             # For water and oil wells
@@ -661,6 +673,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluid,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -714,6 +727,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -810,6 +824,7 @@ class BHPControl(WellControl[WellFluidTcon]):
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
                 formation_volume_factor=formation_volume_factor,
+                gas_viscosity=phase_viscosity,
             )
         else:
             rate = compute_oil_well_rate(
@@ -901,6 +916,7 @@ class RateControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -956,6 +972,7 @@ class RateControl(WellControl[WellFluidTcon]):
                     incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
                     formation_volume_factor=formation_volume_factor,
                     pvt_tables=pvt_tables,
+                    phase_viscosity=phase_viscosity,
                 )
 
             except (ValueError, ZeroDivisionError, ComputationError) as exc:
@@ -998,6 +1015,7 @@ class RateControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluid,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -1050,6 +1068,7 @@ class RateControl(WellControl[WellFluidTcon]):
                 fluid_compressibility=fluid_compressibility,
                 incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
                 pvt_tables=pvt_tables,
+                phase_viscosity=phase_viscosity,
             )
         except (ValueError, ZeroDivisionError, ComputationError) as exc:
             logger.warning(
@@ -1103,6 +1122,7 @@ class RateControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -1194,6 +1214,7 @@ class RateControl(WellControl[WellFluidTcon]):
                 incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
                 formation_volume_factor=formation_volume_factor,
                 pvt_tables=pvt_tables,
+                phase_viscosity=phase_viscosity,
             )
         except (ValueError, ZeroDivisionError, ComputationError) as exc:
             logger.warning(
@@ -1346,6 +1367,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -1362,6 +1384,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
 
         :param pressure: Reservoir pressure at the well location (psi).
         :param temperature: Reservoir temperature at the well location (°F).
+        :param phase_viscosity: The viscosity of the fluid phase.
         :param phase_mobility: Relative mobility of the fluid phase.
         :param well_index: Well index (md*ft).
         :param fluid: Fluid being produced or injected.
@@ -1413,6 +1436,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 formation_volume_factor=formation_volume_factor,
                 incompressibility_threshold=incompressibility_threshold,
                 pvt_tables=pvt_tables,
+                phase_viscosity=phase_viscosity,
             )
         except (ValueError, ZeroDivisionError, ComputationError) as exc:
             logger.warning(
@@ -1487,6 +1511,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
                 formation_volume_factor=formation_volume_factor,
+                gas_viscosity=phase_viscosity,
             )
         else:
             # For water and oil wells
@@ -1517,6 +1542,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluid,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -1565,6 +1591,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 well_index=well_index,
                 pressure=pressure,
                 temperature=temperature,
+                phase_viscosity=phase_viscosity,
                 phase_mobility=phase_mobility,
                 use_pseudo_pressure=use_pseudo_pressure,
                 formation_volume_factor=formation_volume_factor,
@@ -1626,6 +1653,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -1724,6 +1752,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 formation_volume_factor=formation_volume_factor,
                 incompressibility_threshold=incompressibility_threshold,
                 pvt_tables=pvt_tables,
+                phase_viscosity=phase_viscosity,
             )
         except (ValueError, ZeroDivisionError, ComputationError) as exc:
             logger.warning(
@@ -1829,6 +1858,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
                 formation_volume_factor=formation_volume_factor,
+                gas_viscosity=phase_viscosity,
             )
         else:
             rate = compute_oil_well_rate(
@@ -1953,6 +1983,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         pressure: float,
         temperature: float,
         primary_phase_mobility: typing.Optional[float],
+        primary_phase_viscosity: typing.Optional[float],
         well_index: float,
         primary_fluid: WellFluid,
         primary_formation_volume_factor: float,
@@ -1966,6 +1997,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
             pressure=pressure,
             temperature=temperature,
             phase_mobility=primary_phase_mobility,
+            phase_viscosity=primary_phase_viscosity,
             well_index=well_index,
             fluid=primary_fluid,
             formation_volume_factor=primary_formation_volume_factor,
@@ -1983,6 +2015,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluid,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -1990,6 +2023,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
         primary_phase_mobility: typing.Optional[float] = None,
+        primary_phase_viscosity: typing.Optional[float] = None,
         primary_fluid: typing.Optional[WellFluid] = None,
         primary_formation_volume_factor: typing.Optional[float] = None,
         primary_fluid_compressibility: typing.Optional[float] = None,
@@ -2015,6 +2049,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 pressure=pressure,
                 temperature=temperature,
                 primary_phase_mobility=phase_mobility,
+                primary_phase_viscosity=phase_viscosity,
                 well_index=well_index,
                 primary_fluid=fluid,
                 primary_formation_volume_factor=formation_volume_factor,
@@ -2039,6 +2074,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
             pressure=pressure,
             temperature=temperature,
             primary_phase_mobility=primary_phase_mobility,
+            primary_phase_viscosity=primary_phase_viscosity,
             well_index=well_index,
             primary_fluid=primary_fluid,
             primary_formation_volume_factor=primary_formation_volume_factor,
@@ -2055,6 +2091,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -2062,6 +2099,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
         primary_phase_mobility: typing.Optional[float] = None,
+        primary_phase_viscosity: typing.Optional[float] = None,
         primary_fluid: typing.Optional[WellFluid] = None,
         primary_formation_volume_factor: typing.Optional[float] = None,
         primary_fluid_compressibility: typing.Optional[float] = None,
@@ -2084,6 +2122,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 pressure=pressure,
                 temperature=temperature,
                 phase_mobility=phase_mobility,
+                phase_viscosity=phase_viscosity,
                 well_index=well_index,
                 fluid=fluid,
                 formation_volume_factor=formation_volume_factor,
@@ -2121,6 +2160,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
             pressure=pressure,
             temperature=temperature,
             primary_phase_mobility=primary_phase_mobility,
+            primary_phase_viscosity=primary_phase_viscosity,
             well_index=well_index,
             primary_fluid=primary_fluid,
             primary_formation_volume_factor=primary_formation_volume_factor,
@@ -2163,6 +2203,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
                 formation_volume_factor=formation_volume_factor,
+                gas_viscosity=phase_viscosity,
             )
         else:
             rate = compute_oil_well_rate(
@@ -2191,6 +2232,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         well_index: float,
         fluid: WellFluidTcon,
         formation_volume_factor: float,
+        phase_viscosity: typing.Optional[float] = None,
         phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
@@ -2198,6 +2240,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
         primary_phase_mobility: typing.Optional[float] = None,
+        primary_phase_viscosity: typing.Optional[float] = None,
         primary_fluid: typing.Optional[WellFluid] = None,
         primary_formation_volume_factor: typing.Optional[float] = None,
         primary_fluid_compressibility: typing.Optional[float] = None,
@@ -2268,6 +2311,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 fluid=fluid,
                 formation_volume_factor=formation_volume_factor,
                 phase_mobility=phase_mobility,
+                phase_viscosity=phase_viscosity,
                 allocation_fraction=allocation_fraction,
                 is_active=is_active,
                 use_pseudo_pressure=use_pseudo_pressure,
@@ -2303,6 +2347,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
             pressure=pressure,
             temperature=temperature,
             primary_phase_mobility=primary_phase_mobility,
+            primary_phase_viscosity=primary_phase_viscosity,
             well_index=well_index,
             primary_fluid=primary_fluid,
             primary_formation_volume_factor=primary_formation_volume_factor,
@@ -2345,6 +2390,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
                 formation_volume_factor=formation_volume_factor,
+                gas_viscosity=phase_viscosity,
             )
         else:
             rate = compute_oil_well_rate(
@@ -2380,6 +2426,9 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         oil_compressibility: float,
         water_compressibility: float,
         gas_compressibility: float,
+        oil_viscosity: typing.Optional[float] = None,
+        water_viscosity: typing.Optional[float] = None,
+        gas_viscosity: typing.Optional[float] = None,
     ) -> dict[str, typing.Any]:
         """
         Build kwargs for the primary phase cell properties for passing to
@@ -2398,13 +2447,21 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
             return {}
 
         phase_props = {
-            FluidPhase.OIL: (oil_mobility, oil_fvf, oil_compressibility),
-            FluidPhase.GAS: (gas_mobility, gas_fvf, gas_compressibility),
-            FluidPhase.WATER: (water_mobility, water_fvf, water_compressibility),
+            FluidPhase.OIL: (oil_mobility, oil_fvf, oil_compressibility, oil_viscosity),
+            FluidPhase.GAS: (gas_mobility, gas_fvf, gas_compressibility, gas_viscosity),
+            FluidPhase.WATER: (
+                water_mobility,
+                water_fvf,
+                water_compressibility,
+                water_viscosity,
+            ),
         }
-        mobility, fvf, compressibility = phase_props[FluidPhase(self.primary_phase)]
+        mobility, fvf, compressibility, viscosity = phase_props[
+            FluidPhase(self.primary_phase)
+        ]
         return {
             "primary_phase_mobility": mobility,
+            "primary_phase_viscosity": viscosity,
             "primary_fluid": primary_fluid,
             "primary_formation_volume_factor": fvf,
             "primary_fluid_compressibility": compressibility,

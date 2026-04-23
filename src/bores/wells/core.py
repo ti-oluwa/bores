@@ -88,6 +88,7 @@ def compute_well_index(
     effective_drainage_radius: float,
     skin_factor: float = 0.0,
     net_to_gross: float = 1.0,
+    regime_constant: float = -3 / 4,
 ) -> float:
     """
     Compute the well index for a given well using the Peaceman equation.
@@ -97,7 +98,7 @@ def compute_well_index(
 
     The formula for the well index is:
 
-    W = (k * h * net_to_gross) / (ln(re/rw) + s)
+    W = (k * h * net_to_gross) / (ln(re/rw) + C + s)
 
     where:
         - W is the well index (md*ft)
@@ -106,6 +107,7 @@ def compute_well_index(
         - re is the effective drainage radius (ft)
         - rw is the wellbore radius (ft)
         - s is the skin factor (dimensionless, default is 0)
+        - C is the regime constant. 0 for steady, -3/4 for pseudo steady, 1/2 for transient regime
 
     :param permeability: Absolute permeability of the reservoir rock (mD).
     :param interval_thickness: Thickness of the reservoir interval (ft).
@@ -114,10 +116,13 @@ def compute_well_index(
     :param skin_factor: Skin factor for the well (dimensionless, default is 0).
     :param net_to_gross: Net-to-gross ratio of the reservoir interval (default is 1.0).
         Reduces the effective thickness of the reservoir contributing to flow into the well.
+    :param regime_constant: The flow regime constant. 0 for steady, -3/4 for pseudo steady, 1/2 for transient regime
     :return: The well index in (mD*ft).
     """
     return (permeability * interval_thickness * net_to_gross) / (
-        np.log(effective_drainage_radius / wellbore_radius) + skin_factor
+        np.log(effective_drainage_radius / wellbore_radius)
+        + regime_constant
+        + skin_factor
     )
 
 
@@ -433,34 +438,6 @@ def compute_required_bhp_for_oil_rate(
     return float(pressure + target_rate / denominator)
 
 
-@numba.njit(cache=True)
-def compute_oil_productivity_index(
-    well_index: float,
-    phase_mobility: float,
-    md_per_cp_to_ft2_per_psi_per_day: float = 0.001127,
-) -> float:
-    """
-    Compute the well productivity index for oil/water phases.
-
-    The PI relates flow rate to drawdown via Darcy's law:
-
-        Q_res = PI * (P_bhp - P_reservoir)   [ft³/day]
-
-    where Q_res is at reservoir conditions (rb/day before FVF conversion).
-
-    This is the linear incompressible formulation, consistent with
-    `compute_oil_well_rate`. The FVF is applied downstream by the caller.
-
-    PI = WI * (kr/μ) * 0.001127 (or as set) [ft³/(psi·day)]
-
-    :param well_index: Well index (mD·ft).
-    :param phase_mobility: Phase relative mobility kr/μ (1/cP).
-    :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor (0.001127).
-    :return: Productivity index (ft³/(psi·day)).
-    """
-    return well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
-
-
 def compute_gas_well_rate(
     well_index: float,
     pressure: float,
@@ -472,22 +449,22 @@ def compute_gas_well_rate(
     pseudo_pressure_table: typing.Optional[PseudoPressureTable] = None,
     formation_volume_factor: typing.Optional[float] = None,
     gas_gravity: typing.Optional[float] = None,
+    gas_viscosity: typing.Optional[float] = None,
 ) -> float:
     """
     Compute the gas well rate at reservoir conditions (ft³/day).
 
-    The well equation is first evaluated at surface conditions (SCF/day) via
-    the (Tsc/Psc) prefactor, then multiplied by Bg (ft³/SCF) to convert to
-    reservoir conditions, consistent with the oil/water rate functions which
-    return reservoir bbl/day. The caller divides by Bg downstream to obtain
-    surface SCF/day, following the same pattern used throughout the simulator.
+    The well equation is first evaluated at surface conditions (SCF/day) using
+    the standard radial steady-state gas flow formulation, then multiplied by Bg
+    (ft³/SCF) to convert to reservoir conditions, consistent with the oil/water
+    rate functions which return reservoir bbl/day.
 
     Two formulations are supported:
 
     Pseudo-pressure (recommended, valid over the full pressure range):
 
     ```
-    Q_scf = 1.9875e-2 * (Tsc/Psc) * (W * M / T) * (m(Pbhp) - m(P))
+    Q_scf = 1000 / 1422.3 * (W * M * μ / T) * (m(Pbhp) - m(P))
     Q_res = Q_scf * Bg
     ```
 
@@ -495,9 +472,13 @@ def compute_gas_well_rate(
     low-to-moderate pressures below ~2000 psi):
 
     ```
-    Q_scf = 1.9875e-2 * (Tsc/Psc) * (W * M / T) * (Pbhp^2 - P^2) / Z
+    Q_scf = 1000 / 1422.3 * (W * M / T) * (Pbhp^2 - P^2) / Z
     Q_res = Q_scf * Bg
     ```
+
+    Notes:
+    - The 1/1422 constant already includes all unit conversions and gas-law scaling.
+    - In pseudo-pressure formulation, viscosity is embedded in m(p); do NOT multiply by μ again.
 
     Since phase_mobility = kr/mu (no Bg term), Bg must be supplied via
     `formation_volume_factor` or will be computed internally from `gas_gravity`.
@@ -511,21 +492,13 @@ def compute_gas_well_rate(
     :param temperature: Reservoir temperature (deg F).
     :param bottom_hole_pressure: Well bottom-hole pressure (psi).
     :param phase_mobility: Phase relative mobility kr/mu (md/cP).
-        Must not include the Bg term; surface-to-reservoir conversion is
-        handled here via `formation_volume_factor` or `gas_gravity`.
-    :param average_compressibility_factor: Average Z-factor over the pressure
-        interval. Used only for the pressure-squared formulation. Default 1.0.
-    :param use_pseudo_pressure: If True (default), use the pseudo-pressure
-        formulation. If False, use the pressure-squared formulation.
-    :param pseudo_pressure_table: Pre-computed pseudo-pressure lookup table.
-        Required when `use_pseudo_pressure=True`.
-    :param formation_volume_factor: Gas formation volume factor Bg (ft³/SCF)
-        at reservoir conditions. If None, Bg is computed internally from
-        `gas_gravity`, `pressure`, and `temperature`.
-    :param gas_gravity: Gas specific gravity (air = 1.0). Required when
-        `formation_volume_factor` is None.
-    :return: Gas well rate at reservoir conditions (ft³/day). Negative for
-        production, positive for injection.
+    :param average_compressibility_factor: Average Z-factor (pressure-squared only).
+    :param use_pseudo_pressure: Use pseudo-pressure if True.
+    :param pseudo_pressure_table: Required if pseudo-pressure is used.
+    :param formation_volume_factor: Gas formation volume factor Bg (ft³/SCF).
+    :param gas_gravity: Required if Bg is not provided.
+    :param gas_viscosity: Gas viscosity in cP. Required if using pseudo pressure.
+    :return: Gas well rate at reservoir conditions (ft³/day).
     """
     if well_index < 0:
         raise ValidationError("Well index must be a positive value.")
@@ -535,10 +508,7 @@ def compute_gas_well_rate(
     if well_index == 0.0 or phase_mobility == 0.0:
         return 0.0
 
-    Tsc = c.STANDARD_TEMPERATURE_RANKINE
-    Psc = c.STANDARD_PRESSURE_IMPERIAL
     temperature_rankine = fahrenheit_to_rankine(temperature)
-
     if formation_volume_factor is not None:
         gas_fvf = formation_volume_factor
     else:
@@ -552,31 +522,24 @@ def compute_gas_well_rate(
             gas_gravity=gas_gravity,
             method="dak",
         )
-        # Bg = 0.02827 * Z * T / P  (ft³/SCF)
         gas_fvf = 0.02827 * Z * temperature_rankine / pressure
 
-    # Common prefactor: 1.9875e-2 * (Tsc/Psc) * (W * M / T)
-    # Gives Q in SCF/day; multiply by Bg at the end for ft³/day.
-    prefactor = (
-        1.9875e-2 * (Tsc / Psc) * (well_index * phase_mobility / temperature_rankine)
-    )
+    prefactor = (1000 * well_index * phase_mobility) / (1422.3 * temperature_rankine)
     if use_pseudo_pressure:
         if pseudo_pressure_table is None:
             raise ValidationError(
                 "`pseudo_pressure_table` must be provided when `use_pseudo_pressure` is True."
             )
-        pseudo_pressure_difference = pseudo_pressure_table(
+        pressure_difference = pseudo_pressure_table(
             bottom_hole_pressure
         ) - pseudo_pressure_table(pressure)
-        well_rate_scf = prefactor * pseudo_pressure_difference
+        viscosity = gas_viscosity if gas_viscosity is not None else 1.0
+        well_rate_scf = prefactor * viscosity * pressure_difference
     else:
-        pressure_squared_difference = bottom_hole_pressure**2 - pressure**2
-        well_rate_scf = (
-            prefactor * pressure_squared_difference / average_compressibility_factor
-        )
+        pressure_difference = bottom_hole_pressure**2 - pressure**2
+        well_rate_scf = prefactor * pressure_difference / average_compressibility_factor
 
-    # Convert SCF/day to reservoir ft³/day
-    return well_rate_scf * gas_fvf
+    return float(well_rate_scf * gas_fvf)
 
 
 def compute_required_bhp_for_gas_rate(
@@ -589,49 +552,37 @@ def compute_required_bhp_for_gas_rate(
     use_pseudo_pressure: bool = True,
     pseudo_pressure_table: typing.Optional[PseudoPressureTable] = None,
     formation_volume_factor: typing.Optional[float] = None,
+    gas_viscosity: typing.Optional[float] = None,
 ) -> float:
     """
     Compute the bottom-hole pressure required to achieve a target gas rate.
 
-    This is the exact algebraic inverse of `compute_gas_well_rate`.
-    `target_rate` must be at reservoir conditions (ft³/day), consistent
-    with the return value of `compute_gas_well_rate`.
+    Inverse of the 1/1422 radial gas flow formulation.
 
-    Sign convention:
-    - Negative `target_rate` indicates production (returned BHP < reservoir pressure).
-    - Positive `target_rate` indicates injection (returned BHP > reservoir pressure).
-
-    Inverse formula (pseudo-pressure):
+    Pseudo-pressure:
 
     ```
-    Q_scf   = target_rate / Bg
-    m(Pbhp) = m(P) + Q_scf * T * Psc / (1.9875e-2 * Tsc * W * M)
-    Pbhp    = m^-1( m(Pbhp) )  [inverse table interpolation]
+    Q_scf = target_rate / Bg
+    m(Pbhp) = m(P) + Q_scf * 1422.3 * T / (1000 * W * M * μ)
     ```
 
-    Inverse formula (pressure-squared):
+    Pressure-squared:
 
     ```
-    Q_scf  = target_rate / Bg
-    Pbhp   = sqrt( P^2 + Q_scf * T * Psc * Z / (1.9875e-2 * Tsc * W * M) )
+    Q_scf = target_rate / Bg
+    Pbhp^2 = P^2 + Q_scf * 1422.3 * T * Z / (1000 * W * M)
     ```
 
-    :param target_rate: Target gas rate at reservoir conditions (ft³/day).
-        Negative for production, positive for injection.
     :param well_index: Well index (mD*ft).
     :param pressure: Reservoir pressure at the perforation interval (psi).
     :param temperature: Reservoir temperature (deg F).
+    :param bottom_hole_pressure: Well bottom-hole pressure (psi).
     :param phase_mobility: Phase relative mobility kr/mu (md/cP).
-        Must not include the gas formation volume factor term.
-    :param average_compressibility_factor: Average Z-factor over the pressure
-        interval. Used only for the pressure-squared formulation. Default 1.0.
-    :param use_pseudo_pressure: If True (default), use the pseudo-pressure
-        inverse. If False, use the pressure-squared inverse.
-    :param pseudo_pressure_table: Pre-computed pseudo-pressure lookup table
-        supporting inverse interpolation. Required when `use_pseudo_pressure=True`.
-    :param formation_volume_factor: Gas formation volume factor (ft³/SCF) at reservoir conditions.
-        Required to convert the reservoir-condition target rate back to
-        surface SCF/day before inverting the well equation.
+    :param average_compressibility_factor: Average Z-factor (pressure-squared only).
+    :param use_pseudo_pressure: Use pseudo-pressure if True.
+    :param pseudo_pressure_table: Required if pseudo-pressure is used.
+    :param formation_volume_factor: Gas formation volume factor Bg (ft³/SCF).
+    :param gas_viscosity: Gas viscosity in cP. Required if using pseudo pressure.
     :return: Required bottom-hole pressure (psi).
     """
     if well_index < 0:
@@ -639,110 +590,32 @@ def compute_required_bhp_for_gas_rate(
     if phase_mobility < 0:
         raise ValidationError("Phase mobility must be a positive value.")
     if formation_volume_factor is None:
-        raise ValidationError(
-            "`formation_volume_factor` (Bg) must be provided to convert the "
-            "reservoir-condition target rate to surface conditions."
-        )
+        raise ValidationError("`formation_volume_factor` must be provided.")
+
     if well_index == 0.0 or phase_mobility == 0.0:
         return float(pressure)
 
-    Tsc = c.STANDARD_TEMPERATURE_RANKINE
-    Psc = c.STANDARD_PRESSURE_IMPERIAL
     temperature_rankine = fahrenheit_to_rankine(temperature)
-
-    # Convert reservoir ft³/day back to SCF/day for inversion
     target_rate_scf = target_rate / formation_volume_factor
-
-    # Common denominator: 1.9875e-2 * Tsc * W * M / T
-    denominator = 1.9875e-2 * Tsc * well_index * phase_mobility / temperature_rankine
+    factor = 1422.3 * temperature_rankine / (1000 * well_index * phase_mobility)
 
     if use_pseudo_pressure:
         if pseudo_pressure_table is None:
-            raise ValidationError(
-                "`pseudo_pressure_table` must be provided when `use_pseudo_pressure` is True."
-            )
-        # m(Pbhp) = m(P) + Q_scf * Psc / denominator
-        required_pseudo_pressure = (
-            pseudo_pressure_table(pressure) + target_rate_scf * Psc / denominator
-        )
-        try:
-            return float(
-                pseudo_pressure_table.inverse(pseudo_pressure=required_pseudo_pressure)
-            )
-        except ValidationError as exc:
-            min_pseudo_pressure = pseudo_pressure_table.pseudo_pressures[0]
-            max_pseudo_pressure = pseudo_pressure_table.pseudo_pressures[-1]
-            raise ComputationError(
-                f"Cannot achieve target rate {target_rate:.2f} ft³/day — "
-                f"required pseudo-pressure {required_pseudo_pressure:.2f} is outside "
-                f"the valid table range [{min_pseudo_pressure:.2f}, {max_pseudo_pressure:.2f}]."
-            ) from exc
+            raise ValidationError("`pseudo_pressure_table` must be provided.")
 
-    # Pressure-squared inverse.
-    # Pbhp^2 = P^2 + Q_scf * Psc * Z / denominator
+        viscosity = gas_viscosity if gas_viscosity is not None else 1.0
+        required_m = (
+            pseudo_pressure_table(pressure) + target_rate_scf * factor * viscosity
+        )
+        return float(pseudo_pressure_table.inverse(pseudo_pressure=required_m))
+
     required_bhp_squared = (
-        pressure**2
-        + target_rate_scf * Psc * average_compressibility_factor / denominator
+        pressure**2 + target_rate_scf * factor * average_compressibility_factor
     )
     if required_bhp_squared < 0:
-        raise ComputationError(
-            f"Cannot achieve target rate {target_rate:.2f} ft³/day. Rate results in negative pressure squared.  "
-            "The requested rate exceeds reservoir deliverability."
-        )
+        raise ComputationError("Negative pressure squared.")
+
     return float(np.sqrt(required_bhp_squared))
-
-
-def compute_gas_productivity_index(
-    well_index: float,
-    phase_mobility: float,
-    pressure: float,
-    temperature: float,
-    bottom_hole_pressure: float,
-    formation_volume_factor: float,
-    use_pseudo_pressure: bool = False,
-    pseudo_pressure_table: typing.Optional[PseudoPressureTable] = None,
-    average_compressibility_factor: float = 1.0,
-) -> float:
-    drawdown = pressure - bottom_hole_pressure
-    if abs(drawdown) < 1.0:
-        # Near-zero drawdown: use tangent approximation to avoid division by zero
-        # fall through to tangent formula below
-        pass
-    else:
-        # Secant: PI = Q_res / drawdown, where Q_res = compute_gas_well_rate(...)
-        q_res = compute_gas_well_rate(
-            well_index=well_index,
-            pressure=pressure,
-            temperature=temperature,
-            bottom_hole_pressure=bottom_hole_pressure,
-            phase_mobility=phase_mobility,
-            average_compressibility_factor=average_compressibility_factor,
-            use_pseudo_pressure=use_pseudo_pressure,
-            pseudo_pressure_table=pseudo_pressure_table,
-            formation_volume_factor=formation_volume_factor,
-        )
-        return abs(q_res) / abs(drawdown)  # ft³/(psi·day), always positive
-
-    # Tangent fallback for near-zero drawdown
-    Tsc = c.STANDARD_TEMPERATURE_RANKINE
-    Psc = c.STANDARD_PRESSURE_IMPERIAL
-    T_rankine = fahrenheit_to_rankine(temperature)
-    prefactor = 1.9875e-2 * (Tsc / Psc) * (well_index * phase_mobility / T_rankine)
-
-    if use_pseudo_pressure and pseudo_pressure_table is not None:
-        delta_p = max(1.0, pressure * 1e-4)
-        p_hi = min(pressure + delta_p, pseudo_pressure_table.pressures[-1])
-        p_lo = max(pressure - delta_p, pseudo_pressure_table.pressures[0])
-        dm_dp = (pseudo_pressure_table(p_hi) - pseudo_pressure_table(p_lo)) / (
-            p_hi - p_lo
-        )
-        return prefactor * dm_dp * formation_volume_factor
-
-    return (
-        prefactor
-        * (2.0 * pressure / average_compressibility_factor)
-        * formation_volume_factor
-    )
 
 
 @attrs.frozen
