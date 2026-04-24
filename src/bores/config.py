@@ -84,7 +84,7 @@ class Config(
     scheme: EvolutionScheme = "impes"
     """Evolution scheme to use for the simulation ('impes', 'explicit', 'sequential-implicit', 'full-sequential-implicit')."""
 
-    use_pseudo_pressure: bool = True
+    use_pseudo_pressure: bool = False
     """Whether to use pseudo-pressure for gas (when applicable)."""
 
     total_compressibility_range: Range = attrs.field(default=Range(min=1e-24, max=1e-2))

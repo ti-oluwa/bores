@@ -151,7 +151,7 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="si",
+    scheme="impes",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,
@@ -159,7 +159,7 @@ config = bores.Config(
     maximum_pressure_change=800,
     freeze_saturation_pressure=True,
     # disable_capillary_effects=True,
-    minimum_injector_water_saturation=0.1
+    # minimum_injector_water_saturation=0.1
 )
 
 # Run and monitor the simulation and collect states

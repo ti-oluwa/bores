@@ -92,7 +92,7 @@ def validate_saturation_grids(
     :param irreducible_water_saturation_grid: Irreducible water saturation grid (fraction).
     :param porosity_grid: Porosity grid (fraction) used to identify active cells.
     :param normalize: If True, normalizes saturations to sum to 1.0 in active cells (default: True).
-    :return: Tuple of (oil_saturation_grid, water_saturation_grid, gas_saturation_grid),
+    :return: Tuple of (water_saturation_grid, oil_saturation_grid, gas_saturation_grid),
              potentially normalized if normalize=True.
     :raises ValueError: If saturation constraints are violated in active cells.
     :raises UserWarning: If residual oil saturation for gas is greater than for water.
@@ -157,7 +157,7 @@ def validate_saturation_grids(
             UserWarning,
         )
 
-    return oil_saturation_grid, water_saturation_grid, gas_saturation_grid
+    return water_saturation_grid, oil_saturation_grid, gas_saturation_grid
 
 
 def reservoir_model(
@@ -313,7 +313,7 @@ def reservoir_model(
         )
 
     # Validate and normalize saturation grids
-    oil_saturation_grid, water_saturation_grid, gas_saturation_grid = (
+    water_saturation_grid, oil_saturation_grid, gas_saturation_grid = (
         validate_saturation_grids(
             oil_saturation_grid=oil_saturation_grid,
             water_saturation_grid=water_saturation_grid,
@@ -928,6 +928,7 @@ def injection_well(
     radius: float,
     control: WellControl,
     injected_fluid: InjectedFluid,
+    is_active: bool = True,
     **kwargs: typing.Any,
 ) -> InjectionWell[Coordinates]:
     """
@@ -947,6 +948,7 @@ def injection_well(
         radius=radius,
         control=control,
         injected_fluid=injected_fluid,
+        is_active=is_active,
         **kwargs,
     )
 
@@ -958,6 +960,7 @@ def production_well(
     control: WellControl,
     produced_fluids: typing.Sequence[ProducedFluid],
     skin_factor: float = 0.0,
+    is_active: bool = True,
     **kwargs: typing.Any,
 ) -> ProductionWell[Coordinates]:
     """
@@ -981,6 +984,7 @@ def production_well(
         skin_factor=skin_factor,
         control=control,
         produced_fluids=produced_fluids,
+        is_active=is_active,
         **kwargs,
     )
 

@@ -11,9 +11,7 @@ from bores.config import Config
 from bores.constants import c
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
-from bores.solvers.explicit.saturation.immiscible import (
-    compute_net_mass_flux_contributions,
-)
+from bores.solvers.explicit.immiscible import assemble_flux_contributions
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.base import Wells
@@ -530,10 +528,8 @@ def check_zero_flow_initialization(
 
     # Build no-flow ghost-cell boundary arrays for the flux computation
     padded_shape = (cell_count_x + 2, cell_count_y + 2, cell_count_z + 2)
-    pressure_boundaries: ThreeDimensionalGrid = np.full(
-        padded_shape, np.nan, dtype=dtype
-    )
-    flux_boundaries: ThreeDimensionalGrid = np.zeros(padded_shape, dtype=dtype)
+    pressure_boundaries = np.full(padded_shape, np.nan, dtype=dtype)
+    flux_boundaries = np.zeros(padded_shape, dtype=dtype)
 
     gravitational_constant = (
         c.ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE
@@ -556,8 +552,8 @@ def check_zero_flow_initialization(
 
     # Compute per-phase net fluxes using the same kernel as the explicit saturation solver.
     net_water_mass_flux_grid, net_oil_mass_flux_grid, net_gas_mass_flux_grid = (
-        compute_net_mass_flux_contributions(
-            oil_pressure_grid=pressure_grid,
+        assemble_flux_contributions(
+            pressure_grid=pressure_grid,
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,

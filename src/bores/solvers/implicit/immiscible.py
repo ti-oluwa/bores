@@ -20,7 +20,7 @@ from bores.solvers.base import (
     solve_linear_system,
     to_1D_index,
 )
-from bores.solvers.explicit.saturation.immiscible import _compute_face_volumetric_fluxes
+from bores.solvers.explicit.immiscible import compute_face_fluxes
 from bores.tables.rock_fluid import RockFluidTables
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
@@ -185,8 +185,8 @@ def interleave_residuals(
 
 
 @numba.njit(parallel=True, cache=True)
-def _compute_saturation_residual(
-    oil_pressure_grid: ThreeDimensionalGrid,
+def _compute_saturation_residuals(
+    pressure_grid: ThreeDimensionalGrid,
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
@@ -263,7 +263,7 @@ def _compute_saturation_residual(
     Boundary faces use the interior cell's density for mass weighting, consistent
     with the explicit solver convention.
 
-    :param oil_pressure_grid: Current oil pressure grid (psi), shape `(nx, ny, nz)`.
+    :param pressure_grid: Current oil pressure grid (psi), shape `(nx, ny, nz)`.
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
     :param cell_count_z: Number of cells in z-direction.
@@ -444,7 +444,7 @@ def _compute_saturation_residual(
                 cell_total_mobility = (
                     cell_water_mobility + cell_oil_mobility + cell_gas_mobility
                 )
-                cell_pressure = oil_pressure_grid[i, j, k]
+                cell_pressure = pressure_grid[i, j, k]
 
                 # Alpha factors for boundary cells (use interior cell values)
                 cell_alpha_solution_gor = current_alpha_solution_gor
@@ -462,10 +462,10 @@ def _compute_saturation_residual(
                         upwind_water_density,
                         upwind_oil_density,
                         upwind_gas_density,
-                    ) = _compute_face_volumetric_fluxes(
+                    ) = compute_face_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(east_i, j, k),
-                        oil_pressure_grid=oil_pressure_grid,
+                        pressure_grid=pressure_grid,
                         face_transmissibility=face_transmissibilities_x[
                             i + 1, j + 1, k + 1
                         ],
@@ -563,10 +563,10 @@ def _compute_saturation_residual(
                         upwind_water_density,
                         upwind_oil_density,
                         upwind_gas_density,
-                    ) = _compute_face_volumetric_fluxes(
+                    ) = compute_face_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(west_i, j, k),
-                        oil_pressure_grid=oil_pressure_grid,
+                        pressure_grid=pressure_grid,
                         face_transmissibility=face_transmissibilities_x[pwi, pwj, pwk],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
@@ -660,10 +660,10 @@ def _compute_saturation_residual(
                         upwind_water_density,
                         upwind_oil_density,
                         upwind_gas_density,
-                    ) = _compute_face_volumetric_fluxes(
+                    ) = compute_face_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, south_j, k),
-                        oil_pressure_grid=oil_pressure_grid,
+                        pressure_grid=pressure_grid,
                         face_transmissibility=face_transmissibilities_y[
                             i + 1, j + 1, k + 1
                         ],
@@ -763,10 +763,10 @@ def _compute_saturation_residual(
                         upwind_water_density,
                         upwind_oil_density,
                         upwind_gas_density,
-                    ) = _compute_face_volumetric_fluxes(
+                    ) = compute_face_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, north_j, k),
-                        oil_pressure_grid=oil_pressure_grid,
+                        pressure_grid=pressure_grid,
                         face_transmissibility=face_transmissibilities_y[pni, pnj, pnk],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
@@ -862,10 +862,10 @@ def _compute_saturation_residual(
                         upwind_water_density,
                         upwind_oil_density,
                         upwind_gas_density,
-                    ) = _compute_face_volumetric_fluxes(
+                    ) = compute_face_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, j, bottom_k),
-                        oil_pressure_grid=oil_pressure_grid,
+                        pressure_grid=pressure_grid,
                         face_transmissibility=face_transmissibilities_z[
                             i + 1, j + 1, k + 1
                         ],
@@ -966,10 +966,10 @@ def _compute_saturation_residual(
                         upwind_water_density,
                         upwind_oil_density,
                         upwind_gas_density,
-                    ) = _compute_face_volumetric_fluxes(
+                    ) = compute_face_fluxes(
                         cell_indices=(i, j, k),
                         neighbour_indices=(i, j, top_k),
-                        oil_pressure_grid=oil_pressure_grid,
+                        pressure_grid=pressure_grid,
                         face_transmissibility=face_transmissibilities_z[pti, ptj, ptk],
                         water_relative_mobility_grid=water_relative_mobility_grid,
                         oil_relative_mobility_grid=oil_relative_mobility_grid,
@@ -1156,7 +1156,7 @@ def compute_rock_fluid_properties(
     return (relative_mobility_grids, capillary_pressure_grids, mobility_grids)
 
 
-def compute_well_rate_grids(
+def assemble_residual_well_contributions(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
@@ -1215,7 +1215,7 @@ def compute_well_rate_grids(
     )
 
 
-def _compute_residual(
+def _compute_residuals(
     water_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
     old_water_saturation_grid: ThreeDimensionalGrid,
@@ -1229,7 +1229,7 @@ def _compute_residual(
     old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
     old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
     old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
-    oil_pressure_grid: ThreeDimensionalGrid,
+    pressure_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
@@ -1263,7 +1263,7 @@ def _compute_residual(
     :param old_water_density_grid: Water density at start-of-step pressure (lb/ft³).
     :param old_oil_density_grid: Oil effective density at start-of-step pressure (lb/ft³).
     :param old_gas_density_grid: Gas density at start-of-step pressure (lb/ft³).
-    :param oil_pressure_grid: Oil pressure grid (psi), fixed during Newton loop.
+    :param pressure_grid: Oil pressure grid (psi), fixed during Newton loop.
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
     :param capillary_pressure_grids: `(Pcow, Pcgo)` at current iterate.
     :param relative_mobility_grids: `(lam_w, lam_o, lam_g)` at current iterate.
@@ -1300,7 +1300,7 @@ def _compute_residual(
         net_water_well_mass_rate_grid,
         net_oil_well_mass_rate_grid,
         net_gas_well_mass_rate_grid,
-    ) = compute_well_rate_grids(
+    ) = assemble_residual_well_contributions(
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
@@ -1309,8 +1309,8 @@ def _compute_residual(
         production_mass_rates=production_mass_rates,
         dtype=np.float64,
     )
-    return _compute_saturation_residual(
-        oil_pressure_grid=oil_pressure_grid,
+    return _compute_saturation_residuals(
+        pressure_grid=pressure_grid,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
@@ -1360,7 +1360,7 @@ def _compute_residual(
     )
 
 
-def compute_residual(
+def compute_residuals(
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -1370,7 +1370,7 @@ def compute_residual(
     old_water_density_grid: ThreeDimensionalGrid,
     old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
-    oil_pressure_grid: ThreeDimensionalGrid,
+    pressure_grid: ThreeDimensionalGrid,
     old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
     old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
     old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
@@ -1408,7 +1408,7 @@ def compute_residual(
     :param old_water_density_grid: Water density at start-of-step pressure (lb/ft³).
     :param old_oil_density_grid: Oil effective density at start-of-step pressure (lb/ft³).
     :param old_gas_density_grid: Gas density at start-of-step pressure (lb/ft³).
-    :param oil_pressure_grid: Oil pressure grid (psi), fixed during Newton loop.
+    :param pressure_grid: Oil pressure grid (psi), fixed during Newton loop.
     :param rock_properties: Rock properties.
     :param fluid_properties: Fluid properties (at new pressure level).
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
@@ -1442,7 +1442,7 @@ def compute_residual(
         fluid_properties=fluid_properties,
         config=config,
     )
-    return _compute_residual(
+    return _compute_residuals(
         water_saturation_grid=water_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
         old_water_saturation_grid=old_water_saturation_grid,
@@ -1456,7 +1456,7 @@ def compute_residual(
         old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
         old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
-        oil_pressure_grid=oil_pressure_grid,
+        pressure_grid=pressure_grid,
         face_transmissibilities=face_transmissibilities,
         capillary_pressure_grids=capillary_pressure_grids,
         relative_mobility_grids=relative_mobility_grids,
@@ -1502,7 +1502,7 @@ def assemble_numerical_jacobian(
     old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
     old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
     old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
-    oil_pressure_grid: ThreeDimensionalGrid,
+    pressure_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
@@ -1524,7 +1524,7 @@ def assemble_numerical_jacobian(
     Assemble the mass-based saturation Jacobian using column-wise forward finite differences.
 
     The numerical Jacobian is correct for the mass formulation automatically because
-    it calls `compute_residual`, which evaluates the mass-based residual at each
+    it calls `compute_residuals`, which evaluates the mass-based residual at each
     perturbed saturation. Densities and Rs/Rsw are frozen during Newton (function of
     pressure only), so the numerical Jacobian is exact for the sequential implicit
     scheme.
@@ -1544,7 +1544,7 @@ def assemble_numerical_jacobian(
     :param old_water_density_grid: Water density at start-of-step pressure (lb/ft³).
     :param old_oil_density_grid: Oil effective density at start-of-step pressure (lb/ft³).
     :param old_gas_density_grid: Gas density at start-of-step pressure (lb/ft³).
-    :param oil_pressure_grid: Fixed oil pressure grid (psi).
+    :param pressure_grid: Fixed oil pressure grid (psi).
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
     :param rock_properties: Rock properties.
     :param fluid_properties: Fluid properties (at new pressure level).
@@ -1586,7 +1586,7 @@ def assemble_numerical_jacobian(
         old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
         old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
-        oil_pressure_grid=oil_pressure_grid,
+        pressure_grid=pressure_grid,
         face_transmissibilities=face_transmissibilities,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
@@ -1675,7 +1675,7 @@ def assemble_numerical_jacobian(
             gas_saturation_grid[i, j, k] = perturbed_gas_saturation
             oil_saturation_grid[i, j, k] = perturbed_oil_saturation
 
-            perturbed_water_residual, perturbed_gas_residual = compute_residual(
+            perturbed_water_residual, perturbed_gas_residual = compute_residuals(
                 water_saturation_grid=water_saturation_grid,
                 oil_saturation_grid=oil_saturation_grid,
                 gas_saturation_grid=gas_saturation_grid,
@@ -1720,7 +1720,7 @@ def assemble_numerical_jacobian(
     )
 
 
-def compute_rock_fluid_derivative_grids(
+def compute_rock_fluid_derivatives(
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -1860,14 +1860,14 @@ def compute_rock_fluid_derivative_grids(
 
 
 @numba.njit(parallel=True, cache=True)
-def _assemble_jacobian_flux_contributions(
+def assemble_jacobian_flux_contributions(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
-    oil_pressure_grid: ThreeDimensionalGrid,
+    pressure_grid: ThreeDimensionalGrid,
     water_density_grid: ThreeDimensionalGrid,
     oil_density_grid: ThreeDimensionalGrid,
     gas_density_grid: ThreeDimensionalGrid,
@@ -1888,6 +1888,9 @@ def _assemble_jacobian_flux_contributions(
     dkrw_dSw_grid: ThreeDimensionalGrid,
     dkrw_dSo_grid: ThreeDimensionalGrid,
     dkrw_dSg_grid: ThreeDimensionalGrid,
+    dkro_dSw_grid: ThreeDimensionalGrid,
+    dkro_dSo_grid: ThreeDimensionalGrid,
+    dkro_dSg_grid: ThreeDimensionalGrid,
     dkrg_dSw_grid: ThreeDimensionalGrid,
     dkrg_dSo_grid: ThreeDimensionalGrid,
     dkrg_dSg_grid: ThreeDimensionalGrid,
@@ -1896,6 +1899,7 @@ def _assemble_jacobian_flux_contributions(
     dPcgo_dSw_eff_grid: ThreeDimensionalGrid,
     dPcgo_dSg_eff_grid: ThreeDimensionalGrid,
     water_viscosity_grid: ThreeDimensionalGrid,
+    oil_viscosity_grid: ThreeDimensionalGrid,
     gas_viscosity_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
     net_to_gross_grid: ThreeDimensionalGrid,
@@ -1936,7 +1940,7 @@ def _assemble_jacobian_flux_contributions(
     :param thickness_grid: Cell thickness grid (ft).
     :param cell_size_x: Cell size in x-direction (ft).
     :param cell_size_y: Cell size in y-direction (ft).
-    :param oil_pressure_grid: Oil pressure grid (psi), shape `(nx, ny, nz)`.
+    :param pressure_grid: Oil pressure grid (psi), shape `(nx, ny, nz)`.
     :param water_density_grid: Water density at new pressure (lb/ft³).
     :param oil_density_grid: Oil effective density at new pressure (lb/ft³).
     :param gas_density_grid: Gas density at new pressure (lb/ft³).
@@ -1968,7 +1972,7 @@ def _assemble_jacobian_flux_contributions(
     :return: COO triplet `(rows, cols, vals)` for the inter-cell Jacobian entries.
     """
     cells_per_slice = cell_count_y * cell_count_z
-    max_nnz_per_slice = cells_per_slice * (4 + 6 * 8)
+    max_nnz_per_slice = cells_per_slice * (4 + 6 * 12)
 
     all_rows = np.empty((cell_count_x, max_nnz_per_slice), dtype=np.int32)
     all_cols = np.empty((cell_count_x, max_nnz_per_slice), dtype=np.int32)
@@ -2052,6 +2056,8 @@ def _assemble_jacobian_flux_contributions(
                 # Projected relperm derivatives (So eliminated via dSo/dSw = dSo/dSg = -1)
                 dkrw_dSw_i_eff = dkrw_dSw_grid[i, j, k] - dkrw_dSo_grid[i, j, k]
                 dkrw_dSg_i_eff = dkrw_dSg_grid[i, j, k] - dkrw_dSo_grid[i, j, k]
+                dkro_dSw_i_eff = dkro_dSw_grid[i, j, k] - dkro_dSo_grid[i, j, k]
+                dkro_dSg_i_eff = dkro_dSg_grid[i, j, k] - dkro_dSo_grid[i, j, k]
                 dkrg_dSw_i_eff = dkrg_dSw_grid[i, j, k] - dkrg_dSo_grid[i, j, k]
                 dkrg_dSg_i_eff = dkrg_dSg_grid[i, j, k] - dkrg_dSo_grid[i, j, k]
 
@@ -2103,7 +2109,7 @@ def _assemble_jacobian_flux_contributions(
                         continue
 
                     oil_pressure_difference = (
-                        oil_pressure_grid[ni, nj, nk] - oil_pressure_grid[i, j, k]
+                        pressure_grid[ni, nj, nk] - pressure_grid[i, j, k]
                     )
                     elevation_difference = (
                         elevation_grid[ni, nj, nk] - elevation_grid[i, j, k]
@@ -2174,6 +2180,12 @@ def _assemble_jacobian_flux_contributions(
                     dkrw_dSg_n_eff = (
                         dkrw_dSg_grid[ni, nj, nk] - dkrw_dSo_grid[ni, nj, nk]
                     )
+                    dkro_dSw_n_eff = (
+                        dkro_dSw_grid[ni, nj, nk] - dkro_dSo_grid[ni, nj, nk]
+                    )
+                    dkro_dSg_n_eff = (
+                        dkro_dSg_grid[ni, nj, nk] - dkro_dSo_grid[ni, nj, nk]
+                    )
                     dkrg_dSw_n_eff = (
                         dkrg_dSw_grid[ni, nj, nk] - dkrg_dSo_grid[ni, nj, nk]
                     )
@@ -2187,16 +2199,65 @@ def _assemble_jacobian_flux_contributions(
                     dPcgo_dSg_n = dPcgo_dSg_eff_grid[ni, nj, nk]
 
                     # Water Jacobian contributions — scaled by upwind water density
+                    # Determine oil upwinding from oil potential (= oil pressure difference + gravity)
+                    oil_gravity_potential_face = (
+                        (
+                            oil_density_grid[ni, nj, nk]
+                            if oil_pressure_difference > 0
+                            else oil_density_grid[i, j, k]
+                        )
+                        * gravitational_constant
+                        * elevation_difference
+                        / 144.0
+                    )
+                    oil_potential = oil_pressure_difference + oil_gravity_potential_face
+                    oil_neighbour_is_upwind = oil_potential > 0.0
+
+                    # alpha_Rs at the upwind oil cell (frozen during Newton)
+                    if oil_neighbour_is_upwind:
+                        safe_oil_fvf_upwind = oil_formation_volume_factor_grid[
+                            ni, nj, nk
+                        ]
+                        safe_gas_fvf_upwind = gas_formation_volume_factor_grid[
+                            ni, nj, nk
+                        ]
+                        if safe_oil_fvf_upwind < 1e-30:
+                            safe_oil_fvf_upwind = 1e-30
+                        if safe_gas_fvf_upwind < 1e-30:
+                            safe_gas_fvf_upwind = 1e-30
+                        alpha_rs_face = (
+                            solution_gas_to_oil_ratio_grid[ni, nj, nk]
+                            * safe_gas_fvf_upwind
+                            / safe_oil_fvf_upwind
+                        )
+                    else:
+                        safe_oil_fvf_cell = oil_formation_volume_factor_grid[i, j, k]
+                        safe_gas_fvf_cell = gas_formation_volume_factor_grid[i, j, k]
+                        if safe_oil_fvf_cell < 1e-30:
+                            safe_oil_fvf_cell = 1e-30
+                        if safe_gas_fvf_cell < 1e-30:
+                            safe_gas_fvf_cell = 1e-30
+                        alpha_rs_face = (
+                            solution_gas_to_oil_ratio_grid[i, j, k]
+                            * safe_gas_fvf_cell
+                            / safe_oil_fvf_cell
+                        )
+
                     upwind_water_relative_mobility = (
                         water_relative_mobility_grid[ni, nj, nk]
                         if water_neighbour_is_upwind
                         else water_relative_mobility_grid[i, j, k]
                     )
-                    # Upwind density for this face (water)
+                    # Upwind densities for this face
                     face_water_density = (
                         water_density_grid[ni, nj, nk]
                         if water_neighbour_is_upwind
                         else water_density_grid[i, j, k]
+                    )
+                    face_oil_density = (
+                        oil_density_grid[ni, nj, nk]
+                        if oil_neighbour_is_upwind
+                        else oil_density_grid[i, j, k]
                     )
                     face_gas_density = (
                         gas_density_grid[ni, nj, nk]
@@ -2280,6 +2341,59 @@ def _assemble_jacobian_flux_contributions(
                     dRw_dSw_n = -face_water_density * (dFw_mob_dSw_n + dFw_cap_dSw_n)
                     dRw_dSg_n = -face_water_density * (dFw_mob_dSg_n + dFw_cap_dSg_n)
 
+                    # Oil flux contribution to gas residual Jacobian
+                    # R_g includes -rho_o * alpha_Rs * F_o, so dR_g/dS gets oil mobility derivatives
+                    if not oil_neighbour_is_upwind:
+                        inverse_oil_viscosity = (
+                            1.0 / oil_viscosity_grid[i, j, k]
+                            if oil_viscosity_grid[i, j, k] > 0.0
+                            else 0.0
+                        )
+                        dFo_mob_dSw_i = (
+                            dkro_dSw_i_eff
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * inverse_oil_viscosity
+                            * oil_potential
+                            * transmissibility
+                        )
+                        dFo_mob_dSg_i = (
+                            dkro_dSg_i_eff
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * inverse_oil_viscosity
+                            * oil_potential
+                            * transmissibility
+                        )
+                        dFo_mob_dSw_n = 0.0
+                        dFo_mob_dSg_n = 0.0
+                    else:
+                        inverse_oil_viscosity = (
+                            1.0 / oil_viscosity_grid[ni, nj, nk]
+                            if oil_viscosity_grid[ni, nj, nk] > 0.0
+                            else 0.0
+                        )
+                        dFo_mob_dSw_i = 0.0
+                        dFo_mob_dSg_i = 0.0
+                        dFo_mob_dSw_n = (
+                            dkro_dSw_n_eff
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * inverse_oil_viscosity
+                            * oil_potential
+                            * transmissibility
+                        )
+                        dFo_mob_dSg_n = (
+                            dkro_dSg_n_eff
+                            * md_per_cp_to_ft2_per_psi_per_day
+                            * inverse_oil_viscosity
+                            * oil_potential
+                            * transmissibility
+                        )
+
+                    # dR_g contribution from oil stream: -rho_o_upwind * alpha_Rs * dF_o/dS
+                    dRg_oil_dSw_i = -face_oil_density * alpha_rs_face * dFo_mob_dSw_i
+                    dRg_oil_dSg_i = -face_oil_density * alpha_rs_face * dFo_mob_dSg_i
+                    dRg_oil_dSw_n = -face_oil_density * alpha_rs_face * dFo_mob_dSw_n
+                    dRg_oil_dSg_n = -face_oil_density * alpha_rs_face * dFo_mob_dSg_n
+
                     # Gas Jacobian contributions — scaled by upwind gas density
                     upwind_gas_relative_mobility = (
                         gas_relative_mobility_grid[ni, nj, nk]
@@ -2356,11 +2470,23 @@ def _assemble_jacobian_flux_contributions(
                         * md_per_cp_to_ft2_per_psi_per_day
                     )
 
-                    # dR_g/dS = -upwind_gas_density * dF_g/dS
-                    dRg_dSw_i = -face_gas_density * (dFg_mob_dSw_i + dFg_cap_dSw_i)
-                    dRg_dSg_i = -face_gas_density * (dFg_mob_dSg_i + dFg_cap_dSg_i)
-                    dRg_dSw_n = -face_gas_density * (dFg_mob_dSw_n + dFg_cap_dSw_n)
-                    dRg_dSg_n = -face_gas_density * (dFg_mob_dSg_n + dFg_cap_dSg_n)
+                    # dR_g/dS = -rho_g_upwind * dF_g/dS - rho_o_upwind * alpha_Rs * dF_o/dS
+                    dRg_dSw_i = (
+                        -face_gas_density * (dFg_mob_dSw_i + dFg_cap_dSw_i)
+                        + dRg_oil_dSw_i
+                    )
+                    dRg_dSg_i = (
+                        -face_gas_density * (dFg_mob_dSg_i + dFg_cap_dSg_i)
+                        + dRg_oil_dSg_i
+                    )
+                    dRg_dSw_n = (
+                        -face_gas_density * (dFg_mob_dSw_n + dFg_cap_dSw_n)
+                        + dRg_oil_dSw_n
+                    )
+                    dRg_dSg_n = (
+                        -face_gas_density * (dFg_mob_dSg_n + dFg_cap_dSg_n)
+                        + dRg_oil_dSg_n
+                    )
 
                     if dRw_dSw_i != 0.0:
                         all_rows[i, local_ptr] = water_row
@@ -2424,18 +2550,26 @@ def _assemble_jacobian_flux_contributions(
     return out_rows, out_cols, out_vals
 
 
-def _assemble_jacobian_well_contributions(
-    oil_pressure_grid: ThreeDimensionalGrid,
+def assemble_jacobian_well_contributions(
+    pressure_grid: ThreeDimensionalGrid,
     water_viscosity_grid: ThreeDimensionalGrid,
+    oil_viscosity_grid: ThreeDimensionalGrid,
     gas_viscosity_grid: ThreeDimensionalGrid,
     water_density_grid: ThreeDimensionalGrid,
+    oil_density_grid: ThreeDimensionalGrid,
     gas_density_grid: ThreeDimensionalGrid,
     dkrw_dSw_grid: ThreeDimensionalGrid,
     dkrw_dSo_grid: ThreeDimensionalGrid,
     dkrw_dSg_grid: ThreeDimensionalGrid,
+    dkro_dSw_grid: ThreeDimensionalGrid,
+    dkro_dSo_grid: ThreeDimensionalGrid,
+    dkro_dSg_grid: ThreeDimensionalGrid,
     dkrg_dSw_grid: ThreeDimensionalGrid,
     dkrg_dSo_grid: ThreeDimensionalGrid,
     dkrg_dSg_grid: ThreeDimensionalGrid,
+    solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    oil_formation_volume_factor_grid: ThreeDimensionalGrid,
     well_indices_cache: WellIndicesCache,
     injection_bhps: BottomHolePressures[float, ThreeDimensions],
     production_bhps: BottomHolePressures[float, ThreeDimensions],
@@ -2449,7 +2583,7 @@ def _assemble_jacobian_well_contributions(
     For water: `dR_w/dS = -water_density * d(q_w_vol)/dS`.
     For gas: `dR_g/dS = -gas_density * d(q_g_vol)/dS`.
 
-    :param oil_pressure_grid: Oil pressure grid (psi).
+    :param pressure_grid: Oil pressure grid (psi).
     :param water_viscosity_grid: Water viscosity grid (cP).
     :param gas_viscosity_grid: Gas viscosity grid (cP).
     :param water_density_grid: Water density at new pressure (lb/ft³).
@@ -2494,7 +2628,7 @@ def _assemble_jacobian_well_contributions(
             i, j, k = perforation_index.cell
             well_index = perforation_index.well_index
             cell_1d_index = perforation_index.cell_1d_index
-            cell_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
+            cell_pressure = typing.cast(float, pressure_grid[i, j, k])
             water_bhp, _, gas_bhp = injection_bhps[i, j, k]
             water_density = float(water_density_grid[i, j, k])
             gas_density = float(gas_density_grid[i, j, k])
@@ -2556,9 +2690,10 @@ def _assemble_jacobian_well_contributions(
             i, j, k = perforation_index.cell
             cell_1d_index = perforation_index.cell_1d_index
             well_index = perforation_index.well_index
-            cell_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
-            water_bhp, _, gas_bhp = production_bhps[i, j, k]
+            cell_pressure = typing.cast(float, pressure_grid[i, j, k])
+            water_bhp, oil_bhp, gas_bhp = production_bhps[i, j, k]
             water_density = float(water_density_grid[i, j, k])
+            oil_density = float(oil_density_grid[i, j, k])
             gas_density = float(gas_density_grid[i, j, k])
 
             if np.isfinite(water_bhp) and water_bhp != 0.0:
@@ -2585,6 +2720,50 @@ def _assemble_jacobian_well_contributions(
                 )
                 _add_diagonal_entry(cell_1d_index, 0, 0, water_density * dqw_dSw)
                 _add_diagonal_entry(cell_1d_index, 0, 1, water_density * dqw_dSg)
+
+            if np.isfinite(oil_bhp) and oil_bhp != 0.0:
+                # Oil production contributes solution gas to the gas residual.
+                # R_g includes -alpha_Rs * rho_o * q_o_vol, so:
+                # dR_g/dS += -alpha_Rs * rho_o * dq_o_vol/dS
+                drawdown = oil_bhp - cell_pressure
+                oil_viscosity = typing.cast(float, oil_viscosity_grid[i, j, k])
+                inverse_oil_viscosity = (
+                    1.0 / oil_viscosity if oil_viscosity > 0.0 else 0.0
+                )
+                dkro_dSw_eff = dkro_dSw_grid[i, j, k] - dkro_dSo_grid[i, j, k]
+                dkro_dSg_eff = dkro_dSg_grid[i, j, k] - dkro_dSo_grid[i, j, k]
+                safe_oil_fvf = oil_formation_volume_factor_grid[i, j, k]
+                safe_gas_fvf = gas_formation_volume_factor_grid[i, j, k]
+                if safe_oil_fvf < 1e-30:
+                    safe_oil_fvf = 1e-30
+                if safe_gas_fvf < 1e-30:
+                    safe_gas_fvf = 1e-30
+                alpha_rs_cell = (
+                    solution_gas_to_oil_ratio_grid[i, j, k]
+                    * safe_gas_fvf
+                    / safe_oil_fvf
+                )
+                dqo_dSw = (
+                    well_index
+                    * md_per_cp_to_ft2_per_psi_per_day
+                    * inverse_oil_viscosity
+                    * dkro_dSw_eff
+                    * drawdown
+                )
+                dqo_dSg = (
+                    well_index
+                    * md_per_cp_to_ft2_per_psi_per_day
+                    * inverse_oil_viscosity
+                    * dkro_dSg_eff
+                    * drawdown
+                )
+                # Contribution to gas residual row (row_offset=1) from oil stream
+                _add_diagonal_entry(
+                    cell_1d_index, 1, 0, oil_density * alpha_rs_cell * dqo_dSw
+                )
+                _add_diagonal_entry(
+                    cell_1d_index, 1, 1, oil_density * alpha_rs_cell * dqo_dSg
+                )
 
             if np.isfinite(gas_bhp) and gas_bhp != 0.0:
                 drawdown = gas_bhp - cell_pressure
@@ -2629,7 +2808,7 @@ def assemble_analytical_jacobian(
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
-    oil_pressure_grid: ThreeDimensionalGrid,
+    pressure_grid: ThreeDimensionalGrid,
     water_density_grid: ThreeDimensionalGrid,
     oil_density_grid: ThreeDimensionalGrid,
     gas_density_grid: ThreeDimensionalGrid,
@@ -2639,6 +2818,7 @@ def assemble_analytical_jacobian(
     oil_formation_volume_factor_grid: ThreeDimensionalGrid,
     water_formation_volume_factor_grid: ThreeDimensionalGrid,
     water_viscosity_grid: ThreeDimensionalGrid,
+    oil_viscosity_grid: ThreeDimensionalGrid,
     gas_viscosity_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
@@ -2666,7 +2846,7 @@ def assemble_analytical_jacobian(
     :param water_saturation_grid: Current water saturation grid.
     :param oil_saturation_grid: Current oil saturation grid.
     :param gas_saturation_grid: Current gas saturation grid.
-    :param oil_pressure_grid: Oil pressure grid (psi).
+    :param pressure_grid: Oil pressure grid (psi).
     :param water_density_grid: Water density at new pressure (lb/ft³).
     :param oil_density_grid: Oil effective density at new pressure (lb/ft³).
     :param gas_density_grid: Gas density at new pressure (lb/ft³).
@@ -2690,9 +2870,9 @@ def assemble_analytical_jacobian(
         dkrw_dSw_grid,
         dkrw_dSo_grid,
         dkrw_dSg_grid,
-        _dkro_dSw,
-        _dkro_dSo,
-        _dkro_dSg,
+        dkro_dSw_grid,
+        dkro_dSo_grid,
+        dkro_dSg_grid,
         dkrg_dSw_grid,
         dkrg_dSo_grid,
         dkrg_dSg_grid,
@@ -2700,7 +2880,7 @@ def assemble_analytical_jacobian(
         dPcow_dSg_eff_grid,
         dPcgo_dSw_eff_grid,
         dPcgo_dSg_eff_grid,
-    ) = compute_rock_fluid_derivative_grids(
+    ) = compute_rock_fluid_derivatives(
         water_saturation_grid=water_saturation_grid,
         oil_saturation_grid=oil_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
@@ -2719,14 +2899,14 @@ def assemble_analytical_jacobian(
         gas_relative_mobility_grid,
     ) = relative_mobility_grids
 
-    flux_rows, flux_cols, flux_vals = _assemble_jacobian_flux_contributions(
+    flux_rows, flux_cols, flux_vals = assemble_jacobian_flux_contributions(
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
         thickness_grid=thickness_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
-        oil_pressure_grid=oil_pressure_grid,
+        pressure_grid=pressure_grid,
         water_density_grid=water_density_grid,
         oil_density_grid=oil_density_grid,
         gas_density_grid=gas_density_grid,
@@ -2747,6 +2927,9 @@ def assemble_analytical_jacobian(
         dkrw_dSw_grid=dkrw_dSw_grid,
         dkrw_dSo_grid=dkrw_dSo_grid,
         dkrw_dSg_grid=dkrw_dSg_grid,
+        dkro_dSw_grid=dkro_dSw_grid,
+        dkro_dSo_grid=dkro_dSo_grid,
+        dkro_dSg_grid=dkro_dSg_grid,
         dkrg_dSw_grid=dkrg_dSw_grid,
         dkrg_dSo_grid=dkrg_dSo_grid,
         dkrg_dSg_grid=dkrg_dSg_grid,
@@ -2755,24 +2938,33 @@ def assemble_analytical_jacobian(
         dPcgo_dSw_eff_grid=dPcgo_dSw_eff_grid,
         dPcgo_dSg_eff_grid=dPcgo_dSg_eff_grid,
         water_viscosity_grid=water_viscosity_grid,
+        oil_viscosity_grid=oil_viscosity_grid,
         gas_viscosity_grid=gas_viscosity_grid,
         porosity_grid=rock_properties.porosity_grid,
         net_to_gross_grid=rock_properties.net_to_gross_grid,
         time_step_in_days=time_step_in_days,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
-    well_rows, well_cols, well_vals = _assemble_jacobian_well_contributions(
-        oil_pressure_grid=oil_pressure_grid,
+    well_rows, well_cols, well_vals = assemble_jacobian_well_contributions(
+        pressure_grid=pressure_grid,
         water_viscosity_grid=water_viscosity_grid,
+        oil_viscosity_grid=oil_viscosity_grid,
         gas_viscosity_grid=gas_viscosity_grid,
         water_density_grid=water_density_grid,
+        oil_density_grid=oil_density_grid,
         gas_density_grid=gas_density_grid,
         dkrw_dSw_grid=dkrw_dSw_grid,
         dkrw_dSo_grid=dkrw_dSo_grid,
         dkrw_dSg_grid=dkrw_dSg_grid,
+        dkro_dSw_grid=dkro_dSw_grid,
+        dkro_dSo_grid=dkro_dSo_grid,
+        dkro_dSg_grid=dkro_dSg_grid,
         dkrg_dSw_grid=dkrg_dSw_grid,
         dkrg_dSo_grid=dkrg_dSo_grid,
         dkrg_dSg_grid=dkrg_dSg_grid,
+        solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
+        gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
+        oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
         well_indices_cache=well_indices_cache,
         injection_bhps=injection_bhps,
         production_bhps=production_bhps,
@@ -2810,7 +3002,7 @@ def assemble_jacobian(
     old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
     old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
     old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
-    oil_pressure_grid: ThreeDimensionalGrid,
+    pressure_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
@@ -2851,7 +3043,7 @@ def assemble_jacobian(
     :param old_water_density_grid: Water density at start-of-step pressure (lb/ft³).
     :param old_oil_density_grid: Oil effective density at start-of-step pressure (lb/ft³).
     :param old_gas_density_grid: Gas density at start-of-step pressure (lb/ft³).
-    :param oil_pressure_grid: Fixed oil pressure grid (psi).
+    :param pressure_grid: Fixed oil pressure grid (psi).
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
     :param rock_properties: Rock properties.
     :param fluid_properties: Fluid properties (at new pressure level).
@@ -2882,7 +3074,7 @@ def assemble_jacobian(
             thickness_grid=thickness_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
-            oil_pressure_grid=oil_pressure_grid,
+            pressure_grid=pressure_grid,
             water_saturation_grid=water_saturation_grid,
             oil_saturation_grid=oil_saturation_grid,
             gas_saturation_grid=gas_saturation_grid,
@@ -2899,6 +3091,7 @@ def assemble_jacobian(
             face_transmissibilities=face_transmissibilities,
             gravitational_constant=gravitational_constant,
             water_viscosity_grid=fluid_properties.water_viscosity_grid,
+            oil_viscosity_grid=fluid_properties.oil_effective_viscosity_grid,
             gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
             capillary_pressure_grids=capillary_pressure_grids,
             relative_mobility_grids=relative_mobility_grids,
@@ -2931,7 +3124,7 @@ def assemble_jacobian(
         old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
         old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
-        oil_pressure_grid=oil_pressure_grid,
+        pressure_grid=pressure_grid,
         face_transmissibilities=face_transmissibilities,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
@@ -3024,10 +3217,10 @@ def evolve_saturation(
     :return: `EvolutionResult` containing an `ImplicitSaturationSolution` and a list of
         `NewtonConvergenceInfo` records.
     """
-    oil_pressure_grid = fluid_properties.pressure_grid
+    pressure_grid = fluid_properties.pressure_grid
     porosity_grid = rock_properties.porosity_grid
     net_to_gross_grid = rock_properties.net_to_gross_grid
-    cell_count_x, cell_count_y, cell_count_z = oil_pressure_grid.shape
+    cell_count_x, cell_count_y, cell_count_z = pressure_grid.shape
     cell_size_x, cell_size_y = cell_dimension
 
     old_water_saturation_grid = fluid_properties.water_saturation_grid
@@ -3070,7 +3263,7 @@ def evolve_saturation(
         old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
         old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
         old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
-        oil_pressure_grid=oil_pressure_grid,
+        pressure_grid=pressure_grid,
         face_transmissibilities=face_transmissibilities,
         fluid_properties=fluid_properties,
         cell_count_x=cell_count_x,
@@ -3121,7 +3314,7 @@ def evolve_saturation(
             )
         )
 
-        water_residual, gas_residual = _compute_residual(
+        water_residual, gas_residual = _compute_residuals(
             water_saturation_grid=water_saturation_grid,
             gas_saturation_grid=gas_saturation_grid,
             old_water_saturation_grid=old_water_saturation_grid,
@@ -3135,7 +3328,7 @@ def evolve_saturation(
             old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
             old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
             old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
-            oil_pressure_grid=oil_pressure_grid,
+            pressure_grid=pressure_grid,
             face_transmissibilities=face_transmissibilities,
             capillary_pressure_grids=capillary_pressure_grids,
             relative_mobility_grids=relative_mobility_grids,
@@ -3231,7 +3424,7 @@ def evolve_saturation(
             old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
             old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
             old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
-            oil_pressure_grid=oil_pressure_grid,
+            pressure_grid=pressure_grid,
             face_transmissibilities=face_transmissibilities,
             rock_properties=rock_properties,
             fluid_properties=fluid_properties,
@@ -3308,7 +3501,7 @@ def evolve_saturation(
         )
 
         for _ in range(maximum_line_search_cuts):
-            water_residual_trial, gas_residual_trial = compute_residual(
+            water_residual_trial, gas_residual_trial = compute_residuals(
                 water_saturation_grid=water_saturation_grid_trial,
                 oil_saturation_grid=oil_saturation_grid_trial,
                 gas_saturation_grid=gas_saturation_grid_trial,

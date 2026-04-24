@@ -62,6 +62,7 @@ def build_well_indices_cache(
     wells: Wells[ThreeDimensions],
     absolute_permeability: RockPermeability,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
+    regime_constant: float = -3 / 4,
 ) -> WellIndicesCache:
     """
     Compute well indices for all perforated cells across all injection and production wells.
@@ -82,6 +83,7 @@ def build_well_indices_cache(
     :param absolute_permeability: Absolute permeability object with x, y, z component grids (mD).
     :param boundary_conditions: Model boundary conditions. Used to apply no-flow boundary
         corrections to the Peaceman effective drainage radius for wells at grid boundaries.
+    :param regime_constant: The flow regime constant. 0 for steady, -3/4 for pseudo steady, 1/2 for transient regime
     :return: `WellIndicesCache` containing precomputed `WellIndices` for every injection
         and production well, keyed by well name.
     """
@@ -111,6 +113,7 @@ def build_well_indices_cache(
                     net_to_gross=net_to_gross_grid[i, j, k],
                     well_location=(i, j, k),
                     grid_shape=grid_shape,
+                    regime_constant=regime_constant,
                     boundary_conditions=boundary_conditions,
                 )
                 cell_1d_index = to_1D_index(

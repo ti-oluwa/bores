@@ -17,7 +17,7 @@ from bores.wells.core import (
 from bores.wells.indices import WellIndicesCache
 
 
-def compute_well_rates(
+def update_well_rates(
     pressure_grid: ThreeDimensionalGrid,
     water_relative_mobility_grid: ThreeDimensionalGrid,
     oil_relative_mobility_grid: ThreeDimensionalGrid,
@@ -36,8 +36,8 @@ def compute_well_rates(
     production_fvfs: FormationVolumeFactors[float, ThreeDimensions],
 ) -> None:
     """
-    Compute well flow rates and update them in-place using the pressure and the
-    BHPs stored during the Jacobian assembly step.
+    Compute well volumetric and mass rates and update them in-place using the pressure and the
+    BHPs stored during the pressure Jacobian assembly step.
 
     :param pressure_grid: Oil pressure grid (psi)
     :param fluid_properties: Fluid properties container
@@ -87,8 +87,6 @@ def compute_well_rates(
             cell_pressure = typing.cast(float, pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
 
-            # Retrieve BHP stored during pressure solve.
-            # injection_bhps stores (water_bhp, 0, gas_bhp) depending on phase.
             if is_gas:
                 bhp = injection_bhps.gas[i, j, k]
             else:
@@ -110,8 +108,13 @@ def compute_well_rates(
                     pressure=cell_pressure, temperature=cell_temperature
                 ),
             )
+            total_mobility = typing.cast(
+                float,
+                gas_relative_mobility_grid[i, j, k]
+                + oil_relative_mobility_grid[i, j, k]
+                + water_relative_mobility_grid[i, j, k],
+            )
             if is_gas:
-                # Build pseudo-pressure table if needed
                 phase_mobility = gas_relative_mobility_grid[i, j, k]
                 use_pp, pp_table = get_pseudo_pressure_table(
                     fluid=injected_fluid,
@@ -144,7 +147,7 @@ def compute_well_rates(
                     pressure=cell_pressure,
                     temperature=cell_temperature,
                     bottom_hole_pressure=bhp,
-                    phase_mobility=phase_mobility,
+                    phase_mobility=total_mobility,
                     use_pseudo_pressure=use_pp,
                     pseudo_pressure_table=pp_table,
                     average_compressibility_factor=avg_z_factor,
@@ -175,7 +178,7 @@ def compute_well_rates(
                         well_index=well_index,
                         pressure=cell_pressure,
                         bottom_hole_pressure=bhp,
-                        phase_mobility=phase_mobility,
+                        phase_mobility=total_mobility,
                         fluid_compressibility=phase_compressibility,
                         incompressibility_threshold=incompressibility_threshold,
                     )

@@ -696,7 +696,7 @@ config = bores.Config(
     phase_appearance_tolerance=1e-6,
     saturation_convergence_tolerance=1e-4,
     saturation_cfl_threshold=0.8,
-    minimum_injector_gas_saturation=0.2,
+    # minimum_injector_gas_saturation=0.2,
 )
 
 # Run and monitor the simulation and collect states

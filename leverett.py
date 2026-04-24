@@ -21,6 +21,7 @@ tests the numerical scheme's shock-capturing ability.
 import typing
 
 import bores
+from bores.correlations.core import compute_gas_molecular_weight
 
 # 1000 ft long core, divided into 100 cells (10 ft each)
 # Cross-section: 10 ft x 10 ft (100 sq ft area)
@@ -45,7 +46,7 @@ absolute_permeability = bores.RockPermeability(x=perm_grid)
 temperature_grid = bores.uniform_grid(grid_shape, value=150.0)  # deg F
 
 depth_grid = bores.depth_grid(thickness_grid, datum=5000.0)
-pressure_grid = bores.uniform_grid(grid_shape, value=3000.0)
+pressure_grid = bores.uniform_grid(grid_shape, value=5000.0)
 
 # Initial saturations — connate water, rest is oil
 connate_water_saturation = 0.20
@@ -82,15 +83,12 @@ water_density = water_specific_gravity * 62.4  # lbm/ft³
 
 # Gas (not used, but required by model)
 gas_gravity = 0.7
+gas_molecular_weight = compute_gas_molecular_weight(gas_gravity=gas_gravity)
 gas_gravity_grid = bores.uniform_grid(grid_shape, value=gas_gravity)
-
-# Bubble point — set high to keep system undersaturated (no free gas)
-bubble_point = 5000.0  # psia (above initial pressure)
-bubble_point_grid = bores.uniform_grid(grid_shape, value=bubble_point)
-
+oil_bubble_point_grid = bores.uniform_grid(grid_shape, value=2700.0)
 
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.LETThreePhaseRelPermModel()
+    relative_permeability_table=bores.BrooksCoreyRelPermModel()
 )
 
 model = bores.reservoir_model(
@@ -106,7 +104,7 @@ model = bores.reservoir_model(
     oil_saturation_grid=oil_saturation_grid,
     gas_saturation_grid=gas_saturation_grid,
     oil_viscosity_grid=oil_viscosity_grid,
-    oil_bubble_point_pressure_grid=bubble_point_grid,
+    oil_bubble_point_pressure_grid=oil_bubble_point_grid,
     residual_oil_saturation_water_grid=residual_oil_saturation_water_grid,
     residual_oil_saturation_gas_grid=residual_oil_saturation_gas_grid,
     residual_gas_saturation_grid=residual_gas_saturation_grid,
@@ -167,6 +165,12 @@ producer = bores.production_well(
             specific_gravity=1.0,
             molecular_weight=18.015,
         ),
+        bores.ProducedFluid(
+            name="Gas",
+            phase=bores.FluidPhase.GAS,
+            specific_gravity=0.7,
+            molecular_weight=gas_molecular_weight,
+        ),
     ],
     is_active=True,
     skin_factor=0.0,
@@ -181,7 +185,7 @@ timer = bores.Timer(
     initial_step_size=bores.Time(hours=6),
     maximum_step_size=bores.Time(days=2),
     minimum_step_size=bores.Time(minutes=1),
-    simulation_time=bores.Time(days=200),  # ~0.5 PV injected
+    simulation_time=bores.Time(days=200),
     maximum_rejections=20,
 )
 
@@ -192,12 +196,14 @@ config = bores.Config(
     scheme="impes",
     pressure_solver="direct",
     saturation_solver="direct",
-    maximum_saturation_change=0.1,  # Control numerical diffusion
+    maximum_saturation_change=0.5,  # Control numerical diffusion
     disable_capillary_effects=True,  # Classic BL has no Pc
     normalize_saturations=True,
+    maximum_pressure_change=3000,
     output_frequency=5,  # Save every 5th step for analysis
     minimum_injector_water_saturation=0.1,
-    saturation_cfl_threshold=0.6
+    saturation_cfl_threshold=0.8,
+    use_pseudo_pressure=False,
 )
 
 print("=" * 70)

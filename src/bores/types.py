@@ -92,7 +92,6 @@ WellFluidType = typing.Literal["water", "oil", "gas"]
 
 EvolutionScheme = typing.Literal[
     "impes",
-    "explicit",
     "sequential-implicit",
     "full-sequential-implicit",
     "si",
@@ -102,7 +101,6 @@ EvolutionScheme = typing.Literal[
 Discretization methods for numerical simulations
 
 - `"impes"`: Implicit pressure, Explicit saturation
-- `"explicit"`: Both pressure and saturation are treated explicitly
 - `"sequential-implicit"` or `"si"`: Both pressure and saturation are treated (sequentially) implicitly
 - `"full-sequential-implicit"` or `"full-si"`: Both pressure and saturation are treated (sequentially) implicitly
 """
@@ -111,6 +109,7 @@ MiscibilityModel = typing.Literal["immiscible", "todd-longstaff"]
 """Miscibility models for fluid interactions in the simulation"""
 
 Spacing = typing.Literal["cosine", "linspace"]
+
 
 class ArrayLike(typing.Protocol[Tco]):
     """

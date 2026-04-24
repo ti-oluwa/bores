@@ -167,7 +167,7 @@ def evolve_pressure(
             dtype=dtype,
         )
         face_transmissibility_future = pool.submit(
-            compute_face_flux_contributions,
+            assemble_flux_contributions,
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
@@ -190,7 +190,7 @@ def evolve_pressure(
             dtype=dtype,
         )
         wells_future = pool.submit(
-            compute_well_contributions,
+            assemble_well_contributions,
             current_pressure_grid=current_pressure_grid,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
@@ -243,7 +243,7 @@ def evolve_pressure(
             sparse_off_diag,
             diagonal_additions,
             rhs_additions,
-        ) = compute_face_flux_contributions(
+        ) = assemble_flux_contributions(
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
@@ -270,7 +270,7 @@ def evolve_pressure(
             well_diagonal_values,
             well_rhs_cell_indices,
             well_rhs_values,
-        ) = compute_well_contributions(
+        ) = assemble_well_contributions(
             current_pressure_grid=current_pressure_grid,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
@@ -453,29 +453,26 @@ def compute_accumulation_contributions(
                     cell_count_z=cell_count_z,
                 )
 
-                cell_volume = (
+                # Accumulation term coefficient
+                accumulation_coefficient = (
                     cell_size_x
                     * cell_size_y
                     * thickness_grid[i, j, k]
                     * net_to_gross_grid[i, j, k]
-                )
-                cell_porosity = porosity_grid[i, j, k]
-                cell_total_compressibility = total_compressibility_grid[i, j, k]
-                cell_oil_pressure = current_pressure_grid[i, j, k]
-
-                # Accumulation term coefficient
-                accumulation_coefficient = (
-                    cell_porosity * cell_total_compressibility * cell_volume
+                    * porosity_grid[i, j, k]
+                    * total_compressibility_grid[i, j, k]
                 ) / time_step_size_in_days
 
                 diagonal_values[cell_1D_index] = accumulation_coefficient
-                rhs_values[cell_1D_index] = accumulation_coefficient * cell_oil_pressure
+                rhs_values[cell_1D_index] = (
+                    accumulation_coefficient * current_pressure_grid[i, j, k]
+                )
 
     return diagonal_values, rhs_values
 
 
 @numba.njit(parallel=True, cache=True)
-def compute_face_flux_contributions(
+def assemble_flux_contributions(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
@@ -673,10 +670,10 @@ def compute_face_flux_contributions(
     )
 
     # For Dirichlet singletons: the known boundary pressure value.
-    thread_bc_pressure = np.zeros((cell_count_x, max_entries_per_i_slice), dtype=dtype)
+    thread_pressure_bc = np.zeros((cell_count_x, max_entries_per_i_slice), dtype=dtype)
 
     # For Neumann singletons: the known boundary flux (ft³/day), applied directly to RHS.
-    thread_bc_flux = np.zeros((cell_count_x, max_entries_per_i_slice), dtype=dtype)
+    thread_flux_bc = np.zeros((cell_count_x, max_entries_per_i_slice), dtype=dtype)
 
     # 1D real-grid index of the interior cell that owns the boundary face.
     thread_owner_cell = np.zeros(
@@ -712,7 +709,7 @@ def compute_face_flux_contributions(
                 if ei < cell_count_x:
                     # Interior neighbour: write symmetric off-diagonal pair.
                     transmissibility, capillary_flux, gravity_flux = (
-                        compute_fluxes_from_neighbour(
+                        compute_face_fluxes(
                             cell_indices=(i, j, k),
                             neighbour_indices=(ei, ej, ek),
                             water_relative_mobility_grid=water_relative_mobility_grid,
@@ -762,7 +759,7 @@ def compute_face_flux_contributions(
                     # Ghost cell lives at (ei+1, ej+1, ek+1) in padded grid.
                     pei, pej, pek = ei + 1, ej + 1, ek + 1
                     transmissibility, capillary_flux, gravity_flux = (
-                        compute_fluxes_from_neighbour(
+                        compute_face_fluxes(
                             cell_indices=(i, j, k),
                             # Clamp neighbour to last real cell for mobility/density lookup —
                             # the ghost cell has no real properties; using the boundary cell
@@ -791,12 +788,12 @@ def compute_face_flux_contributions(
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
-                        thread_bc_pressure[ii, local_slot] = pressure_boundary
+                        thread_pressure_bc[ii, local_slot] = pressure_boundary
                     else:
                         # Neumann: flux_boundaries[ghost_1d] is the known flux (ft³/day).
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[pei, pej, pek]
+                        thread_flux_bc[ii, local_slot] = flux_boundaries[pei, pej, pek]
                     local_slot += 1
 
                 # WEST FACE (i-1, j, k) — boundary-only
@@ -806,7 +803,7 @@ def compute_face_flux_contributions(
                 if wi < 0:
                     pwi, pwj, pwk = wi + 1, wj + 1, wk + 1
                     transmissibility, capillary_flux, gravity_flux = (
-                        compute_fluxes_from_neighbour(
+                        compute_face_fluxes(
                             cell_indices=(i, j, k),
                             neighbour_indices=(0, wj, wk),  # clamp to first real cell
                             water_relative_mobility_grid=water_relative_mobility_grid,
@@ -832,18 +829,18 @@ def compute_face_flux_contributions(
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
-                        thread_bc_pressure[ii, local_slot] = pressure_boundary
+                        thread_pressure_bc[ii, local_slot] = pressure_boundary
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[pwi, pwj, pwk]
+                        thread_flux_bc[ii, local_slot] = flux_boundaries[pwi, pwj, pwk]
                     local_slot += 1
 
                 # SOUTH FACE (i, j+1, k)
                 si, sj, sk = i, j + 1, k
                 if sj < cell_count_y:
                     transmissibility, capillary_flux, gravity_flux = (
-                        compute_fluxes_from_neighbour(
+                        compute_face_fluxes(
                             cell_indices=(i, j, k),
                             neighbour_indices=(si, sj, sk),
                             water_relative_mobility_grid=water_relative_mobility_grid,
@@ -889,7 +886,7 @@ def compute_face_flux_contributions(
                 else:
                     psi, psj, psk = si + 1, sj + 1, sk + 1
                     transmissibility, capillary_flux, gravity_flux = (
-                        compute_fluxes_from_neighbour(
+                        compute_face_fluxes(
                             cell_indices=(i, j, k),
                             neighbour_indices=(si, cell_count_y - 1, sk),
                             water_relative_mobility_grid=water_relative_mobility_grid,
@@ -915,11 +912,11 @@ def compute_face_flux_contributions(
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
-                        thread_bc_pressure[ii, local_slot] = pressure_boundary
+                        thread_pressure_bc[ii, local_slot] = pressure_boundary
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[psi, psj, psk]
+                        thread_flux_bc[ii, local_slot] = flux_boundaries[psi, psj, psk]
                     local_slot += 1
 
                 # NORTH FACE (i, j-1, k) — boundary-only
@@ -927,7 +924,7 @@ def compute_face_flux_contributions(
                 if nj < 0:
                     pni, pnj, pnk = ni + 1, nj + 1, nk + 1
                     transmissibility, capillary_flux, gravity_flux = (
-                        compute_fluxes_from_neighbour(
+                        compute_face_fluxes(
                             cell_indices=(i, j, k),
                             neighbour_indices=(ni, 0, nk),
                             water_relative_mobility_grid=water_relative_mobility_grid,
@@ -953,18 +950,18 @@ def compute_face_flux_contributions(
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
-                        thread_bc_pressure[ii, local_slot] = pressure_boundary
+                        thread_pressure_bc[ii, local_slot] = pressure_boundary
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[pni, pnj, pnk]
+                        thread_flux_bc[ii, local_slot] = flux_boundaries[pni, pnj, pnk]
                     local_slot += 1
 
                 # BOTTOM FACE (i, j, k+1)
                 bi, bj, bk = i, j, k + 1
                 if bk < cell_count_z:
                     transmissibility, capillary_flux, gravity_flux = (
-                        compute_fluxes_from_neighbour(
+                        compute_face_fluxes(
                             cell_indices=(i, j, k),
                             neighbour_indices=(bi, bj, bk),
                             water_relative_mobility_grid=water_relative_mobility_grid,
@@ -1010,7 +1007,7 @@ def compute_face_flux_contributions(
                 else:
                     pbi, pbj, pbk = bi + 1, bj + 1, bk + 1
                     transmissibility, capillary_flux, gravity_flux = (
-                        compute_fluxes_from_neighbour(
+                        compute_face_fluxes(
                             cell_indices=(i, j, k),
                             neighbour_indices=(bi, bj, cell_count_z - 1),
                             water_relative_mobility_grid=water_relative_mobility_grid,
@@ -1036,11 +1033,11 @@ def compute_face_flux_contributions(
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
-                        thread_bc_pressure[ii, local_slot] = pressure_boundary
+                        thread_pressure_bc[ii, local_slot] = pressure_boundary
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[pbi, pbj, pbk]
+                        thread_flux_bc[ii, local_slot] = flux_boundaries[pbi, pbj, pbk]
                     local_slot += 1
 
                 # TOP FACE (i, j, k-1) — boundary-only
@@ -1048,7 +1045,7 @@ def compute_face_flux_contributions(
                 if tk < 0:
                     pti, ptj, ptk = ti + 1, tj + 1, tk + 1
                     transmissibility, capillary_flux, gravity_flux = (
-                        compute_fluxes_from_neighbour(
+                        compute_face_fluxes(
                             cell_indices=(i, j, k),
                             neighbour_indices=(ti, tj, 0),
                             water_relative_mobility_grid=water_relative_mobility_grid,
@@ -1074,11 +1071,11 @@ def compute_face_flux_contributions(
                     if not np.isnan(pressure_boundary):
                         thread_is_dirichlet[ii, local_slot] = True
                         thread_is_neumann[ii, local_slot] = False
-                        thread_bc_pressure[ii, local_slot] = pressure_boundary
+                        thread_pressure_bc[ii, local_slot] = pressure_boundary
                     else:
                         thread_is_dirichlet[ii, local_slot] = False
                         thread_is_neumann[ii, local_slot] = True
-                        thread_bc_flux[ii, local_slot] = flux_boundaries[pti, ptj, ptk]
+                        thread_flux_bc[ii, local_slot] = flux_boundaries[pti, ptj, ptk]
                     local_slot += 1
 
         entries_written_per_i_slice[ii] = local_slot
@@ -1116,7 +1113,7 @@ def compute_face_flux_contributions(
                 transmissibility = thread_transmissibility[ii, slot]
                 diagonal_additions[owner] += transmissibility
                 rhs_additions[owner] += (
-                    transmissibility * thread_bc_pressure[ii, slot]
+                    transmissibility * thread_pressure_bc[ii, slot]
                     + thread_rhs_term[ii, slot]
                 )
                 slot += 1
@@ -1125,7 +1122,7 @@ def compute_face_flux_contributions(
                 #   rhs += q_bc (known flux, ft³/day, applied directly)
                 # No diagonal or off-diagonal contribution.
                 owner = thread_owner_cell[ii, slot]
-                rhs_additions[owner] += thread_bc_flux[ii, slot]
+                rhs_additions[owner] += thread_flux_bc[ii, slot]
                 slot += 1
             else:
                 # Interior-interior pair: two consecutive slots share the same face.
@@ -1164,7 +1161,7 @@ def compute_face_flux_contributions(
 
 
 @numba.njit(cache=True, inline="always")
-def compute_fluxes_from_neighbour(
+def compute_face_fluxes(
     cell_indices: ThreeDimensions,
     neighbour_indices: ThreeDimensions,
     face_transmissibility: float,
@@ -1201,8 +1198,6 @@ def compute_fluxes_from_neighbour(
         - Total capillary flux (ft³/day)
         - Total gravity flux (ft³/day)
     """
-    # Calculate pressure differences relative to current cell (Neighbour - Current)
-    # These represent the gradients driving flow from neighbour to current cell, or vice versa
     oil_water_capillary_pressure_difference = (
         oil_water_capillary_pressure_grid[neighbour_indices]
         - oil_water_capillary_pressure_grid[cell_indices]
@@ -1304,7 +1299,7 @@ def compute_fluxes_from_neighbour(
     return (total_transmissibility, total_capillary_flux, total_gravity_flux)
 
 
-def compute_well_contributions(
+def assemble_well_contributions(
     current_pressure_grid: ThreeDimensionalGrid,
     water_relative_mobility_grid: ThreeDimensionalGrid,
     oil_relative_mobility_grid: ThreeDimensionalGrid,
@@ -1355,7 +1350,7 @@ def compute_well_contributions(
     water_compressibility_grid = fluid_properties.water_compressibility_grid
     oil_compressibility_grid = fluid_properties.oil_compressibility_grid
     gas_compressibility_grid = fluid_properties.gas_compressibility_grid
-    oil_viscosity_grid = fluid_properties.oil_viscosity_grid
+    oil_viscosity_grid = fluid_properties.oil_effective_viscosity_grid
     water_viscosity_grid = fluid_properties.water_viscosity_grid
     gas_viscosity_grid = fluid_properties.gas_viscosity_grid
     gas_fvf_grid = fluid_properties.gas_formation_volume_factor_grid
@@ -1411,7 +1406,6 @@ def compute_well_contributions(
             is_gas = injected_phase == FluidPhase.GAS
 
             if is_gas:
-                phase_mobility = gas_relative_mobility_grid[i, j, k]
                 phase_compressibility = typing.cast(
                     float,
                     injected_fluid.get_compressibility(
@@ -1419,7 +1413,6 @@ def compute_well_contributions(
                     ),
                 )
             else:
-                phase_mobility = water_relative_mobility_grid[i, j, k]
                 phase_compressibility = typing.cast(
                     float,
                     injected_fluid.get_compressibility(
@@ -1443,12 +1436,17 @@ def compute_well_contributions(
                     pressure=cell_pressure, temperature=cell_temperature
                 ),
             )
-
+            total_mobility = typing.cast(
+                float,
+                gas_relative_mobility_grid[i, j, k]
+                + oil_relative_mobility_grid[i, j, k]
+                + water_relative_mobility_grid[i, j, k],
+            )
             effective_bhp = well.get_bottom_hole_pressure(
                 pressure=cell_pressure,
                 temperature=cell_temperature,
                 phase_viscosity=phase_viscosity,
-                phase_mobility=phase_mobility,
+                phase_mobility=total_mobility,
                 well_index=well_index,
                 fluid=injected_fluid,
                 formation_volume_factor=phase_fvf,
@@ -1469,29 +1467,30 @@ def compute_well_contributions(
                 )
                 continue
 
-            if abs(effective_bhp - cell_pressure) > 1e6:
-                logger.warning(
-                    "Extreme BHP for injection well %r "
-                    "at cell (%d, %d, %d): %.2e psi "
-                    "(reservoir pressure: %.1f psi).",
-                    well.name,
-                    i,
-                    j,
-                    k,
-                    effective_bhp,
-                    cell_pressure,
-                )
+            if config.warn_well_anomalies:
+                if abs(effective_bhp - cell_pressure) > 1e6:
+                    logger.warning(
+                        "Extreme BHP for injection well %r "
+                        "at cell (%d, %d, %d): %.2e psi "
+                        "(reservoir pressure: %.1f psi).",
+                        well.name,
+                        i,
+                        j,
+                        k,
+                        effective_bhp,
+                        cell_pressure,
+                    )
 
-            if cell_pressure > effective_bhp and config.warn_well_anomalies:
-                _warn_injection_pressure(
-                    bhp=effective_bhp,
-                    cell_pressure=cell_pressure,
-                    well_name=well.name,
-                    time=time,
-                    cell=(i, j, k),
-                )
+                if cell_pressure > effective_bhp:
+                    _warn_injection_pressure(
+                        bhp=effective_bhp,
+                        cell_pressure=cell_pressure,
+                        well_name=well.name,
+                        time=time,
+                        cell=(i, j, k),
+                    )
 
-            phase_index = well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
+            phase_index = well_index * total_mobility * md_per_cp_to_ft2_per_psi_per_day
             if is_gas and use_pseudo_pressure:
                 # Use linearized pseudo pressure term
                 _, pp_table = get_pseudo_pressure_table(
@@ -1553,6 +1552,13 @@ def compute_well_contributions(
                     water_viscosity=water_viscosity_grid[i, j, k],
                 )
 
+            total_mobility = typing.cast(
+                float,
+                gas_relative_mobility_grid[i, j, k]
+                + oil_relative_mobility_grid[i, j, k]
+                + water_relative_mobility_grid[i, j, k],
+            )
+
             water_bhp = np.nan
             oil_bhp = np.nan
             gas_bhp = np.nan
@@ -1590,7 +1596,7 @@ def compute_well_contributions(
                     pressure=cell_pressure,
                     temperature=cell_temperature,
                     phase_viscosity=phase_viscosity,
-                    phase_mobility=phase_mobility,
+                    phase_mobility=total_mobility,  # Use total mobility to compute the effective bhp
                     well_index=well_index,
                     fluid=produced_fluid,
                     formation_volume_factor=phase_fvf,
@@ -1612,27 +1618,28 @@ def compute_well_contributions(
                     )
                     continue
 
-                if abs(effective_bhp - cell_pressure) > 1e6:
-                    logger.warning(
-                        "Extreme BHP for production well %r "
-                        "at cell (%d,%d,%d): %.2e psi "
-                        "(reservoir pressure: %.1f psi).",
-                        well.name,
-                        i,
-                        j,
-                        k,
-                        effective_bhp,
-                        cell_pressure,
-                    )
+                if config.warn_well_anomalies:
+                    if abs(effective_bhp - cell_pressure) > 1e6:
+                        logger.warning(
+                            "Extreme BHP for production well %r "
+                            "at cell (%d,%d,%d): %.2e psi "
+                            "(reservoir pressure: %.1f psi).",
+                            well.name,
+                            i,
+                            j,
+                            k,
+                            effective_bhp,
+                            cell_pressure,
+                        )
 
-                if cell_pressure < effective_bhp and config.warn_well_anomalies:
-                    _warn_production_pressure(
-                        bhp=effective_bhp,
-                        cell_pressure=cell_pressure,
-                        well_name=well.name,
-                        time=time,
-                        cell=(i, j, k),
-                    )
+                    if cell_pressure < effective_bhp:
+                        _warn_production_pressure(
+                            bhp=effective_bhp,
+                            cell_pressure=cell_pressure,
+                            well_name=well.name,
+                            time=time,
+                            cell=(i, j, k),
+                        )
 
                 phase_index = (
                     well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
@@ -1654,9 +1661,7 @@ def compute_well_contributions(
                         (m_bhp - m_cell + dm_dp * cell_pressure),  # type: ignore[arg-type]
                         dm_dp,  # type: ignore[arg-type]
                     )
-                    drawdown = m_bhp - m_cell
                 else:
-                    drawdown = effective_bhp - cell_pressure
                     _add_bhp_contribution(cell_1d_index, phase_index, effective_bhp)
 
                 if produced_phase == FluidPhase.GAS:
