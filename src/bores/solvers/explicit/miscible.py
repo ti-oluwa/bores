@@ -1220,7 +1220,7 @@ def compute_well_rate_grids(
             # Build primary phase context if using CoupledRateControl
             primary_phase_context = {}
             if is_couple_controlled:
-                primary_phase_context = well.control.build_primary_phase_context(  # type: ignore
+                primary_phase_context = well.control.build_context(  # type: ignore
                     produced_fluids=well.produced_fluids,
                     oil_mobility=typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]

@@ -4,25 +4,16 @@ from contextvars import ContextVar
 import attrs
 import numpy as np
 import numpy.typing as npt
-from typing_extensions import Self, TypedDict
+from typing_extensions import Self
 
-from bores.errors import ValidationError
 from bores.serialization import Serializable, deserialize_ndarray, serialize_ndarray
 from bores.types import T
-from bores.utils import clip
 
 DType = typing.TypeVar("DType", float, np.floating)
 ShapeT = typing.TypeVar("ShapeT", bound=typing.Tuple[int, ...])
 
 
-__all__ = [
-    "BottomHolePressure",
-    "BottomHolePressure",
-    "PhaseRange",
-    "Range",
-    "Rates",
-    "SparseTensor",
-]
+__all__ = ["BottomHolePressure", "BottomHolePressure", "Rates", "SparseTensor"]
 
 
 class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
@@ -1249,59 +1240,6 @@ class PhaseTensorsProxy(typing.Generic[DType, ShapeT]):
             `DType`.
         """
         return self.water[key], self.oil[key], self.gas[key]
-
-
-@attrs.frozen
-class Range(Serializable):
-    """
-    Class representing minimum and maximum values.
-    """
-
-    min: float
-    """Minimum value."""
-    max: float
-    """Maximum value."""
-
-    def __attrs_post_init__(self) -> None:
-        if self.min > self.max:
-            raise ValidationError("Minimum value cannot be greater than maximum value.")
-
-    def clip(self, value: T) -> T:
-        """
-        Clips the given value between the minimum and maximum values.
-
-        :param value: The value to be clipped.
-        :return: The clipped value.
-        """
-        return clip(value, self.min, self.max)
-
-    def __len__(self) -> int:
-        return 2
-
-    def __iter__(self) -> typing.Iterator[float]:
-        yield self.min
-        yield self.max
-
-    def __contains__(self, item: float) -> bool:
-        return self.min <= item <= self.max
-
-    def __getitem__(self, index: int) -> float:
-        if index == 0:
-            return self.min
-        elif index == 1:
-            return self.max
-        else:
-            raise IndexError("Index out of range for Range. Valid indices are 0 and 1.")
-
-
-class PhaseRange(TypedDict):
-    """
-    Dictionary holding ranges for different phases.
-    """
-
-    oil: Range
-    water: Range
-    gas: Range
 
 
 class ContextFlag(typing.Generic[T]):

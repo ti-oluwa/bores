@@ -37,6 +37,27 @@ __all__ = ["ModelState", "validate_state"]
 
 @typing.final
 @attrs.frozen(slots=True, eq=False, hash=False)
+class RatesInfo(Serializable, typing.Generic[NDimension]):
+    injection_rates: Rates[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas injection volumetric rates at this state in ft³/day"""
+    production_rates: Rates[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas production volumetric  rates at this state in ft³/day"""
+    injection_mass_rates: Rates[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas injection mass rates at this state in lbm/day"""
+    production_mass_rates: Rates[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas production mass rates at this state in lbm/day"""
+    injection_fvfs: FormationVolumeFactors[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas injection formation volume factors at this state in ft³/SCF or bbls/STB"""
+    production_fvfs: FormationVolumeFactors[float, NDimension]
+    """Holds sparse tensors for oil, water, and gas production formation volume factors at this state in ft³/SCF or bbls/STB"""
+    injection_bhps: BottomHolePressures[float, NDimension]
+    """Sparse tensor holding injection well(s) cell perforation bottom hole pressure at this state in psi"""
+    production_bhps: BottomHolePressures[float, NDimension]
+    """Sparse tensor holding production well(s) cell perforation bottom hole pressure at this state in psi"""
+
+
+@typing.final
+@attrs.frozen(slots=True, eq=False, hash=False)
 class ModelState(
     Serializable,
     typing.Generic[NDimension],
@@ -55,18 +76,8 @@ class ModelState(
     """The reservoir model at this state"""
     wells: Wells[NDimension]
     """The wells configuration at this state"""
-    injection_rates: Rates[float, NDimension]
-    """Holds sparse tensors for oil, water, and gas injection rates at this state in ft³/day"""
-    production_rates: Rates[float, NDimension]
-    """Holds sparse tensors for oil, water, and gas production rates at this state in ft³/day"""
-    injection_formation_volume_factors: FormationVolumeFactors[float, NDimension]
-    """Holds sparse tensors for oil, water, and gas injection formation volume factors at this state in ft³/SCF or bbls/STB"""
-    production_formation_volume_factors: FormationVolumeFactors[float, NDimension]
-    """Holds sparse tensors for oil, water, and gas production formation volume factors at this state in ft³/SCF or bbls/STB"""
-    injection_bhps: BottomHolePressures[float, NDimension]
-    """Sparse tensor holding injection well(s) cell perforation bottom hole pressure at this state in psi"""
-    production_bhps: BottomHolePressures[float, NDimension]
-    """Sparse tensor holding production well(s) cell perforation bottom hole pressure at this state in psi"""
+    rates: RatesInfo[NDimension]
+    """The well rate information at this state"""
     relative_permeabilities: RelPermGrids[NDimension]
     """Relative permeabilities at this state"""
     relative_mobilities: RelativeMobilityGrids[NDimension]
@@ -101,16 +112,6 @@ class ModelState(
     def time_in_years(self) -> float:
         """Time elapsed at this state in years"""
         return self.time / c.DAYS_PER_YEAR * 86400
-
-    @property
-    def injection_fvfs(self) -> FormationVolumeFactors[float, NDimension]:
-        """Formation volume factors for injection phases at this state in ft³/SCF or bbls/STB"""
-        return self.injection_formation_volume_factors
-
-    @property
-    def production_fvfs(self) -> FormationVolumeFactors[float, NDimension]:
-        """Formation volume factors for production phases at this state in ft³/SCF or bbls/STB"""
-        return self.production_formation_volume_factors
 
     @property
     def average_pressure(self) -> float:
@@ -376,29 +377,27 @@ def validate_state(
             ),
         )
         # Reconstruct model and model state with coerced data
-        model = ReservoirModel(
-            grid_shape=model.grid_shape,
-            cell_dimension=model.cell_dimension,
-            thickness_grid=thickness_grid,
-            fluid_properties=fluid_properties,  # type:ignore[arg-type]
-            rock_properties=rock_properties,  # type:ignore[arg-type]
-            saturation_history=saturation_history,
-            boundary_conditions=model.boundary_conditions,  # type: ignore
-            dip_angle=model.dip_angle,
-            dip_azimuth=model.dip_azimuth,
+        model = typing.cast(
+            ReservoirModel[NDimension],
+            ReservoirModel(
+                grid_shape=model.grid_shape,
+                cell_dimension=model.cell_dimension,
+                thickness_grid=thickness_grid,
+                fluid_properties=fluid_properties,  # type:ignore[arg-type]
+                rock_properties=rock_properties,  # type:ignore[arg-type]
+                saturation_history=saturation_history,
+                boundary_conditions=model.boundary_conditions,  # type: ignore
+                dip_angle=model.dip_angle,
+                dip_azimuth=model.dip_azimuth,
+            ),
         )
-        state = ModelState(
+        return ModelState(
             step=state.step,
             step_size=state.step_size,
             time=state.time,
             model=model,
             wells=state.wells,
-            injection_rates=state.injection_rates,
-            production_rates=state.production_rates,
-            injection_formation_volume_factors=state.injection_formation_volume_factors,
-            production_formation_volume_factors=state.production_formation_volume_factors,
-            injection_bhps=state.injection_bhps,
-            production_bhps=state.production_bhps,
+            rates=state.rates,
             relative_permeabilities=relative_permeabilities,
             relative_mobilities=relative_mobilities,
             capillary_pressures=capillary_pressures,

@@ -698,11 +698,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
             )
             step_in_days = st.step_size * days_per_second
 
-            oil_fvf_grid = st.production_formation_volume_factors.oil.array()
-            water_fvf_grid = st.production_formation_volume_factors.water.array()
+            oil_fvf_grid = st.rates.production_fvfs.oil.array()
+            water_fvf_grid = st.rates.production_fvfs.water.array()
 
-            oil_production = st.production_rates.oil.array()
-            water_production = st.production_rates.water.array()
+            oil_production = st.rates.production_rates.oil.array()
+            water_production = st.rates.production_rates.water.array()
 
             # Avoid division by zero
             with np.errstate(divide="ignore", invalid="ignore"):
@@ -941,11 +941,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 st.model.fluid_properties.gas_solubility_in_water_grid
             )
 
-            oil_fvf_grid = st.production_formation_volume_factors.oil.array()
-            water_fvf_grid = st.production_formation_volume_factors.water.array()
+            oil_fvf_grid = st.rates.production_fvfs.oil.array()
+            water_fvf_grid = st.rates.production_fvfs.water.array()
 
-            oil_production = st.production_rates.oil.array()
-            water_production = st.production_rates.water.array()
+            oil_production = st.rates.production_rates.oil.array()
+            water_production = st.rates.production_rates.water.array()
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 oil_production_stb = np.where(
@@ -1145,9 +1145,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            oil_production = state.production_rates.oil.array()
+            oil_production = state.rates.production_rates.oil.array()
             step_in_days = state.step_size * days_per_second
-            oil_fvf_grid = state.production_formation_volume_factors.oil.array()
+            oil_fvf_grid = state.rates.production_fvfs.oil.array()
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 oil_production_stb = np.where(
@@ -1225,9 +1225,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            gas_production = state.production_rates.gas.array()
+            gas_production = state.rates.production_rates.gas.array()
             step_in_days = state.step_size * days_per_second
-            gas_fvf_grid = state.production_formation_volume_factors.gas.array()
+            gas_fvf_grid = state.rates.production_fvfs.gas.array()
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 gas_production_scf = np.where(
@@ -1306,12 +1306,12 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            water_production = state.production_rates.water.array()
+            water_production = state.rates.production_rates.water.array()
             if water_production is None:
                 continue
 
             step_in_days = state.step_size * days_per_second
-            water_fvf_grid = state.production_formation_volume_factors.water.array()
+            water_fvf_grid = state.rates.production_fvfs.water.array()
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 water_production_stb = np.where(
@@ -1392,7 +1392,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state = self._states[t]
 
             # Injection is in ft³/day, convert to STB using FVF
-            oil_injection = state.injection_rates.oil
+            oil_injection = state.rates.injection_rates.oil
             step_in_days = state.step_size * days_per_second
             oil_fvf_grid = state.model.fluid_properties.oil_formation_volume_factor_grid
             oil_injection_stb = oil_injection * ft3_to_bbl / oil_fvf_grid
@@ -1467,9 +1467,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            gas_injection = state.injection_rates.gas.array()
+            gas_injection = state.rates.injection_rates.gas.array()
             step_in_days = state.step_size * days_per_second
-            gas_fvf_grid = state.injection_formation_volume_factors.gas.array()
+            gas_fvf_grid = state.rates.injection_fvfs.gas.array()
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 gas_injection_scf = np.where(
@@ -1548,9 +1548,9 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 continue
             state = self._states[t]
 
-            water_injection = state.injection_rates.water.array()
+            water_injection = state.rates.injection_rates.water.array()
             step_in_days = state.step_size * days_per_second
-            water_fvf_grid = state.injection_formation_volume_factors.water.array()
+            water_fvf_grid = state.rates.injection_fvfs.water.array()
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 water_injection_stb = np.where(
@@ -2115,7 +2115,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 if s > to_step:
                     break
                 st = self._states[s]
-                oil_production = st.production_rates.oil
+                oil_production = st.rates.production_rates.oil
                 step_in_days = st.step_size * days_per_second
                 solution_gor_grid = (
                     st.model.fluid_properties.solution_gas_to_oil_ratio_grid
@@ -2123,11 +2123,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 gas_solubility_in_water_grid = (
                     st.model.fluid_properties.gas_solubility_in_water_grid
                 )
-                oil_fvf_grid = st.production_formation_volume_factors.oil.array()
-                water_fvf_grid = st.production_formation_volume_factors.water.array()
+                oil_fvf_grid = st.rates.production_fvfs.oil.array()
+                water_fvf_grid = st.rates.production_fvfs.water.array()
 
-                oil_production = st.production_rates.oil.array()
-                water_production = st.production_rates.water.array()
+                oil_production = st.rates.production_rates.oil.array()
+                water_production = st.rates.production_rates.water.array()
 
                 with np.errstate(divide="ignore", invalid="ignore"):
                     oil_production_stb = np.where(
@@ -2272,8 +2272,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
         water_rate = 0.0
         oil_production_stb = None
 
-        if (oil_production := state.production_rates.oil) is not None:
-            oil_fvf_grid = state.production_formation_volume_factors.oil.array()
+        if (oil_production := state.rates.production_rates.oil) is not None:
+            oil_fvf_grid = state.rates.production_fvfs.oil.array()
             oil_prod_arr = oil_production.array()
             with np.errstate(divide="ignore", invalid="ignore"):
                 oil_production_stb = np.where(
@@ -2285,8 +2285,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 oil_production_stb = np.where(mask, oil_production_stb, 0.0)
             oil_rate = np.nansum(oil_production_stb)
 
-        if (gas_production := state.production_rates.gas) is not None:
-            gas_fvf_grid = state.production_formation_volume_factors.gas.array()
+        if (gas_production := state.rates.production_rates.gas) is not None:
+            gas_fvf_grid = state.rates.production_fvfs.gas.array()
             gas_prod_arr = gas_production.array()
             with np.errstate(divide="ignore", invalid="ignore"):
                 gas_production_scf = np.where(
@@ -2306,8 +2306,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
         gas_rate = free_gas_rate + solution_gas_rate
 
-        if (water_production := state.production_rates.water) is not None:
-            water_fvf_grid = state.production_formation_volume_factors.water.array()
+        if (water_production := state.rates.production_rates.water) is not None:
+            water_fvf_grid = state.rates.production_fvfs.water.array()
             water_prod_arr = water_production.array()
             with np.errstate(divide="ignore", invalid="ignore"):
                 water_production_stb = np.where(
@@ -2388,8 +2388,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
         gas_rate = 0.0
         water_rate = 0.0
 
-        if (oil_injection := state.injection_rates.oil) is not None:
-            oil_fvf_grid = state.injection_formation_volume_factors.oil.array()
+        if (oil_injection := state.rates.injection_rates.oil) is not None:
+            oil_fvf_grid = state.rates.injection_fvfs.oil.array()
             oil_inj_arr = oil_injection.array()
             with np.errstate(divide="ignore", invalid="ignore"):
                 oil_injection_stb = np.where(
@@ -2401,8 +2401,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 oil_injection_stb = np.where(mask, oil_injection_stb, 0.0)
             oil_rate = np.nansum(oil_injection_stb)
 
-        if (gas_injection := state.injection_rates.gas) is not None:
-            gas_fvf_grid = state.injection_formation_volume_factors.gas.array()
+        if (gas_injection := state.rates.injection_rates.gas) is not None:
+            gas_fvf_grid = state.rates.injection_fvfs.gas.array()
             gas_inj_arr = gas_injection.array()
             with np.errstate(divide="ignore", invalid="ignore"):
                 gas_injection_scf = np.where(
@@ -2414,8 +2414,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 gas_injection_scf = np.where(mask, gas_injection_scf, 0.0)
             gas_rate = np.nansum(gas_injection_scf)
 
-        if (water_injection := state.injection_rates.water) is not None:
-            water_fvf_grid = state.injection_formation_volume_factors.water.array()
+        if (water_injection := state.rates.injection_rates.water) is not None:
+            water_fvf_grid = state.rates.injection_fvfs.water.array()
             water_inj_arr = water_injection.array()
             with np.errstate(divide="ignore", invalid="ignore"):
                 water_injection_stb = np.where(
@@ -2640,11 +2640,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 st.model.fluid_properties.gas_solubility_in_water_grid
             )
 
-            oil_fvf_grid = st.production_formation_volume_factors.oil.array()
-            water_fvf_grid = st.production_formation_volume_factors.water.array()
+            oil_fvf_grid = st.rates.production_fvfs.oil.array()
+            water_fvf_grid = st.rates.production_fvfs.water.array()
 
-            oil_production = st.production_rates.oil.array()
-            water_production = st.production_rates.water.array()
+            oil_production = st.rates.production_rates.oil.array()
+            water_production = st.rates.production_rates.water.array()
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 oil_production_stb = np.where(
@@ -2675,8 +2675,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
             else initial_solution_gor
         )
 
-        inj_gas_fvf_arr = state.injection_formation_volume_factors.gas.array()
-        inj_water_fvf_arr = state.injection_formation_volume_factors.water.array()
+        inj_gas_fvf_arr = state.rates.injection_fvfs.gas.array()
+        inj_water_fvf_arr = state.rates.injection_fvfs.water.array()
 
         injected_gas_fvf = (
             float(np.nanmean(inj_gas_fvf_arr[inj_gas_fvf_arr > 0]))
@@ -3220,7 +3220,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
                 average_mobility=0.0,
             )
 
-        if state.production_rates is None:
+        if state.rates.production_rates is None:
             logger.warning("No production data available for productivity analysis")
             return ProductivityAnalysis(
                 total_flow_rate=0.0,
@@ -3288,13 +3288,13 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
                 # Get actual cell flow rate and fluid properties
                 if phase == "oil":
-                    if state.production_rates.oil is None:
+                    if state.rates.production_rates.oil is None:
                         continue
 
                     oil_fvf = float(
-                        state.production_formation_volume_factors.oil[i, j, k]  # type: ignore
+                        state.rates.production_fvfs.oil[i, j, k]  # type: ignore
                     )
-                    cell_flow_rate_ft3 = state.production_rates.oil[i, j, k]  # type: ignore  # ft³/day
+                    cell_flow_rate_ft3 = state.rates.production_rates.oil[i, j, k]  # type: ignore  # ft³/day
                     with np.errstate(divide="ignore", invalid="ignore"):
                         cell_flow_rate_stb = np.where(  # STB/day
                             oil_fvf > 0,
@@ -3303,12 +3303,12 @@ class ModelAnalyst(typing.Generic[NDimension]):
                         )
 
                 elif phase == "water":
-                    if state.production_rates.water is None:
+                    if state.rates.production_rates.water is None:
                         continue
                     water_fvf = float(
-                        state.production_formation_volume_factors.water[i, j, k]  # type: ignore
+                        state.rates.production_fvfs.water[i, j, k]  # type: ignore
                     )
-                    cell_flow_rate_ft3 = state.production_rates.water[  # type: ignore
+                    cell_flow_rate_ft3 = state.rates.production_rates.water[  # type: ignore
                         i, j, k
                     ]  # ft³/day
 
@@ -3320,12 +3320,12 @@ class ModelAnalyst(typing.Generic[NDimension]):
                         )
 
                 else:  # gas
-                    if state.production_rates.gas is None:
+                    if state.rates.production_rates.gas is None:
                         continue
                     gas_fvf = float(
-                        state.production_formation_volume_factors.gas[i, j, k]  # type: ignore
+                        state.rates.production_fvfs.gas[i, j, k]  # type: ignore
                     )
-                    cell_flow_rate_ft3 = state.production_rates.gas[i, j, k]  # type: ignore  # ft³/day
+                    cell_flow_rate_ft3 = state.rates.production_rates.gas[i, j, k]  # type: ignore  # ft³/day
                     with np.errstate(divide="ignore", invalid="ignore"):
                         cell_flow_rate_stb = np.where(  # STB/day
                             gas_fvf > 0,
@@ -3493,8 +3493,8 @@ class ModelAnalyst(typing.Generic[NDimension]):
             state.model.fluid_properties.water_formation_volume_factor_grid
         )
 
-        inj_gas_fvf_arr = state.injection_formation_volume_factors.gas.array()
-        inj_water_fvf_arr = state.injection_formation_volume_factors.water.array()
+        inj_gas_fvf_arr = state.rates.injection_fvfs.gas.array()
+        inj_water_fvf_arr = state.rates.injection_fvfs.water.array()
 
         avg_injected_gas_fvf = (
             float(np.nanmean(inj_gas_fvf_arr[inj_gas_fvf_arr > 0]))
@@ -3532,11 +3532,11 @@ class ModelAnalyst(typing.Generic[NDimension]):
             )
             step_in_days = st.step_size * days_per_second
 
-            oil_fvf_grid = st.production_formation_volume_factors.oil.array()
-            water_fvf_grid = st.production_formation_volume_factors.water.array()
+            oil_fvf_grid = st.rates.production_fvfs.oil.array()
+            water_fvf_grid = st.rates.production_fvfs.water.array()
 
-            oil_production = st.production_rates.oil.array()
-            water_production = st.production_rates.water.array()
+            oil_production = st.rates.production_rates.oil.array()
+            water_production = st.rates.production_rates.water.array()
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 oil_production_stb = np.where(

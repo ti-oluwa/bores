@@ -96,13 +96,13 @@ def compute_material_balance_errors(
     rock: RockProperties[ThreeDimensions],
     thickness_grid: NDimensionalGrid[ThreeDimensions],
     cell_dimension: typing.Tuple[float, float],
-    injection_mass_rates: Rates[float, ThreeDimensions],
-    production_mass_rates: Rates[float, ThreeDimensions],
     time_step_size: float,
+    injection_mass_rates: typing.Optional[Rates[float, ThreeDimensions]] = None,
+    production_mass_rates: typing.Optional[Rates[float, ThreeDimensions]] = None,
 ) -> MaterialBalanceErrors:
     """
     Compute per-phase material balance errors for a timestep using the mass formulation.
-    
+
     The MBE for each phase is:
 
         MBE = (mass_new - mass_old) - net_mass_inflow * dt
@@ -151,10 +151,14 @@ def compute_material_balance_errors(
     # oil density to get lb/day. Use current density as the best estimate of the
     # density at which fluid entered/left the reservoir this step.
     net_mass_oil_inflow = 0.0
-    for key in injection_mass_rates.oil:
-        net_mass_oil_inflow += float(injection_mass_rates.oil[key])
-    for key in production_mass_rates.oil:
-        net_mass_oil_inflow += float(production_mass_rates.oil[key])
+    if injection_mass_rates is not None:
+        for key in injection_mass_rates.oil:
+            net_mass_oil_inflow += float(injection_mass_rates.oil[key])
+
+    if production_mass_rates is not None:
+        for key in production_mass_rates.oil:
+            net_mass_oil_inflow += float(production_mass_rates.oil[key])
+
     net_mass_oil_inflow *= time_step_in_days  # lb
 
     absolute_oil_mbe = oil_mass_change - net_mass_oil_inflow
@@ -179,10 +183,14 @@ def compute_material_balance_errors(
     water_mass_change = current_water_mass - previous_water_mass
 
     net_mass_water_inflow = 0.0
-    for key in injection_mass_rates.water:
-        net_mass_water_inflow += float(injection_mass_rates.water[key])
-    for key in production_mass_rates.water:
-        net_mass_water_inflow += float(production_mass_rates.water[key])
+    if injection_mass_rates is not None:
+        for key in injection_mass_rates.water:
+            net_mass_water_inflow += float(injection_mass_rates.water[key])
+
+    if production_mass_rates is not None:
+        for key in production_mass_rates.water:
+            net_mass_water_inflow += float(production_mass_rates.water[key])
+
     net_mass_water_inflow *= time_step_in_days  # lbm
 
     absolute_water_mbe = water_mass_change - net_mass_water_inflow
@@ -275,40 +283,48 @@ def compute_material_balance_errors(
     # Net mass gas inflow: includes free gas from the gas well rate stream, plus
     # solution gas carried by produced/injected oil and water.
     net_mass_gas_inflow = 0.0
-    for key in injection_mass_rates.gas:
-        net_mass_gas_inflow += float(injection_mass_rates.gas[key])
-    for key in production_mass_rates.gas:
-        net_mass_gas_inflow += float(production_mass_rates.gas[key])
 
-    # Solution gas carried in oil stream
-    for key in injection_mass_rates.oil:
-        i, j, k = key
-        alpha_solution_gor = float(current_alpha_solution_gor[i, j, k])
-        net_mass_gas_inflow += float(injection_mass_rates.oil[key]) * alpha_solution_gor
-    for key in production_mass_rates.oil:
-        i, j, k = key
-        alpha_solution_gor = float(current_alpha_solution_gor[i, j, k])
-        net_mass_gas_inflow += (
-            float(production_mass_rates.oil[key]) * alpha_solution_gor
-        )
+    if injection_mass_rates is not None:
+        for key in injection_mass_rates.gas:
+            net_mass_gas_inflow += float(injection_mass_rates.gas[key])
 
-    # Solution gas carried in water stream
-    for key in injection_mass_rates.water:
-        i, j, k = key
-        alpha_gas_solubility_in_water = float(
-            current_alpha_gas_solubility_in_water[i, j, k]
-        )
-        net_mass_gas_inflow += (
-            float(injection_mass_rates.water[key]) * alpha_gas_solubility_in_water
-        )
-    for key in production_mass_rates.water:
-        i, j, k = key
-        alpha_gas_solubility_in_water = float(
-            current_alpha_gas_solubility_in_water[i, j, k]
-        )
-        net_mass_gas_inflow += (
-            float(production_mass_rates.water[key]) * alpha_gas_solubility_in_water
-        )
+        # Solution gas carried in oil stream
+        for key in injection_mass_rates.oil:
+            i, j, k = key
+            alpha_solution_gor = float(current_alpha_solution_gor[i, j, k])
+            net_mass_gas_inflow += (
+                float(injection_mass_rates.oil[key]) * alpha_solution_gor
+            )
+
+        # Solution gas carried in water stream
+        for key in injection_mass_rates.water:
+            i, j, k = key
+            alpha_gas_solubility_in_water = float(
+                current_alpha_gas_solubility_in_water[i, j, k]
+            )
+            net_mass_gas_inflow += (
+                float(injection_mass_rates.water[key]) * alpha_gas_solubility_in_water
+            )
+
+    if production_mass_rates is not None:
+        for key in production_mass_rates.gas:
+            net_mass_gas_inflow += float(production_mass_rates.gas[key])
+
+        for key in production_mass_rates.oil:
+            i, j, k = key
+            alpha_solution_gor = float(current_alpha_solution_gor[i, j, k])
+            net_mass_gas_inflow += (
+                float(production_mass_rates.oil[key]) * alpha_solution_gor
+            )
+
+        for key in production_mass_rates.water:
+            i, j, k = key
+            alpha_gas_solubility_in_water = float(
+                current_alpha_gas_solubility_in_water[i, j, k]
+            )
+            net_mass_gas_inflow += (
+                float(production_mass_rates.water[key]) * alpha_gas_solubility_in_water
+            )
 
     net_mass_gas_inflow *= time_step_in_days  # lbm
 

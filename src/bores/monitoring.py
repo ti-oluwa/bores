@@ -455,9 +455,7 @@ class RunStats:
                 f"  Average Newton iterations  : {self.average_newton_iterations:.2f}"
             )
         lines.append("")
-        lines.append(
-            f"  Total absolute MBE        : {last.total_absolute_mbe:.3e} lbm"
-        )
+        lines.append(f"  Total absolute MBE        : {last.total_absolute_mbe:.3e} lbm")
         lines.append(
             f"  Total relative MBE        : {last.total_relative_mbe * 100:.2e}%"
         )
@@ -594,25 +592,27 @@ def build_well_diagnostics(
         cells = _expand_well_cells(well)
         oil_rate = _surface_rate_for_well_cells(
             cells,
-            state.injection_rates.oil,
-            state.injection_formation_volume_factors.oil,
+            state.rates.injection_rates.oil,
+            state.rates.injection_fvfs.oil,
             "oil",
         )
         water_rate = _surface_rate_for_well_cells(
             cells,
-            state.injection_rates.water,
-            state.injection_formation_volume_factors.water,
+            state.rates.injection_rates.water,
+            state.rates.injection_fvfs.water,
             "water",
         )
         gas_rate = _surface_rate_for_well_cells(
             cells,
-            state.injection_rates.gas,
-            state.injection_formation_volume_factors.gas,
+            state.rates.injection_rates.gas,
+            state.rates.injection_fvfs.gas,
             "gas",
         )
-        average_oil_bhp = _avg_bhp_for_well_cells(cells, state.injection_bhps.oil)
-        average_water_bhp = _avg_bhp_for_well_cells(cells, state.injection_bhps.water)
-        average_gas_bhp = _avg_bhp_for_well_cells(cells, state.injection_bhps.gas)
+        average_oil_bhp = _avg_bhp_for_well_cells(cells, state.rates.injection_bhps.oil)
+        average_water_bhp = _avg_bhp_for_well_cells(
+            cells, state.rates.injection_bhps.water
+        )
+        average_gas_bhp = _avg_bhp_for_well_cells(cells, state.rates.injection_bhps.gas)
         results.append(
             WellRateDiagnostics(
                 name=well.name,
@@ -630,25 +630,31 @@ def build_well_diagnostics(
         cells = _expand_well_cells(well)
         oil_rate = _surface_rate_for_well_cells(
             cells,
-            state.production_rates.oil,
-            state.production_formation_volume_factors.oil,
+            state.rates.production_rates.oil,
+            state.rates.production_fvfs.oil,
             "oil",
         )
         water_rate = _surface_rate_for_well_cells(
             cells,
-            state.production_rates.water,
-            state.production_formation_volume_factors.water,
+            state.rates.production_rates.water,
+            state.rates.production_fvfs.water,
             "water",
         )
         gas_rate = _surface_rate_for_well_cells(
             cells,
-            state.production_rates.gas,
-            state.production_formation_volume_factors.gas,
+            state.rates.production_rates.gas,
+            state.rates.production_fvfs.gas,
             "gas",
         )
-        average_oil_bhp = _avg_bhp_for_well_cells(cells, state.production_bhps.oil)
-        average_water_bhp = _avg_bhp_for_well_cells(cells, state.production_bhps.water)
-        average_gas_bhp = _avg_bhp_for_well_cells(cells, state.production_bhps.gas)
+        average_oil_bhp = _avg_bhp_for_well_cells(
+            cells, state.rates.production_bhps.oil
+        )
+        average_water_bhp = _avg_bhp_for_well_cells(
+            cells, state.rates.production_bhps.water
+        )
+        average_gas_bhp = _avg_bhp_for_well_cells(
+            cells, state.rates.production_bhps.gas
+        )
         results.append(
             WellRateDiagnostics(
                 name=well.name,
@@ -691,33 +697,33 @@ def build_step_diagnostics(
 
     # Aggregate totals
     oil_injection_rate = _convert_to_total_surface_rate(
-        rates=state.injection_rates,
-        fvfs=state.injection_formation_volume_factors,
+        rates=state.rates.injection_rates,
+        fvfs=state.rates.injection_fvfs,
         phase="oil",
     )
     water_injection_rate = _convert_to_total_surface_rate(
-        rates=state.injection_rates,
-        fvfs=state.injection_formation_volume_factors,
+        rates=state.rates.injection_rates,
+        fvfs=state.rates.injection_fvfs,
         phase="water",
     )
     gas_injection_rate = _convert_to_total_surface_rate(
-        rates=state.injection_rates,
-        fvfs=state.injection_formation_volume_factors,
+        rates=state.rates.injection_rates,
+        fvfs=state.rates.injection_fvfs,
         phase="gas",
     )
     oil_production_rate = _convert_to_total_surface_rate(
-        rates=state.production_rates,
-        fvfs=state.production_formation_volume_factors,
+        rates=state.rates.production_rates,
+        fvfs=state.rates.production_fvfs,
         phase="oil",
     )
     water_production_rate = _convert_to_total_surface_rate(
-        rates=state.production_rates,
-        fvfs=state.production_formation_volume_factors,
+        rates=state.rates.production_rates,
+        fvfs=state.rates.production_fvfs,
         phase="water",
     )
     gas_production_rate = _convert_to_total_surface_rate(
-        rates=state.production_rates,
-        fvfs=state.production_formation_volume_factors,
+        rates=state.rates.production_rates,
+        fvfs=state.rates.production_fvfs,
         phase="gas",
     )
 

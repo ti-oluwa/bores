@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "AdaptiveRateControl",
     "BHPControl",
-    "ControlResult",
+    "ControlInfo",
     "CoupledRateControl",
     "InjectionClamp",
     "ProductionClamp",
@@ -43,7 +43,7 @@ WellFluidTcon = typing.TypeVar("WellFluidTcon", bound=WellFluid, contravariant=T
 
 
 @attrs.frozen
-class ControlResult:
+class ControlInfo:
     """
     Combined result of a single well control evaluation.
 
@@ -452,14 +452,14 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
         **kwargs: typing.Any,
-    ) -> ControlResult:
+    ) -> ControlInfo:
         """
         Compute both the flow rate and effective bottom-hole pressure in a single pass.
 
         Rather than calling `get_flow_rate` and `get_bottom_hole_pressure` separately
         (which would duplicate expensive intermediate work such as pseudo-pressure
         table lookups and Z-factor averages), callers should use this method and
-        cache the returned `ControlResult`. The pressure solver can then
+        cache the returned `ControlInfo`. The pressure solver can then
         use `result.bhp` for the implicit coupling term while the saturation
         solver uses `result.rate`, guaranteeing consistency between the two.
 
@@ -482,7 +482,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         :param pvt_tables: PVT look-up tables for fluid properties.
         :param kwargs: Additional control-specific arguments (e.g. primary-phase
             context for `CoupledRateControl`).
-        :return: `ControlResult` containing the flow rate (bbl/day or
+        :return: `ControlInfo` containing the flow rate (bbl/day or
             ft³/day) and effective BHP (psi).
         """
         rate = self.get_flow_rate(
@@ -515,7 +515,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
             pvt_tables=pvt_tables,
             **kwargs,
         )
-        return ControlResult(rate=rate, bhp=bhp, is_bhp_control=self.is_bhp_control())
+        return ControlInfo(rate=rate, bhp=bhp, is_bhp_control=self.is_bhp_control())
 
 
 _WELL_CONTROLS: typing.Dict[str, typing.Type[WellControl]] = {}
@@ -735,7 +735,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
         **kwargs: typing.Any,
-    ) -> ControlResult:
+    ) -> ControlInfo:
         """
         Compute rate and BHP simultaneously for BHP control.
 
@@ -765,7 +765,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells.
         :param fluid_compressibility: Fluid compressibility (psi⁻¹).
         :param pvt_tables: PVT look-up tables for fluid properties.
-        :return: `ControlResult` with the Darcy rate and effective BHP.
+        :return: `ControlInfo` with the Darcy rate and effective BHP.
         :raises ValidationError: If `phase_mobility` is `None`.
         """
         if phase_mobility is None:
@@ -776,7 +776,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         if _disallow_flow(fluid=fluid, is_active=is_active) or (
             self.target_phase is not None and fluid.phase != self.target_phase
         ):
-            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=True)
+            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=True)
 
         bhp = self.bhp
 
@@ -847,7 +847,7 @@ class BHPControl(WellControl[WellFluidTcon]):
                 )
                 final_rate = clamped_rate
 
-        return ControlResult(rate=final_rate, bhp=effective_bhp, is_bhp_control=True)
+        return ControlInfo(rate=final_rate, bhp=effective_bhp, is_bhp_control=True)
 
     def __str__(self) -> str:
         """String representation."""
@@ -1130,7 +1130,7 @@ class RateControl(WellControl[WellFluidTcon]):
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
         **kwargs: typing.Any,
-    ) -> ControlResult:
+    ) -> ControlInfo:
         """
         Compute rate and effective BHP in a single pass for constant rate control.
 
@@ -1170,14 +1170,14 @@ class RateControl(WellControl[WellFluidTcon]):
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells.
         :param fluid_compressibility: Fluid compressibility (psi⁻¹).
         :param pvt_tables: PVT look-up tables for fluid properties.
-        :return: `ControlResult` with the flow rate and effective BHP.
+        :return: `ControlInfo` with the flow rate and effective BHP.
             When the BHP constraint cannot be satisfied both fields reflect the
             shut-in state: `rate=0`, `bhp=pressure`.
         """
         if _disallow_flow(fluid=fluid, is_active=is_active) or (
             self.target_phase is not None and fluid.phase != self.target_phase
         ):
-            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         # Allocated reservoir rate
         target_rate = self.target_rate * allocation_fraction * formation_volume_factor
@@ -1195,7 +1195,7 @@ class RateControl(WellControl[WellFluidTcon]):
                         f"(constant rate control - strict mode, pressure={pressure:.3f} psi)"
                     )
                     final_rate = clamped_rate
-            return ControlResult(rate=final_rate, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=final_rate, bhp=pressure, is_bhp_control=False)
 
         # Constrained mode: solve for required BHP once.
         bhp_limit = self.bhp_limit
@@ -1221,7 +1221,7 @@ class RateControl(WellControl[WellFluidTcon]):
                 f"Failed to compute required BHP for target rate {target_rate:.6f}: {exc}. "
                 "Returning shut-in state (rate=0, bhp=reservoir pressure)."
             )
-            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         logger.debug(
             f"Required BHP: {required_bhp:.6f} psi, Reservoir pressure: {pressure:.6f} psi, "
@@ -1240,7 +1240,7 @@ class RateControl(WellControl[WellFluidTcon]):
                     f"BHP limit {bhp_limit:.3f} psi (required BHP: {required_bhp:.3f} psi, "
                     f"reservoir pressure: {pressure:.3f} psi). Returning shut-in state."
                 )
-                return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
+                return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         # Cap the reported BHP at bhp_limit so it never exceeds the declared
         # constraint even when the solve lands exactly on the boundary.
@@ -1280,7 +1280,7 @@ class RateControl(WellControl[WellFluidTcon]):
                     )
                     final_bhp = clamped_bhp
 
-        return ControlResult(rate=final_rate, bhp=final_bhp, is_bhp_control=False)
+        return ControlInfo(rate=final_rate, bhp=final_bhp, is_bhp_control=False)
 
     def update(
         self,
@@ -1661,7 +1661,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
         **kwargs: typing.Any,
-    ) -> ControlResult:
+    ) -> ControlInfo:
         """
         Compute rate and effective BHP in a single pass for adaptive rate control.
 
@@ -1706,7 +1706,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells.
         :param fluid_compressibility: Fluid compressibility (psi⁻¹).
         :param pvt_tables: PVT look-up tables for fluid properties.
-        :return: `ControlResult` with the flow rate and effective BHP.
+        :return: `ControlInfo` with the flow rate and effective BHP.
             BHP equals `bhp_limit` when operating in BHP mode, or the
             required BHP (capped at `bhp_limit`) when in rate mode.
             Reservoir pressure is used as the BHP sentinel in strict rate mode.
@@ -1714,7 +1714,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         if _disallow_flow(fluid=fluid, is_active=is_active) or (
             self.target_phase is not None and fluid.phase != self.target_phase
         ):
-            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         target_rate = self.target_rate * allocation_fraction * formation_volume_factor
         is_production = target_rate < 0.0
@@ -1732,8 +1732,8 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                         f"(adaptive control - strict rate mode, pressure={pressure:.3f} psi)"
                     )
                     final_rate = clamped_rate
-            # No mobility → cannot back-solve for BHP; use reservoir pressure.
-            return ControlResult(rate=final_rate, bhp=pressure, is_bhp_control=False)
+            # No mobility so we cannot back-solve for BHP; use reservoir pressure.
+            return ControlInfo(rate=final_rate, bhp=pressure, is_bhp_control=False)
 
         # Attempt to solve for the BHP required to deliver the target rate.
         bhp_solve_failed = False
@@ -1763,7 +1763,6 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             bhp_solve_failed = True
 
         # Determine operating mode from the solve result.
-        in_rate_mode: bool
         if bhp_solve_failed:
             in_rate_mode = False
         else:
@@ -1817,7 +1816,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             logger.debug(
                 f"Adaptive control - rate mode: rate={final_rate:.6f}, BHP={final_bhp:.4f} psi"
             )
-            return ControlResult(rate=final_rate, bhp=final_bhp, is_bhp_control=False)
+            return ControlInfo(rate=final_rate, bhp=final_bhp, is_bhp_control=False)
 
         # BHP mode: operate at bhp_limit and compute the resulting Darcy rate.
         logger.debug(
@@ -1832,15 +1831,16 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,
             )
-            specific_gravity = typing.cast(
-                float,
-                fluid.get_specific_gravity(pressure=pressure, temperature=temperature),
+            specific_gravity = fluid.get_specific_gravity(
+                pressure=pressure, temperature=temperature
             )
             if specific_gravity is None:
                 raise ValidationError(
                     "Well fluid has no specific gravity defined. "
                     "Specify a value or provide a PVT table for the fluid."
                 )
+            specific_gravity = typing.cast(float, specific_gravity)
+
             # Z-factor averaged between reservoir pressure and bhp_limit - single compute.
             avg_z_factor = compute_average_compressibility_factor(
                 pressure=pressure,
@@ -1897,7 +1897,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                     )
                     final_bhp = clamped_bhp
 
-        return ControlResult(rate=final_rate, bhp=final_bhp, is_bhp_control=True)
+        return ControlInfo(rate=final_rate, bhp=final_bhp, is_bhp_control=True)
 
     def update(
         self,
@@ -1978,7 +1978,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
     def get_type(self) -> WellControlType:
         return "rate"
 
-    def _compute_primary_bhp(
+    def _compute_shared_bhp(
         self,
         pressure: float,
         temperature: float,
@@ -1992,7 +1992,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         primary_fluid_compressibility: typing.Optional[float],
         pvt_tables: typing.Optional[PVTTables],
     ) -> float:
-        """Compute the BHP established by the primary phase's rate control."""
+        """Compute the (shared) BHP established by the primary phase's rate control."""
         return self.primary_control.get_bottom_hole_pressure(
             pressure=pressure,
             temperature=temperature,
@@ -2045,7 +2045,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
             return pressure
 
         if fluid.phase == self.primary_phase:
-            return self._compute_primary_bhp(
+            return self._compute_shared_bhp(
                 pressure=pressure,
                 temperature=temperature,
                 primary_phase_mobility=phase_mobility,
@@ -2070,7 +2070,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
             )
             return pressure
 
-        return self._compute_primary_bhp(
+        return self._compute_shared_bhp(
             pressure=pressure,
             temperature=temperature,
             primary_phase_mobility=primary_phase_mobility,
@@ -2156,7 +2156,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         ):
             return 0.0
 
-        bhp = self._compute_primary_bhp(
+        bhp = self._compute_shared_bhp(
             pressure=pressure,
             temperature=temperature,
             primary_phase_mobility=primary_phase_mobility,
@@ -2245,14 +2245,14 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         primary_formation_volume_factor: typing.Optional[float] = None,
         primary_fluid_compressibility: typing.Optional[float] = None,
         **kwargs: typing.Any,
-    ) -> ControlResult:
+    ) -> ControlInfo:
         """
         Compute rate and effective BHP simultaneously for coupled rate control.
 
         `CoupledRateControl` derives a shared BHP from the primary phase's
         rate control and then computes each secondary phase's Darcy rate at that
         BHP. Both `get_flow_rate` and `get_bottom_hole_pressure` ultimately
-        call `_compute_primary_bhp`, which in turn calls
+        call `_compute_shared_bhp`, which in turn calls
         `primary_control.get_bottom_hole_pressure` (itself containing a
         `_compute_required_bhp` solve for rate controls). This method makes
         that call once and reuses the result for both outputs.
@@ -2294,12 +2294,12 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
             Required when evaluating a secondary phase.
         :param primary_fluid_compressibility: Compressibility of the primary phase
             (psi⁻¹). Used when the primary is a liquid phase.
-        :return: `ControlResult` with the flow rate and effective BHP for
+        :return: `ControlInfo` with the flow rate and effective BHP for
             `fluid`. For the primary phase the BHP is what its rate control
             requires; for secondary phases it is the same shared BHP.
         """
         if not is_active:
-            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         # Primary phase: delegate entirely to `primary_control.get_control` so
         # that the BHP solve and rate computation share intermediates there.
@@ -2329,7 +2329,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 f"Cannot compute control result for secondary phase {fluid.phase!s} - "
                 f"primary phase properties not provided. Returning zero rate / cell pressure."
             )
-            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         if phase_mobility is None:
             raise ValidationError(
@@ -2340,10 +2340,10 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         if _disallow_flow(
             fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
         ):
-            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         # Compute the shared BHP from the primary phase
-        shared_bhp = self._compute_primary_bhp(
+        shared_bhp = self._compute_shared_bhp(
             pressure=pressure,
             temperature=temperature,
             primary_phase_mobility=primary_phase_mobility,
@@ -2412,9 +2412,9 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 )
                 final_rate = clamped_rate
 
-        return ControlResult(rate=final_rate, bhp=shared_bhp, is_bhp_control=True)
+        return ControlInfo(rate=final_rate, bhp=shared_bhp, is_bhp_control=True)
 
-    def build_primary_phase_context(
+    def build_context(
         self,
         produced_fluids: typing.Sequence[WellFluid],
         oil_mobility: float,

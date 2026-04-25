@@ -12,6 +12,7 @@ from bores.datastructures import Rates
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import EvolutionResult
+from bores.solvers.rates import WellRates
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import OneDimensionalGrid, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.indices import WellIndicesCache
@@ -90,11 +91,7 @@ def evolve_saturation(
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     config: Config,
-    well_indices_cache: WellIndicesCache,
-    injection_rates: Rates[float, ThreeDimensions],
-    production_rates: Rates[float, ThreeDimensions],
-    injection_mass_rates: Rates[float, ThreeDimensions],
-    production_mass_rates: Rates[float, ThreeDimensions],
+    rates: typing.Optional[WellRates[ThreeDimensions]] = None,
     dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ExplicitSaturationSolution, SaturationEvolutionMeta]:
     """
@@ -184,112 +181,54 @@ def evolve_saturation(
         / c.GRAVITATIONAL_CONSTANT_LBM_FT_PER_LBF_S2
     )
 
-    if (pool := config.task_pool) is not None:
-        mass_fluxes_future = pool.submit(
-            assemble_flux_contributions,
-            pressure_grid=pressure_grid,
-            cell_count_x=cell_count_x,
-            cell_count_y=cell_count_y,
-            cell_count_z=cell_count_z,
-            pressure_boundaries=pressure_boundaries,
-            flux_boundaries=flux_boundaries,
-            water_relative_mobility_grid=water_relative_mobility_grid,
-            oil_relative_mobility_grid=oil_relative_mobility_grid,
-            gas_relative_mobility_grid=gas_relative_mobility_grid,
-            face_transmissibilities_x=face_transmissibilities.x,
-            face_transmissibilities_y=face_transmissibilities.y,
-            face_transmissibilities_z=face_transmissibilities.z,
-            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-            water_density_grid=current_water_density_grid,
-            oil_density_grid=current_oil_density_grid,
-            gas_density_grid=current_gas_density_grid,
-            solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
-            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
-            gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
-            oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
-            water_formation_volume_factor_grid=water_formation_volume_factor_grid,
-            elevation_grid=elevation_grid,
-            gravitational_constant=gravitational_constant,
-            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-            dtype=dtype,
-        )
-        well_rates_future = pool.submit(
-            assemble_well_contributions,
-            cell_count_x=cell_count_x,
-            cell_count_y=cell_count_y,
-            cell_count_z=cell_count_z,
-            well_indices_cache=well_indices_cache,
-            injection_rates=injection_rates,
-            production_rates=production_rates,
-            injection_mass_rates=injection_mass_rates,
-            production_mass_rates=production_mass_rates,
-            dtype=dtype,
-        )
-        (
-            net_water_mass_flux_grid,
-            net_gas_total_mass_flux_grid,
-            net_volumetric_outflow_grid,
-        ) = mass_fluxes_future.result()
-        (
-            net_water_well_rate_grid,
-            net_oil_well_rate_grid,
-            net_gas_well_rate_grid,
-            net_water_well_mass_rate_grid,
-            net_oil_well_mass_rate_grid,
-            net_gas_well_mass_rate_grid,
-        ) = well_rates_future.result()
+    (
+        net_water_mass_flux_grid,
+        net_gas_total_mass_flux_grid,
+        net_volumetric_outflow_grid,
+    ) = assemble_flux_contributions(
+        pressure_grid=pressure_grid,
+        cell_count_x=cell_count_x,
+        cell_count_y=cell_count_y,
+        cell_count_z=cell_count_z,
+        pressure_boundaries=pressure_boundaries,
+        flux_boundaries=flux_boundaries,
+        water_relative_mobility_grid=water_relative_mobility_grid,
+        oil_relative_mobility_grid=oil_relative_mobility_grid,
+        gas_relative_mobility_grid=gas_relative_mobility_grid,
+        face_transmissibilities_x=face_transmissibilities.x,
+        face_transmissibilities_y=face_transmissibilities.y,
+        face_transmissibilities_z=face_transmissibilities.z,
+        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+        water_density_grid=current_water_density_grid,
+        oil_density_grid=current_oil_density_grid,
+        gas_density_grid=current_gas_density_grid,
+        solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
+        gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+        gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
+        oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
+        water_formation_volume_factor_grid=water_formation_volume_factor_grid,
+        elevation_grid=elevation_grid,
+        gravitational_constant=gravitational_constant,
+        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        dtype=dtype,
+    )
+
+    if rates is not None:
+        net_water_well_rate_grid = rates.net_water_well_rate_grid
+        net_oil_well_rate_grid = rates.net_oil_well_rate_grid
+        net_gas_well_rate_grid = rates.net_gas_well_rate_grid
+        net_water_well_mass_rate_grid = rates.net_water_well_mass_rate_grid
+        net_oil_well_mass_rate_grid = rates.net_oil_well_mass_rate_grid
+        net_gas_well_mass_rate_grid = rates.net_gas_well_mass_rate_grid
     else:
-        (
-            net_water_mass_flux_grid,
-            net_gas_total_mass_flux_grid,
-            net_volumetric_outflow_grid,
-        ) = assemble_flux_contributions(
-            pressure_grid=pressure_grid,
-            cell_count_x=cell_count_x,
-            cell_count_y=cell_count_y,
-            cell_count_z=cell_count_z,
-            pressure_boundaries=pressure_boundaries,
-            flux_boundaries=flux_boundaries,
-            water_relative_mobility_grid=water_relative_mobility_grid,
-            oil_relative_mobility_grid=oil_relative_mobility_grid,
-            gas_relative_mobility_grid=gas_relative_mobility_grid,
-            face_transmissibilities_x=face_transmissibilities.x,
-            face_transmissibilities_y=face_transmissibilities.y,
-            face_transmissibilities_z=face_transmissibilities.z,
-            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-            water_density_grid=current_water_density_grid,
-            oil_density_grid=current_oil_density_grid,
-            gas_density_grid=current_gas_density_grid,
-            solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
-            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
-            gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
-            oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
-            water_formation_volume_factor_grid=water_formation_volume_factor_grid,
-            elevation_grid=elevation_grid,
-            gravitational_constant=gravitational_constant,
-            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-            dtype=dtype,
-        )
-        (
-            net_water_well_rate_grid,
-            net_oil_well_rate_grid,
-            net_gas_well_rate_grid,
-            net_water_well_mass_rate_grid,
-            net_oil_well_mass_rate_grid,
-            net_gas_well_mass_rate_grid,
-        ) = assemble_well_contributions(
-            cell_count_x=cell_count_x,
-            cell_count_y=cell_count_y,
-            cell_count_z=cell_count_z,
-            well_indices_cache=well_indices_cache,
-            injection_rates=injection_rates,
-            production_rates=production_rates,
-            injection_mass_rates=injection_mass_rates,
-            production_mass_rates=production_mass_rates,
-            dtype=dtype,
-        )
+        zeros_grid = np.zeros_like(pressure_grid, dtype=dtype)
+        net_water_well_rate_grid = zeros_grid
+        net_oil_well_rate_grid = zeros_grid
+        net_gas_well_rate_grid = zeros_grid
+        net_water_well_mass_rate_grid = zeros_grid
+        net_oil_well_mass_rate_grid = zeros_grid
+        net_gas_well_mass_rate_grid = zeros_grid
 
     (
         updated_water_saturation_grid,
@@ -1458,95 +1397,6 @@ def assemble_flux_contributions(
         net_water_mass_flux_grid,
         net_gas_total_mass_flux_grid,
         net_volumetric_outflow_grid,
-    )
-
-
-def assemble_well_contributions(
-    cell_count_x: int,
-    cell_count_y: int,
-    cell_count_z: int,
-    well_indices_cache: WellIndicesCache,
-    injection_rates: Rates[float, ThreeDimensions],
-    production_rates: Rates[float, ThreeDimensions],
-    injection_mass_rates: Rates[float, ThreeDimensions],
-    production_mass_rates: Rates[float, ThreeDimensions],
-    dtype: npt.DTypeLike,
-) -> typing.Tuple[
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-]:
-    """
-    Compute volumetric and mass well rates for all cells (injection + production).
-
-    Returns reservoir-condition volumetric rates (ft³/day) and mass rates (lbm/day)
-    for water, oil, and gas. Injection rates are positive (into cell),
-    production rates are negative (out of cell).
-
-    :param cell_count_x: Number of cells in the x-direction.
-    :param cell_count_y: Number of cells in the y-direction.
-    :param cell_count_z: Number of cells in the z-direction.
-    :param well_indices_cache: Cache of well indices.
-    :param injection_rates: Injection rates for each phase and cell (ft³/day).
-    :param production_rates: Production rates for each phase and cell (ft³/day).
-    :param dtype: Numpy dtype for output arrays.
-    :return: Tuple of (`net_water_well_rate_grid`, `net_oil_well_rate_grid`,
-        `net_gas_well_rate_grid`, `net_water_well_mass_rate_grid`, `net_oil_well_mass_rate_grid`,
-        `net_gas_well_mass_rate_grid`) in ft³/day and lbm/day. Positive = inflow to cell.
-    """
-    net_water_well_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-    net_oil_well_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-    net_gas_well_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-    net_water_well_mass_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-    net_oil_well_mass_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-    net_gas_well_mass_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-
-    for well_indices in well_indices_cache.injection.values():
-        for perforation_index in well_indices:
-            i, j, k = perforation_index.cell
-            water_rate, _, gas_rate = injection_rates[i, j, k]
-            water_mass_rate, _, gas_mass_rate = injection_mass_rates[i, j, k]
-            net_water_well_rate_grid[i, j, k] += water_rate
-            net_gas_well_rate_grid[i, j, k] += gas_rate
-            net_water_well_mass_rate_grid[i, j, k] += water_mass_rate
-            net_gas_well_mass_rate_grid[i, j, k] += gas_mass_rate
-
-    for well_indices in well_indices_cache.production.values():
-        for perforation_index in well_indices:
-            i, j, k = perforation_index.cell
-            water_rate, oil_rate, gas_rate = production_rates[i, j, k]
-            water_mass_rate, oil_mass_rate, gas_mass_rate = production_mass_rates[
-                i, j, k
-            ]
-            net_water_well_rate_grid[i, j, k] += water_rate
-            net_oil_well_rate_grid[i, j, k] += oil_rate
-            net_gas_well_rate_grid[i, j, k] += gas_rate
-            net_water_well_mass_rate_grid[i, j, k] += water_mass_rate
-            net_oil_well_mass_rate_grid[i, j, k] += oil_mass_rate
-            net_gas_well_mass_rate_grid[i, j, k] += gas_mass_rate
-
-    return (
-        net_water_well_rate_grid,
-        net_oil_well_rate_grid,
-        net_gas_well_rate_grid,
-        net_water_well_mass_rate_grid,
-        net_oil_well_mass_rate_grid,
-        net_gas_well_mass_rate_grid,
     )
 
 

@@ -1,4 +1,5 @@
 """Well implementations and base classes."""
+
 import functools
 import itertools
 import logging
@@ -27,7 +28,7 @@ from bores.types import (
     ThreeDimensions,
     TwoDimensions,
 )
-from bores.wells.controls import ControlResult, WellControl
+from bores.wells.controls import ControlInfo, WellControl
 from bores.wells.core import (
     InjectedFluid,
     ProducedFluid,
@@ -442,7 +443,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
         **kwargs: typing.Any,
-    ) -> ControlResult:
+    ) -> ControlInfo:
         """
         Compute both the flow rate and effective bottom-hole pressure for the well in a single pass,
         using the configured control strategy.
@@ -459,7 +460,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :param kwargs: Additional control-specific context (e.g., primary phase properties for CoupledRateControl).
-        :return: `ControlResult` containing the flow rate (bbl/day or
+        :return: `ControlInfo` containing the flow rate (bbl/day or
             ft³/day) and effective BHP (psi).
         """
         return self.control.get_control(
@@ -625,7 +626,7 @@ class ProductionWell(Well[Coordinates, ProducedFluid]):
     @functools.cached_property
     def produced_phases(self) -> typing.List[FluidPhase]:
         """List of unique fluid phases produced by the well (e.g., ['oil', 'gas', 'water'])."""
-        return [fluid.phase for fluid in self.produced_fluids] # type: ignore[return-value]
+        return [fluid.phase for fluid in self.produced_fluids]  # type: ignore[return-value]
 
 
 InjectionWellT = typing.TypeVar("InjectionWellT", bound=InjectionWell)
@@ -969,3 +970,9 @@ class Wells(
         :return: True if there are injection or production wells, False otherwise.
         """
         return bool(self.injection_wells or self.production_wells)
+
+    def any_open(self) -> bool:
+        return any(
+            well.is_open
+            for well in itertools.chain(self.injection_wells, self.production_wells)
+        )

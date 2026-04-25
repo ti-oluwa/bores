@@ -1,14 +1,11 @@
 import threading
 import typing
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 
 import attrs
 from typing_extensions import Self
 
 from bores.boundary_conditions import BoundaryConditions
 from bores.constants import Constants
-from bores.datastructures import Range
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTTables
 from bores.tables.rock_fluid import RockFluidTables
@@ -22,7 +19,7 @@ from bores.types import (
 )
 from bores.wells import Wells, WellSchedules
 
-__all__ = ["Config", "new_task_pool"]
+__all__ = ["Config"]
 
 
 @typing.final
@@ -86,9 +83,6 @@ class Config(
 
     use_pseudo_pressure: bool = False
     """Whether to use pseudo-pressure for gas (when applicable)."""
-
-    total_compressibility_range: Range = attrs.field(default=Range(min=1e-24, max=1e-2))
-    """Range to constrain total compressibility for the simulation. This is usually necessary for numerical stability."""
 
     capillary_strength_factor: float = attrs.field(  # type: ignore
         default=1.0,
@@ -492,7 +486,7 @@ class Config(
     high-rate gas injection).
     """
 
-    normalize_saturations: bool = True
+    normalize_saturations: bool = False
     """
     Whether to normalize saturations so that `So + Sw + Sg = 1.0` after each timestep.
 
@@ -585,62 +579,6 @@ class Config(
     this fraction of the average flux across the domain, the cell is flagged for potential deadlock.
     """
 
-    task_pool: typing.Optional[ThreadPoolExecutor] = attrs.field(
-        default=None,
-        eq=False,
-        hash=False,
-    )
-    """
-    Optional thread pool for concurrent matrix assembly during simulation.
-
-    When provided, the three independent assembly stages in the pressure solver
-    (accumulation, face transmissibilities, well contributions) and the two
-    independent stages in the saturation solver (flux contributions, well rate
-    grids) are submitted concurrently rather than run sequentially. The calling
-    thread blocks only until all submitted stages complete, so the effective
-    assembly time approaches the duration of the slowest stage rather than
-    their sum.
-
-    When None (default), all assembly stages run sequentially on the calling
-    thread with zero threading overhead. This is the correct choice for small
-    grids where threading bookkeeping exceeds the parallelism gain.
-
-    **When to provide a pool**
-
-    The break-even point is approximately 10,000 interior cells. Below this
-    threshold the overhead of thread synchronisation, future creation, and
-    queue operations exceeds the time saved by concurrent execution. At 50,000
-    cells the concurrent path reduces assembly time by roughly 30-50%, which
-    translates to approximately 7-10% reduction in total per-step wall time
-    (the linear solve is unaffected and typically dominates at this scale).
-    At 200,000+ cells the benefit is clearly measurable.
-
-    A rough guide by grid size:
-
-    - < 10,000 cells  → leave as `None`
-    - 10,000-50,000   → marginal benefit, profile before committing
-    - 50,000-200,000  → noticeable benefit, 3 workers recommended
-    - > 200,000       → clearly beneficial, assembly cost approaches solve cost
-
-    **Lifecycle**
-
-    The pool is not created or shut down by `Config`. The caller is responsible
-    for managing its lifetime. The recommended pattern is to create the pool
-    once for the entire simulation run using `new_task_pool()` and pass it in
-    at `Config` construction time:
-
-    ```python
-    with new_task_pool(concurrency=3) as pool:
-        config = Config(..., task_pool=pool)
-        for state in run(model, config):
-            process(state)
-    # Pool shuts down cleanly here
-    ```
-
-    Do not share a pool between concurrent simulation runs unless the pool has
-    sufficient workers to service both simultaneously.
-    """
-
     _lock: threading.Lock = attrs.field(
         factory=threading.Lock, init=False, repr=False, hash=False
     )
@@ -665,16 +603,6 @@ class Config(
                 "`minimum_injector_water_saturation` must be greater than `phase_appearance_tolerance` to avoid numerical issues with phase appearance."
             )
 
-        # Validate that the provided task pool is not already shut down.
-        if self.task_pool is not None and self.task_pool._shutdown:
-            raise ValueError("Provided `task_pool` is already shut down.")
-
-        # Validate that the provided task pool has a positive number of workers.
-        if self.task_pool is not None and self.task_pool._max_workers <= 0:
-            raise ValueError(
-                "Provided `task_pool` must have a positive number of workers."
-            )
-
     def copy(self, **kwargs: typing.Any) -> Self:
         """Create a deep copy of the `Config` instance."""
         with self._lock:
@@ -693,72 +621,3 @@ class Config(
                 raise AttributeError(f"Config has no attribute '{key}'")
         with self._lock:
             return attrs.evolve(self, **kwargs)
-
-
-@contextmanager
-def new_task_pool(
-    concurrency: typing.Optional[int] = None,
-) -> typing.Generator[ThreadPoolExecutor, None, None]:
-    """
-    Context manager that creates a `ThreadPoolExecutor` for concurrent
-    simulation assembly and shuts it down cleanly on exit.
-
-    Intended as the standard way to supply a `task_pool` to `Config`.
-    The pool is created once, used for the entire simulation run, and
-    gracefully shut down (waiting for any in-flight work to complete)
-    when the `with` block exits - whether normally or due to an exception.
-
-    :param concurrency: Maximum number of tasks that may run concurrently.
-        If `None`, Python defaults to `min(32, os.cpu_count() + 4)`,
-        which is almost always too large for simulation assembly. Pass an
-        explicit value instead:
-
-        - `3` for IMPES (pressure assembly has 3 independent stages,
-          saturation assembly has 2 - 3 workers covers both without waste).
-        - `2` if the machine has only 2 physical cores available to the
-          process, or if memory bandwidth is the bottleneck rather than
-          compute.
-        - Higher values provide no additional benefit for the current
-          assembly design, which submits at most 3 tasks per solver call.
-
-    :yields: The configured `ThreadPoolExecutor`.
-
-    Example: Standard IMPES run with concurrent assembly:
-
-    ```python
-    from bores.config import Config, new_task_pool
-
-    with new_task_pool(concurrency=3) as pool:
-        config = Config(
-            timer=timer,
-            rock_fluid_tables=tables,
-            task_pool=pool,
-        )
-        for state in run(model, config):
-            process(state)
-    # Pool shuts down here; all in-flight writes complete before exit
-    ```
-
-    Example: Conditional pool based on grid size:
-
-    ```python
-    cell_count = nx * ny * nz
-
-    if cell_count > 10_000:
-        with new_task_pool(concurrency=3) as pool:
-            config = Config(..., task_pool=pool)
-            for state in run(model, config):
-                process(state)
-    else:
-        config = Config(...)   # no pool, sequential assembly
-        for state in run(model, config):
-            process(state)
-    ```
-
-    Note: Do not pass the pool to more than one `Config` instance that
-    will be used concurrently. Each simulation run submits up to 3 tasks
-    per solver call; two concurrent runs would require 6 workers to avoid
-    queuing, and the assembly functions are not designed for that usage.
-    """
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        yield pool

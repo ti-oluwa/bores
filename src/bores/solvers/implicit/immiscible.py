@@ -9,7 +9,7 @@ from scipy.sparse import coo_matrix
 
 from bores.config import Config
 from bores.constants import c
-from bores.datastructures import BottomHolePressures, Rates
+from bores.datastructures import BottomHolePressures
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
@@ -21,6 +21,7 @@ from bores.solvers.base import (
     to_1D_index,
 )
 from bores.solvers.explicit.immiscible import compute_face_fluxes
+from bores.solvers.rates import WellRates
 from bores.tables.rock_fluid import RockFluidTables
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
@@ -1156,65 +1157,6 @@ def compute_rock_fluid_properties(
     return (relative_mobility_grids, capillary_pressure_grids, mobility_grids)
 
 
-def assemble_residual_well_contributions(
-    cell_count_x: int,
-    cell_count_y: int,
-    cell_count_z: int,
-    well_indices_cache: WellIndicesCache,
-    injection_mass_rates: Rates[float, ThreeDimensions],
-    production_mass_rates: Rates[float, ThreeDimensions],
-    dtype: npt.DTypeLike,
-) -> typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid]:
-    """
-    Compute mass well rates for all cells (injection + production).
-
-    Returns reservoir-condition mass rates (lbm/day) for water, oil, and gas.
-    Injection rates are positive (into cell), production rates are negative (out of cell).
-
-    :param cell_count_x: Number of cells in the x-direction.
-    :param cell_count_y: Number of cells in the y-direction.
-    :param cell_count_z: Number of cells in the z-direction.
-    :param well_indices_cache: Cache of well indices.
-    :param injection_mass_rates: Injection rates for each phase and cell (lbm/day).
-    :param production_mass_rates: Production rates for each phase and cell (lbm/day).
-    :param dtype: Numpy dtype for output arrays.
-    :return: Tuple of (`net_water_well_mass_rate_grid`, `net_oil_well_mass_rate_grid`,
-        `net_gas_well_mass_rate_grid`) in lbm/day. Positive = inflow to cell.
-    """
-    net_water_well_mass_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-    net_oil_well_mass_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-    net_gas_well_mass_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-
-    for well_indices in well_indices_cache.injection.values():
-        for perforation_index in well_indices:
-            i, j, k = perforation_index.cell
-            water_mass_rate, _, gas_mass_rate = injection_mass_rates[i, j, k]
-            net_water_well_mass_rate_grid[i, j, k] += water_mass_rate
-            net_gas_well_mass_rate_grid[i, j, k] += gas_mass_rate
-
-    for well_indices in well_indices_cache.production.values():
-        for perforation_index in well_indices:
-            i, j, k = perforation_index.cell
-            water_mass_rate, oil_mass_rate, gas_mass_rate = production_mass_rates[
-                i, j, k
-            ]
-            net_water_well_mass_rate_grid[i, j, k] += water_mass_rate
-            net_oil_well_mass_rate_grid[i, j, k] += oil_mass_rate
-            net_gas_well_mass_rate_grid[i, j, k] += gas_mass_rate
-
-    return (
-        net_water_well_mass_rate_grid,
-        net_oil_well_mass_rate_grid,
-        net_gas_well_mass_rate_grid,
-    )
-
-
 def _compute_residuals(
     water_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -1245,9 +1187,9 @@ def _compute_residuals(
     net_to_gross_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     gravitational_constant: float,
-    well_indices_cache: WellIndicesCache,
-    injection_mass_rates: Rates[float, ThreeDimensions],
-    production_mass_rates: Rates[float, ThreeDimensions],
+    net_water_well_mass_rate_grid: ThreeDimensionalGrid,
+    net_oil_well_mass_rate_grid: ThreeDimensionalGrid,
+    net_gas_well_mass_rate_grid: ThreeDimensionalGrid,
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
@@ -1279,9 +1221,6 @@ def _compute_residuals(
     :param net_to_gross_grid: Net-to-gross ratio (fraction).
     :param time_step_in_days: Time step size (days).
     :param gravitational_constant: Gravitational constant conversion factor (lbf/lbm).
-    :param well_indices_cache: Cache of well indices.
-    :param injection_mass_rates: Injection rates.
-    :param production_mass_rates: Production rates.
     :param pressure_boundaries: Padded pressure boundary grid, shape `(nx+2, ny+2, nz+2)`.
     :param flux_boundaries: Padded flux boundary grid, shape `(nx+2, ny+2, nz+2)`.
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
@@ -1295,20 +1234,6 @@ def _compute_residuals(
         oil_relative_mobility_grid,
         gas_relative_mobility_grid,
     ) = relative_mobility_grids
-
-    (
-        net_water_well_mass_rate_grid,
-        net_oil_well_mass_rate_grid,
-        net_gas_well_mass_rate_grid,
-    ) = assemble_residual_well_contributions(
-        cell_count_x=cell_count_x,
-        cell_count_y=cell_count_y,
-        cell_count_z=cell_count_z,
-        well_indices_cache=well_indices_cache,
-        injection_mass_rates=injection_mass_rates,
-        production_mass_rates=production_mass_rates,
-        dtype=np.float64,
-    )
     return _compute_saturation_residuals(
         pressure_grid=pressure_grid,
         cell_count_x=cell_count_x,
@@ -1389,11 +1314,11 @@ def compute_residuals(
     elevation_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     gravitational_constant: float,
-    well_indices_cache: WellIndicesCache,
-    injection_mass_rates: Rates[float, ThreeDimensions],
-    production_mass_rates: Rates[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
+    net_water_well_mass_rate_grid: ThreeDimensionalGrid,
+    net_oil_well_mass_rate_grid: ThreeDimensionalGrid,
+    net_gas_well_mass_rate_grid: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
@@ -1472,11 +1397,11 @@ def compute_residuals(
         net_to_gross_grid=rock_properties.net_to_gross_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
-        well_indices_cache=well_indices_cache,
-        injection_mass_rates=injection_mass_rates,
-        production_mass_rates=production_mass_rates,
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
+        net_water_well_mass_rate_grid=net_water_well_mass_rate_grid,
+        net_oil_well_mass_rate_grid=net_oil_well_mass_rate_grid,
+        net_gas_well_mass_rate_grid=net_gas_well_mass_rate_grid,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
 
@@ -1513,11 +1438,11 @@ def assemble_numerical_jacobian(
     elevation_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     gravitational_constant: float,
-    well_indices_cache: WellIndicesCache,
-    injection_mass_rates: Rates[float, ThreeDimensions],
-    production_mass_rates: Rates[float, ThreeDimensions],
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
+    net_water_well_mass_rate_grid: ThreeDimensionalGrid,
+    net_oil_well_mass_rate_grid: ThreeDimensionalGrid,
+    net_gas_well_mass_rate_grid: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
 ) -> coo_matrix:
     """
@@ -1600,9 +1525,9 @@ def assemble_numerical_jacobian(
         elevation_grid=elevation_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
-        well_indices_cache=well_indices_cache,
-        injection_mass_rates=injection_mass_rates,
-        production_mass_rates=production_mass_rates,
+        net_water_well_mass_rate_grid=net_water_well_mass_rate_grid,
+        net_oil_well_mass_rate_grid=net_oil_well_mass_rate_grid,
+        net_gas_well_mass_rate_grid=net_gas_well_mass_rate_grid,
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
@@ -3015,8 +2940,9 @@ def assemble_jacobian(
     well_indices_cache: WellIndicesCache,
     injection_bhps: BottomHolePressures[float, ThreeDimensions],
     production_bhps: BottomHolePressures[float, ThreeDimensions],
-    injection_mass_rates: Rates[float, ThreeDimensions],
-    production_mass_rates: Rates[float, ThreeDimensions],
+    net_water_well_mass_rate_grid: ThreeDimensionalGrid,
+    net_oil_well_mass_rate_grid: ThreeDimensionalGrid,
+    net_gas_well_mass_rate_grid: ThreeDimensionalGrid,
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
@@ -3135,9 +3061,9 @@ def assemble_jacobian(
         elevation_grid=elevation_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
-        well_indices_cache=well_indices_cache,
-        injection_mass_rates=injection_mass_rates,
-        production_mass_rates=production_mass_rates,
+        net_water_well_mass_rate_grid=net_water_well_mass_rate_grid,
+        net_oil_well_mass_rate_grid=net_oil_well_mass_rate_grid,
+        net_gas_well_mass_rate_grid=net_gas_well_mass_rate_grid,
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
@@ -3164,10 +3090,7 @@ def evolve_saturation(
     flux_boundaries: ThreeDimensionalGrid,
     config: Config,
     well_indices_cache: WellIndicesCache,
-    injection_mass_rates: Rates[float, ThreeDimensions],
-    production_mass_rates: Rates[float, ThreeDimensions],
-    injection_bhps: BottomHolePressures[float, ThreeDimensions],
-    production_bhps: BottomHolePressures[float, ThreeDimensions],
+    rates: typing.Optional[WellRates[ThreeDimensions]] = None,
     dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
@@ -3223,6 +3146,12 @@ def evolve_saturation(
     cell_count_x, cell_count_y, cell_count_z = pressure_grid.shape
     cell_size_x, cell_size_y = cell_dimension
 
+    net_water_well_mass_rate_grid = rates.net_water_well_mass_rate_grid
+    net_oil_well_mass_rate_grid = rates.net_oil_well_mass_rate_grid
+    net_gas_well_mass_rate_grid = rates.net_gas_well_mass_rate_grid
+    injection_bhps = rates.injection_bhps
+    production_bhps = rates.production_bhps
+
     old_water_saturation_grid = fluid_properties.water_saturation_grid
     old_oil_saturation_grid = fluid_properties.oil_saturation_grid
     old_gas_saturation_grid = fluid_properties.gas_saturation_grid
@@ -3275,9 +3204,9 @@ def evolve_saturation(
         elevation_grid=elevation_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
-        well_indices_cache=well_indices_cache,
-        injection_mass_rates=injection_mass_rates,
-        production_mass_rates=production_mass_rates,
+        net_water_well_mass_rate_grid=net_water_well_mass_rate_grid,
+        net_oil_well_mass_rate_grid=net_oil_well_mass_rate_grid,
+        net_gas_well_mass_rate_grid=net_gas_well_mass_rate_grid,
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
@@ -3344,9 +3273,9 @@ def evolve_saturation(
             net_to_gross_grid=net_to_gross_grid,
             time_step_in_days=time_step_in_days,
             gravitational_constant=gravitational_constant,
-            well_indices_cache=well_indices_cache,
-            injection_mass_rates=injection_mass_rates,
-            production_mass_rates=production_mass_rates,
+            net_water_well_mass_rate_grid=net_water_well_mass_rate_grid,
+            net_oil_well_mass_rate_grid=net_oil_well_mass_rate_grid,
+            net_gas_well_mass_rate_grid=net_gas_well_mass_rate_grid,
             pressure_boundaries=pressure_boundaries,
             flux_boundaries=flux_boundaries,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
@@ -3437,8 +3366,9 @@ def evolve_saturation(
             well_indices_cache=well_indices_cache,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
-            injection_mass_rates=injection_mass_rates,
-            production_mass_rates=production_mass_rates,
+            net_water_well_mass_rate_grid=net_water_well_mass_rate_grid,
+            net_oil_well_mass_rate_grid=net_oil_well_mass_rate_grid,
+            net_gas_well_mass_rate_grid=net_gas_well_mass_rate_grid,
             pressure_boundaries=pressure_boundaries,
             flux_boundaries=flux_boundaries,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,

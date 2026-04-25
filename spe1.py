@@ -604,7 +604,7 @@ injector = bores.injection_well(
     perforating_intervals=[((0, 0, 0), (0, 0, 0))],
     radius=0.25,
     control=bores.AdaptiveRateControl(
-        target_rate=100.0e6,  # 100 MMscf/D (SCF/day)
+        target_rate=100.0e6,  # 100 MMscf/D
         bhp_limit=9011.0,  # max injection BHP (psia)
         clamp=bores.InjectionClamp(),
     ),
@@ -633,7 +633,6 @@ producer = bores.production_well(
             bhp_limit=1000.0,  # min BHP (psia)
             clamp=bores.ProductionClamp(),
         ),
-        secondary_clamp=bores.ProductionClamp(),
     ),
     produced_fluids=[
         bores.ProducedFluid(
@@ -666,9 +665,9 @@ timer = bores.Timer(
     initial_step_size=bores.Time(days=1.0),
     maximum_step_size=bores.Time(days=30.0),
     minimum_step_size=bores.Time(minutes=10.0),
-    simulation_time=bores.Time(years=30.0),
+    simulation_time=bores.Time(years=10.0),
     maximum_cfl_number=0.8,
-    ramp_up_factor=1.2,
+    ramp_up_factor=1.3,
     backoff_factor=0.5,
     aggressive_backoff_factor=0.25,
     maximum_rejections=20,
@@ -679,7 +678,7 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     scheme="impes",
-    output_frequency=1,
+    output_frequency=10,
     pressure_solver="direct",
     saturation_solver="direct",
     log_interval=10,
@@ -687,15 +686,14 @@ config = bores.Config(
     wells=wells,
     disable_capillary_effects=True,
     # freeze_saturation_pressure=True,
-    # maximum_gas_saturation_change=0.05,
-    # maximum_oil_saturation_change=0.05,
-    # maximum_water_saturation_change=0.05,
-    maximum_pressure_change=300.0,
+    # maximum_gas_saturation_change=0.7,
+    # maximum_oil_saturation_change=0.7,
+    # maximum_water_saturation_change=0.5,
+    maximum_pressure_change=1500.0,
     use_pseudo_pressure=True,
-    normalize_saturations=True,
     phase_appearance_tolerance=1e-6,
     saturation_convergence_tolerance=1e-4,
-    saturation_cfl_threshold=0.8,
+    saturation_cfl_threshold=0.4,
     # minimum_injector_gas_saturation=0.2,
 )
 
