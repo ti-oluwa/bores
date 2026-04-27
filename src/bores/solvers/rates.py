@@ -240,9 +240,14 @@ def compute_well_rates(
                     pressure=cell_pressure, temperature=cell_temperature
                 ),
             )
+            total_mobility = typing.cast(
+                float,
+                water_relative_mobility_grid[i, j, k]
+                + oil_relative_mobility_grid[i, j, k]
+                + gas_relative_mobility_grid[i, j, k],
+            )
 
             if is_gas:
-                phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
                 phase_compressibility = typing.cast(
                     float,
                     injected_fluid.get_compressibility(
@@ -250,9 +255,6 @@ def compute_well_rates(
                     ),
                 )
             else:
-                phase_mobility = typing.cast(
-                    float, water_relative_mobility_grid[i, j, k]
-                )
                 phase_compressibility = typing.cast(
                     float,
                     injected_fluid.get_compressibility(
@@ -266,18 +268,12 @@ def compute_well_rates(
                     ),
                 )
 
-            total_mobility = typing.cast(
-                float,
-                water_relative_mobility_grid[i, j, k]
-                + oil_relative_mobility_grid[i, j, k]
-                + gas_relative_mobility_grid[i, j, k],
-            )
             flow_rate, effective_bhp = well.get_control(
                 pressure=cell_pressure,
                 temperature=cell_temperature,
                 well_index=well_index,
                 phase_viscosity=phase_viscosity,
-                phase_mobility=phase_mobility,
+                phase_mobility=total_mobility,
                 fluid=injected_fluid,
                 fluid_compressibility=phase_compressibility,
                 use_pseudo_pressure=use_pseudo_pressure,

@@ -606,7 +606,7 @@ injector = bores.injection_well(
     control=bores.AdaptiveRateControl(
         target_rate=100.0e6,  # 100 MMscf/D
         bhp_limit=9011.0,  # max injection BHP (psia)
-        # clamp=bores.InjectionClamp(),
+        clamp=bores.InjectionClamp(),
     ),
     injected_fluid=bores.InjectedFluid(
         name="Gas",
@@ -691,7 +691,7 @@ config = bores.Config(
     use_pseudo_pressure=True,
     phase_appearance_tolerance=1e-6,
     cfl_threshold=0.4,
-    # minimum_injector_gas_saturation=0.2,
+    # minimum_injector_gas_saturation=0.1,
 )
 
 # Run and monitor the simulation and collect states

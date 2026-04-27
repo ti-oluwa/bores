@@ -1688,10 +1688,7 @@ def apply_updates(
                 if free_gas_mass < 0.0:
                     free_gas_mass = 0.0
 
-                new_gas_saturation = free_gas_mass / (
-                    current_gas_density
-                    - (current_oil_density * current_alpha_solution_gor)
-                )
+                new_gas_saturation = free_gas_mass / current_gas_density
 
                 # Clamp Sg
                 if new_gas_saturation < 0.0:
