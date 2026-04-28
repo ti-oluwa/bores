@@ -61,7 +61,6 @@ def build_wells_indices(
     net_to_gross_grid: NDimensionalGrid[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     absolute_permeability: RockPermeability,
-    boundary_conditions: BoundaryConditions[ThreeDimensions],
     regime_constant: float = -3 / 4,
 ) -> WellsIndices:
     """
@@ -108,10 +107,7 @@ def build_wells_indices(
                     ),
                     skin_factor=well.skin_factor,
                     net_to_gross=net_to_gross_grid[i, j, k],
-                    well_location=(i, j, k),
-                    grid_shape=grid_shape,
                     regime_constant=regime_constant,
-                    boundary_conditions=boundary_conditions,
                 )
                 cell_1d_index = to_1D_index(
                     i, j, k, cell_count_x, cell_count_y, cell_count_z

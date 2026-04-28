@@ -440,7 +440,7 @@ def _run_impes_step(
         config=config,
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
-        net_well_rate_grid=well_rates.net_well_rate_grid if has_open_wells else None,  # type: ignore
+        rates=well_rates if has_open_wells else None,
         dtype=dtype,
     )
     if not pressure_result.success:
@@ -858,7 +858,7 @@ def _run_sequential_implicit_step(
         config=config,
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
-        net_well_rate_grid=well_rates.net_well_rate_grid if has_open_wells else None,  # type: ignore
+        rates=well_rates if has_open_wells else None,
         dtype=dtype,
     )
     if not pressure_result.success:
@@ -1280,9 +1280,7 @@ def _run_full_sequential_implicit_step(
             config=config,
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
-            net_well_rate_grid=well_rates.net_well_rate_grid  # type: ignore
-            if has_open_wells
-            else None,
+            rates=well_rates if has_open_wells else None,
             dtype=dtype,
         )
 
@@ -1973,7 +1971,6 @@ def run(
             wells=wells,
             absolute_permeability=absolute_permeability,
             net_to_gross_grid=net_to_gross_grid,
-            boundary_conditions=boundary_conditions,
             regime_constant=-0.75,  # Pseudo steady regime
         )
 
@@ -2135,7 +2132,6 @@ def run(
                                 wells=wells,
                                 absolute_permeability=absolute_permeability,
                                 net_to_gross_grid=net_to_gross_grid,
-                                boundary_conditions=boundary_conditions,
                                 regime_constant=-0.75,
                             )
 

@@ -15,6 +15,7 @@ from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import Solution, solve_linear_system, to_1D_index
+from bores.solvers.rates import WellRates
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
 
@@ -41,7 +42,7 @@ def solve_pressure(
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     config: Config,
-    net_well_rate_grid: typing.Optional[ThreeDimensionalGrid] = None,
+    rates: typing.Optional[WellRates] = None,
     dtype: npt.DTypeLike = np.float64,
 ) -> Solution[ImplicitPressureSolution, None]:
     """
@@ -163,19 +164,15 @@ def solve_pressure(
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
         dtype=dtype,
     )
-    if net_well_rate_grid is not None:
-        well_rhs_additions = assemble_well_contributions(
-            net_well_rate_grid=net_well_rate_grid,
-            cell_count_x=cell_count_x,
-            cell_count_y=cell_count_y,
-            cell_count_z=cell_count_z,
-            dtype=dtype,
-        )
+    if rates is not None:
+        well_rhs_additions = rates.rhs_contributions
+        well_diagonal_additions = rates.diagonal_contributions
     else:
         well_rhs_additions = 0
+        well_diagonal_additions = 0
 
-    # Merge into final diagonal and b.
-    diagonal = diagonal_values + diagonal_additions
+    # Merge into final diagonal and RHS.
+    diagonal = diagonal_values + diagonal_additions + well_diagonal_additions
     residual_vector = rhs_values + rhs_additions + well_rhs_additions
 
     cell_count = cell_count_x * cell_count_y * cell_count_z
@@ -1106,49 +1103,3 @@ def compute_face_fluxes(
         * md_per_cp_to_ft2_per_psi_per_day
     )
     return (total_transmissibility, total_capillary_flux, total_gravity_flux)
-
-
-@numba.njit(cache=True)
-def assemble_well_contributions(
-    net_well_rate_grid: ThreeDimensionalGrid,
-    cell_count_x: int,
-    cell_count_y: int,
-    cell_count_z: int,
-    dtype: npt.DTypeLike,
-) -> npt.NDArray:
-    """
-    Build the RHS well source/sink contributions for the implicit pressure
-    linear system from the pre-computed explicit well rate grid.
-
-    Because wells are treated explicitly, their rates are frozen at
-    start-of-step values and added directly to the RHS vector `b` with no
-    diagonal (Jacobian) contribution. This removes all ambiguity around which
-    mobility or pseudo-pressure linearisation to use inside the pressure solve.
-
-    The relationship to the pressure equation accumulation term is:
-
-        (phi * c_t * V / dt) * (P^{n+1} - P^n) = sum_faces(T * lambda * dP) + Q_well
-
-    where `Q_well = net_well_rate_grid[i, j, k]` in ft³/day, already converted
-    to the correct sign convention (positive = injection, negative = production).
-
-    :param net_well_rate_grid: Total volumetric well rate per cell (ft³/day), positive
-        for injection and negative for production. Produced by `compute_well_rates`.
-    :param cell_count_x: Number of cells in the x-direction.
-    :param cell_count_y: Number of cells in the y-direction.
-    :param cell_count_z: Number of cells in the z-direction.
-    :param dtype: NumPy dtype for the output array.
-    :return: 1D array of length `cell_count_x * cell_count_y * cell_count_z`
-        containing the well RHS contribution for each cell, indexed by the
-        standard row-major 1D cell index used throughout the pressure Jacobian.
-    """
-    cell_count = cell_count_x * cell_count_y * cell_count_z
-    well_rhs_values = np.zeros(cell_count, dtype=dtype)
-
-    # Flatten to 1D and scatter only non-zero well cells
-    flat = net_well_rate_grid.ravel()
-    for idx in range(cell_count):
-        rate = flat[idx]
-        if rate != 0.0:
-            well_rhs_values[idx] = rate
-    return well_rhs_values

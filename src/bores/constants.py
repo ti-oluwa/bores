@@ -549,17 +549,17 @@ DEFAULT_CONSTANTS: typing.Dict[
     ),
     # Transmissibility Conversions
     "MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY": Constant(
-        value=0.001127,
+        value=7.08e-3,
         description="Conversion factor from mD/cP to ft²/(psi·day)",
         unit="(ft²/(psi·day))/(mD/cP)",
     ),
     "MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_SECOND": Constant(
-        value=0.001127 / 86400.0,
+        value=7.08e-3 / 86400.0,
         description="Conversion factor from mD/cP to ft²/(psi·s)",
         unit="(ft²/(psi·s))/(mD/cP)",
     ),
     "MILLIDARCIES_FT_PER_CENTIPOISE_TO_CUBIC_FEET_PER_PSI_PER_DAY": Constant(
-        value=0.001127,
+        value=7.08e-3,
         unit="(ft³/(psi·day))/(mD·ft/cP)",
         description="Conversion factor from mD·ft/cP to ft³/(psi·day)",
     ),

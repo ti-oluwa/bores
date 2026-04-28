@@ -187,7 +187,7 @@ timer = bores.Timer(
     minimum_step_size=bores.Time(minutes=1),
     simulation_time=bores.Time(days=200),
     maximum_rejections=20,
-    maximum_cfl=0.7,
+    maximum_cfl=0.8,
 )
 boundary_conditions = bores.BoundaryConditions(default=bores.NeumannBoundary(0))
 
@@ -205,8 +205,8 @@ config = bores.Config(
     maximum_pressure_change=500,
     output_frequency=5,  # Save every 5th step for analysis
     # minimum_injector_water_saturation=0.4,
-    cfl_threshold=0.6,
-    use_pseudo_pressure=False,
+    cfl_threshold=0.7,
+    # use_pseudo_pressure=True,
 )
 
 print("=" * 70)

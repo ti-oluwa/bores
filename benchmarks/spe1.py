@@ -672,6 +672,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
             molecular_weight=gas_molecular_weight,
             is_miscible=False,
             pseudo_pressure_table=pseudo_pressure_table,
+            pvt_table=pvt_tables.gas,
         ),
         is_active=True,
         skin_factor=0.0,
@@ -725,11 +726,9 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         initial_step_size=bores.Time(days=1.0),
         maximum_step_size=bores.Time(days=30.0),
         minimum_step_size=bores.Time(minutes=10.0),
-        simulation_time=bores.Time(years=8.0),
-        maximum_cfl=0.9,
-        ramp_up_factor=1.5,
-        backoff_factor=0.5,
-        aggressive_backoff_factor=0.25,
+        simulation_time=bores.Time(years=10.0),
+        maximum_cfl=0.5,
+        ramp_up_factor=1.3,
         maximum_rejections=20,
     )
 
@@ -752,9 +751,8 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         # maximum_oil_saturation_change=0.05,
         # maximum_water_saturation_change=0.05,
         # maximum_saturation_change=0.5,
-        maximum_pressure_change=2000.0,
-        use_pseudo_pressure=True,
-        normalize_saturations=True,
+        maximum_pressure_change=300.0,
+        # use_pseudo_pressure=True,
         cfl_threshold=0.4,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
@@ -864,12 +862,10 @@ def setup_analysis(bores, states):
         gas_saturation_history,
         gor_history,
         oil_rate_history,
-        oil_saturation_history,
         recovery_efficiency_history,
         volumetric_sweep_efficiency_history,
         water_cut_history,
         water_rate_history,
-        water_saturation_history,
     )
 
 
@@ -890,18 +886,12 @@ def _(avg_pressure_history, bores, np):
 
 
 @app.cell
-def saturation_plots(
-    bores,
-    gas_saturation_history,
-    np,
-    oil_saturation_history,
-    water_saturation_history,
-):
+def saturation_plots(bores, gas_saturation_history, np):
     # Saturation
     saturation_fig = bores.make_series_plot(
         data={
-            "Avg. Water Saturation": np.array(water_saturation_history),
-            "Avg. Oil Saturation": np.array(oil_saturation_history),
+            # "Avg. Water Saturation": np.array(water_saturation_history),
+            # "Avg. Oil Saturation": np.array(oil_saturation_history),
             "Avg. Gas Saturation": np.array(gas_saturation_history),
         },
         title="Saturation Analysis",
@@ -1206,7 +1196,7 @@ def _(bores, states, viz, wells):
     labels.add_well_labels(well_positions, well_names)
 
     shared_kwargs = dict(
-        plot_type="isosurface",
+        plot_type="cell_blocks",
         width=1200,
         height=720,
         # opacity=0.7,
@@ -1222,9 +1212,9 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "pressure"
+    property = "oil-sat"
     figures = []
-    timesteps = [240]
+    timesteps = [354]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

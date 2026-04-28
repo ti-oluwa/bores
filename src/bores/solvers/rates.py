@@ -14,16 +14,19 @@ from bores.datastructures import (
     SparseTensor,
 )
 from bores.models import FluidProperties
-from bores.solvers.base import _warn_injection_rate, _warn_production_rate
+from bores.solvers.base import _warn_injection_rate, _warn_production_rate, to_1D_index
 from bores.types import (
     FluidPhase,
     NDimension,
     NDimensionalGrid,
+    OneDimension,
     ThreeDimensionalGrid,
     ThreeDimensions,
+    TwoDimensions,
 )
 from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
+from bores.wells.core import get_pseudo_pressure_table
 from bores.wells.indices import WellsIndices
 
 
@@ -32,17 +35,7 @@ class WellRates(typing.Generic[NDimension]):
     """
     Container for all well rate quantities computed in a single explicit pass
     over all injection and production perforations.
-
-    The scalar grids (`net_well_rate_grid`, `net_water_well_rate_grid`, etc.)
-    are 3-D arrays of shape `(nx, ny, nz)` in ft³/day. Positive values denote
-    injection (source) and negative values denote production (sink).
-
-    The per-phase tensors (`injection_rates`, `production_rates`, etc.) use
-    `(water, oil, gas)` ordering throughout and carry the same sign convention.
     """
-
-    net_well_rate_grid: NDimensionalGrid[ThreeDimensions]
-    """Total net volumetric rate per cell across all phases (ft³/day)."""
 
     net_water_well_rate_grid: NDimensionalGrid[ThreeDimensions]
     """Net volumetric water rate per cell (ft³/day)."""
@@ -86,6 +79,12 @@ class WellRates(typing.Generic[NDimension]):
     production_bhps: BottomHolePressures[float, ThreeDimensions]
     """Effective bottom hole pressures for production perforations (psi)."""
 
+    diagonal_contributions: NDimensionalGrid[OneDimension]
+    """Wells' diagonal contributions to the pressure Jacobian"""
+
+    rhs_contributions: NDimensionalGrid[OneDimension]
+    """Wells' right-hand side contributions to the pressure Jacobian"""
+
 
 def compute_well_rates(
     fluid_properties: FluidProperties[ThreeDimensions],
@@ -122,10 +121,8 @@ def compute_well_rates(
     pressure_grid = fluid_properties.pressure_grid
     grid_shape = pressure_grid.shape
     cell_count_x, cell_count_y, cell_count_z = grid_shape
+    cell_count = cell_count_x * cell_count_y * cell_count_z
 
-    net_well_rate_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
     net_water_well_rate_grid = np.zeros(
         (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
     )
@@ -144,6 +141,8 @@ def compute_well_rates(
     net_gas_well_mass_rate_grid = np.zeros(
         (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
     )
+    rhs_contributions = np.zeros(cell_count, dtype=dtype)
+    diagonal_contributions = np.zeros(cell_count, dtype=dtype)
 
     injection_rates = Rates(
         oil=SparseTensor(grid_shape, dtype=float),
@@ -234,15 +233,9 @@ def compute_well_rates(
                     pressure=cell_pressure, temperature=cell_temperature
                 ),
             )
-            total_relative_mobility = typing.cast(
-                float,
-                water_relative_mobility_grid[i, j, k]
-                + oil_relative_mobility_grid[i, j, k]
-                + gas_relative_mobility_grid[i, j, k],
-            )
 
             if is_gas:
-                # Only need for oil and water
+                # Only needed for oil and water
                 phase_compressibility = None
             else:
                 phase_compressibility = typing.cast(
@@ -258,19 +251,18 @@ def compute_well_rates(
                     ),
                 )
 
-            print(
-                well_index,
-                total_relative_mobility,
-                phase_fvf,
-                cell_pressure,
-                phase_viscosity,
+            phase_mobility = typing.cast(
+                float,
+                water_relative_mobility_grid[i, j, k]
+                + oil_relative_mobility_grid[i, j, k]
+                + gas_relative_mobility_grid[i, j, k],
             )
-            flow_rate, effective_bhp = well.get_control(
+            control = well.get_control(
                 pressure=cell_pressure,
                 temperature=cell_temperature,
                 well_index=well_index,
                 phase_viscosity=phase_viscosity,
-                phase_mobility=total_relative_mobility,
+                phase_mobility=phase_mobility,
                 fluid=injected_fluid,
                 fluid_compressibility=phase_compressibility,
                 use_pseudo_pressure=use_pseudo_pressure,
@@ -278,6 +270,9 @@ def compute_well_rates(
                 allocation_fraction=allocation_fraction,
                 pvt_tables=None,
             )
+            flow_rate = control.rate
+            effective_bhp = control.bhp
+
             if flow_rate < 0.0 and config.warn_well_anomalies:
                 _warn_injection_rate(
                     injection_rate=flow_rate,
@@ -287,6 +282,53 @@ def compute_well_rates(
                     rate_unit="ft³/day" if is_gas else "bbls/day",
                 )
 
+            # When bhp returned is same as cell pressure, there no drawdown
+            # so no flow. Hence, bhp should be unset, and no rhs or diagonal addition should be made
+            can_flow = effective_bhp != cell_pressure
+            cell_idx = to_1D_index(
+                i=i,
+                j=j,
+                k=k,
+                cell_count_x=cell_count_x,
+                cell_count_y=cell_count_y,
+                cell_count_z=cell_count_z,
+            )
+            if can_flow:
+                if not is_gas:
+                    # Regular linear
+                    well_transmissibility = well_index * phase_mobility * 7.08e-3
+                    diagonal_contributions[cell_idx] += well_transmissibility
+                    rhs_contributions[cell_idx] += well_transmissibility * effective_bhp
+                elif not use_pseudo_pressure:
+                    # Pressure square linearization
+                    well_transmissibility = (
+                        well_index * phase_mobility * phase_viscosity * 7.08e-3
+                    )
+                    coefficient = 2 * cell_pressure
+                    diagonal_contributions[cell_idx] += (
+                        well_transmissibility * coefficient
+                    )
+                    rhs_contributions[cell_idx] += (
+                        well_transmissibility * coefficient * effective_bhp
+                    )
+                else:
+                    # Pseudo pressure linearization
+                    well_transmissibility = (
+                        well_index * phase_mobility * phase_viscosity * 7.08e-3
+                    )
+                    _, pseudo_pressure_table = get_pseudo_pressure_table(
+                        fluid=injected_fluid,
+                        temperature=cell_temperature,
+                        use_pseudo_pressure=True,
+                        pvt_tables=None,
+                    )
+                    assert pseudo_pressure_table is not None
+                    dm_dp = pseudo_pressure_table.gradient(cell_pressure)
+                    diagonal_contributions[cell_idx] += well_transmissibility * dm_dp
+                    rhs_contributions[cell_idx] += (
+                        well_transmissibility * dm_dp * effective_bhp
+                    )
+
             phase_density = typing.cast(
                 float,
                 injected_fluid.get_density(
@@ -294,23 +336,21 @@ def compute_well_rates(
                 ),
             )
             if is_gas:
-                net_well_rate_grid[i, j, k] += flow_rate
                 net_gas_well_rate_grid[i, j, k] += flow_rate
                 net_gas_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 injection_rates.gas[i, j, k] = flow_rate
                 injection_mass_rates.gas[i, j, k] = flow_rate * phase_density
                 injection_fvfs.gas[i, j, k] = phase_fvf
-                if effective_bhp != cell_pressure:
+                if can_flow:
                     injection_bhps.gas[i, j, k] = effective_bhp
             else:
                 flow_rate *= bbl_to_ft3
-                net_well_rate_grid[i, j, k] += flow_rate
                 net_water_well_rate_grid[i, j, k] += flow_rate
                 net_water_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 injection_rates.water[i, j, k] += flow_rate
                 injection_mass_rates.water[i, j, k] += flow_rate * phase_density
                 injection_fvfs.water[i, j, k] = phase_fvf
-                if effective_bhp != cell_pressure:
+                if can_flow:
                     injection_bhps.water[i, j, k] = effective_bhp
 
     # Production wells
@@ -387,7 +427,7 @@ def compute_well_rates(
                         float, water_formation_volume_factor_grid[i, j, k]
                     )
                     phase_viscosity = typing.cast(float, water_viscosity_grid[i, j, k])
-                else:  # Oil
+                else:
                     phase_mobility = typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]
                     )
@@ -399,7 +439,7 @@ def compute_well_rates(
                     )
                     phase_viscosity = typing.cast(float, oil_viscosity_grid[i, j, k])
 
-                flow_rate, effective_bhp = well.get_control(
+                control = well.get_control(
                     pressure=cell_pressure,
                     temperature=cell_temperature,
                     well_index=well_index,
@@ -413,6 +453,9 @@ def compute_well_rates(
                     pvt_tables=config.pvt_tables,
                     **context,
                 )
+                flow_rate = control.rate
+                effective_bhp = control.bhp
+
                 if flow_rate > 0.0 and config.warn_well_anomalies:
                     _warn_production_rate(
                         production_rate=flow_rate,
@@ -422,15 +465,60 @@ def compute_well_rates(
                         rate_unit="ft³/day" if is_gas else "bbls/day",
                     )
 
+                can_flow = effective_bhp != cell_pressure
+                cell_idx = to_1D_index(
+                    i=i,
+                    j=j,
+                    k=k,
+                    cell_count_x=cell_count_x,
+                    cell_count_y=cell_count_y,
+                    cell_count_z=cell_count_z,
+                )
+                if can_flow:
+                    if not is_gas:
+                        phase_transmissibility = well_index * phase_mobility * 7.08e-3
+                        diagonal_contributions[cell_idx] += phase_transmissibility
+                        rhs_contributions[cell_idx] += (
+                            phase_transmissibility * effective_bhp
+                        )
+                    elif not use_pseudo_pressure:
+                        # Pressure square linearization
+                        phase_transmissibility = (
+                            well_index * phase_mobility * phase_viscosity * 7.08e-3
+                        )
+                        coefficient = 2 * cell_pressure
+                        diagonal_contributions[cell_idx] += (
+                            phase_transmissibility * coefficient
+                        )
+                        rhs_contributions[cell_idx] += (
+                            phase_transmissibility * coefficient * effective_bhp
+                        )
+                    else:
+                        # Pseudo pressure linearization
+                        phase_transmissibility = (
+                            well_index * phase_mobility * phase_viscosity * 7.08e-3
+                        )
+                        _, pseudo_pressure_table = get_pseudo_pressure_table(
+                            fluid=produced_fluid,
+                            temperature=cell_temperature,
+                            use_pseudo_pressure=True,
+                            pvt_tables=config.pvt_tables,
+                        )
+                        assert pseudo_pressure_table is not None
+                        dm_dp = pseudo_pressure_table.gradient(cell_pressure)
+                        diagonal_contributions[cell_idx] += (
+                            phase_transmissibility * dm_dp
+                        )
+                        rhs_contributions[cell_idx] += (
+                            phase_transmissibility * dm_dp * effective_bhp
+                        )
+
                 if is_gas:
                     phase_density = typing.cast(float, gas_density_grid[i, j, k])
-                    net_well_rate_grid[i, j, k] += flow_rate
                     gas_flow_rate += flow_rate
                     gas_mass_flow_rate += flow_rate * phase_density
                     gas_phase_fvf = phase_fvf
-                    # When bhp returned is same as cell pressure, there no drawdown
-                    # so no flow. Hence, bhp should be unset
-                    if effective_bhp != cell_pressure:
+                    if can_flow:
                         gas_effective_bhp = effective_bhp
 
                     net_gas_well_rate_grid[i, j, k] += flow_rate
@@ -438,11 +526,10 @@ def compute_well_rates(
                 elif is_water:
                     phase_density = typing.cast(float, water_density_grid[i, j, k])
                     flow_rate *= bbl_to_ft3
-                    net_well_rate_grid[i, j, k] += flow_rate
                     water_flow_rate += flow_rate
                     water_mass_flow_rate += flow_rate * phase_density
                     water_phase_fvf = phase_fvf
-                    if effective_bhp != cell_pressure:
+                    if can_flow:
                         water_effective_bhp = effective_bhp
 
                     net_water_well_rate_grid[i, j, k] += flow_rate
@@ -450,11 +537,10 @@ def compute_well_rates(
                 else:
                     phase_density = typing.cast(float, oil_density_grid[i, j, k])
                     flow_rate *= bbl_to_ft3
-                    net_well_rate_grid[i, j, k] += flow_rate
                     oil_flow_rate += flow_rate
                     oil_mass_flow_rate += flow_rate * phase_density
                     oil_phase_fvf = phase_fvf
-                    if effective_bhp != cell_pressure:
+                    if can_flow:
                         oil_effective_bhp = effective_bhp
 
                     net_oil_well_rate_grid[i, j, k] += flow_rate
@@ -474,7 +560,6 @@ def compute_well_rates(
             )
 
     return WellRates(
-        net_well_rate_grid=net_well_rate_grid,
         net_water_well_rate_grid=net_water_well_rate_grid,
         net_oil_well_rate_grid=net_oil_well_rate_grid,
         net_gas_well_rate_grid=net_gas_well_rate_grid,
@@ -489,4 +574,6 @@ def compute_well_rates(
         production_fvfs=production_fvfs,
         injection_bhps=injection_bhps,
         production_bhps=production_bhps,
+        rhs_contributions=rhs_contributions,
+        diagonal_contributions=diagonal_contributions,
     )

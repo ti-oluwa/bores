@@ -83,7 +83,7 @@ injector = bores.injection_well(
     perforating_intervals=[((0, 0, 2), (0, 0, 2))],
     radius=0.25,
     control=bores.AdaptiveRateControl(
-        target_rate=5000,
+        target_rate=10000,
         bhp_limit=8000.0,
         clamp=bores.InjectionClamp(),
     ),
@@ -161,7 +161,7 @@ config = bores.Config(
     # freeze_saturation_pressure=True,
     # disable_capillary_effects=True,
     cfl_threshold=0.5,
-    # minimum_injector_water_saturation=0.1
+    minimum_injector_water_saturation=0.5
 )
 
 
