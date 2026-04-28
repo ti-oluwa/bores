@@ -258,6 +258,13 @@ def compute_well_rates(
                     ),
                 )
 
+            print(
+                well_index,
+                total_relative_mobility,
+                phase_fvf,
+                cell_pressure,
+                phase_viscosity,
+            )
             flow_rate, effective_bhp = well.get_control(
                 pressure=cell_pressure,
                 temperature=cell_temperature,

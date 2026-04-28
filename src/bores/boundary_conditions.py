@@ -1424,27 +1424,39 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
     ```
     """
 
-    default: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    default: BoundaryCondition[NDimension] = attrs.field(factory=NeumannBoundary)
     """Default boundary condition applied to unset faces."""
-    left: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
+    left: BoundaryCondition[NDimension] = attrs.field(
+        factory=BoundaryCondition, kw_only=True
+    )
     """Condition for the x- face (west)."""
-    right: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
+    right: BoundaryCondition[NDimension] = attrs.field(
+        factory=BoundaryCondition, kw_only=True
+    )
     """Condition for the x+ face (east)."""
-    front: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
+    front: BoundaryCondition[NDimension] = attrs.field(
+        factory=BoundaryCondition, kw_only=True
+    )
     """Condition for the y- face (south)."""
-    back: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
+    back: BoundaryCondition[NDimension] = attrs.field(
+        factory=BoundaryCondition, kw_only=True
+    )
     """Condition for the y+ face (north)."""
-    bottom: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
+    bottom: BoundaryCondition[NDimension] = attrs.field(
+        factory=BoundaryCondition, kw_only=True
+    )
     """Condition for the z- face (shallowest layer)."""
-    top: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
+    top: BoundaryCondition[NDimension] = attrs.field(
+        factory=BoundaryCondition, kw_only=True
+    )
     """Condition for the z+ face (deepest layer)."""
 
-    _flux_cache: typing.Optional[NDimensionalGrid] = attrs.field(
+    _flux_cache: typing.Optional[NDimensionalGrid[NDimension]] = attrs.field(
         default=None, init=False, repr=False
     )
     """Cached sparse flux boundary grid (NaN where no flux BC)."""
 
-    _pressure_cache: typing.Optional[NDimensionalGrid] = attrs.field(
+    _pressure_cache: typing.Optional[NDimensionalGrid[NDimension]] = attrs.field(
         default=None, init=False, repr=False
     )
     """Cached sparse pressure boundary grid (NaN where no pressure BC)."""
@@ -1518,14 +1530,14 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
 
     def _face_conditions(
         self, ndim: int
-    ) -> typing.List[typing.Tuple[Boundary, BoundaryCondition]]:
+    ) -> typing.List[typing.Tuple[Boundary, BoundaryCondition[NDimension]]]:
         """
         Return the (direction, condition) pairs active for a grid of *ndim* dimensions.
 
         :param ndim: Grid dimensionality (2 or 3).
         :return: List of ``(Boundary, BoundaryCondition)`` pairs.
         """
-        pairs: typing.List[typing.Tuple[Boundary, BoundaryCondition]] = [
+        pairs: typing.List[typing.Tuple[Boundary, BoundaryCondition[NDimension]]] = [
             (Boundary.LEFT, self.left),
             (Boundary.RIGHT, self.right),
             (Boundary.FRONT, self.front),
@@ -1542,10 +1554,10 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
 
     def get_boundaries(
         self,
-        grid_shape: typing.Tuple[int, ...],
+        grid_shape: NDimension,
         metadata: BoundaryMetadata,
         pad_width: int = 1,
-    ) -> typing.Tuple[NDimensionalGrid, NDimensionalGrid]:
+    ) -> typing.Tuple[NDimensionalGrid[NDimension], NDimensionalGrid[NDimension]]:
         """
         Evaluate all face boundary conditions and return two sparse boundary grids.
 
@@ -1637,13 +1649,15 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         if first_call:
             object.__setattr__(self, "_cache_initialised", True)
 
-        return flux_cache, pressure_cache
+        return typing.cast(NDimensionalGrid[NDimension], flux_cache), typing.cast(
+            NDimensionalGrid[NDimension], pressure_cache
+        )
 
     def refresh_boundaries(
         self,
         metadata: BoundaryMetadata,
         pad_width: int = 1,
-    ) -> typing.Tuple[NDimensionalGrid, NDimensionalGrid]:
+    ) -> typing.Tuple[NDimensionalGrid[NDimension], NDimensionalGrid[NDimension]]:
         """
         Re-evaluate (only dynamic or time-dependent) boundary conditions.
 
@@ -1718,7 +1732,7 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
 
     @classmethod
     def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        def _load_face(key: str) -> BoundaryCondition:
+        def _load_face(key: str) -> BoundaryCondition[NDimension]:
             face_data = data.get(key)
             if face_data is None:
                 return BoundaryCondition()

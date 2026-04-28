@@ -1818,7 +1818,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             )
             return ControlInfo(rate=final_rate, bhp=final_bhp, is_bhp_control=False)
 
-        # BHP mode: operate at bhp_limit and compute the resulting Darcy rate.
+        # BHP mode: operate at `bhp_limit` and compute the resulting Darcy rate.
         logger.debug(
             f"Adaptive control - BHP mode at {bhp_limit:.3f} psi "
             f"(target rate not achievable within pressure constraints)"
@@ -1841,7 +1841,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 )
             specific_gravity = typing.cast(float, specific_gravity)
 
-            # Z-factor averaged between reservoir pressure and bhp_limit - single compute.
+            # Z-factor averaged between reservoir pressure and bhp_limit.
             avg_z_factor = compute_average_compressibility_factor(
                 pressure=pressure,
                 temperature=temperature,

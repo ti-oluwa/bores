@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.DEBUG)
 # Layer centres at 8335, 8360, 8400 ft subsea
 # -------------------------------------------------------------------------
 cell_dimension = (1000.0, 1000.0)  # DX, DY in feet
-grid_shape = (10, 10, 3)
+grid_shape = typing.cast(bores.ThreeDimensions, (10, 10, 3))
 
 layer_thicknesses = bores.array([20.0, 30.0, 50.0])  # ft, layers 1-3
 thickness_grid = bores.layered_grid(
@@ -606,7 +606,7 @@ injector = bores.injection_well(
     control=bores.AdaptiveRateControl(
         target_rate=100.0e6,  # 100 MMscf/D
         bhp_limit=9011.0,  # max injection BHP (psia)
-        clamp=bores.InjectionClamp(),
+        # clamp=bores.InjectionClamp(),
     ),
     injected_fluid=bores.InjectedFluid(
         name="Gas",
@@ -614,6 +614,7 @@ injector = bores.injection_well(
         specific_gravity=0.792,
         molecular_weight=gas_molecular_weight,
         is_miscible=False,
+        pvt_table=pvt_tables.gas,
         pseudo_pressure_table=pseudo_pressure_table,
     ),
     is_active=True,
@@ -658,7 +659,7 @@ producer = bores.production_well(
     skin_factor=0.0,
     is_active=True,
 )
-wells = bores.wells_(injectors=[injector], producers=[producer])
+wells = bores.wells_(injectors=[injector], producers=[])
 
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1.0),
@@ -682,11 +683,11 @@ config = bores.Config(
     wells=wells,
     disable_capillary_effects=True,
     # freeze_saturation_pressure=True,
-    # maximum_gas_saturation_change=0.7,
-    # maximum_oil_saturation_change=0.7,
-    # maximum_water_saturation_change=0.5,
+    maximum_gas_saturation_change=0.05,
+    maximum_oil_saturation_change=0.05,
+    maximum_water_saturation_change=0.05,
     maximum_pressure_change=1500.0,
-    # use_pseudo_pressure=True,
+    use_pseudo_pressure=True,
     cfl_threshold=0.8,
     # minimum_injector_gas_saturation=0.2,
 )
