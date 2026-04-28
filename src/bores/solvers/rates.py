@@ -228,19 +228,13 @@ def compute_well_rates(
                     pressure=cell_pressure, temperature=cell_temperature
                 ),
             )
-            phase_density = typing.cast(
-                float,
-                injected_fluid.get_density(
-                    pressure=cell_pressure, temperature=cell_temperature
-                ),
-            )
             phase_viscosity = typing.cast(
                 float,
                 injected_fluid.get_viscosity(
                     pressure=cell_pressure, temperature=cell_temperature
                 ),
             )
-            total_mobility = typing.cast(
+            total_relative_mobility = typing.cast(
                 float,
                 water_relative_mobility_grid[i, j, k]
                 + oil_relative_mobility_grid[i, j, k]
@@ -248,12 +242,8 @@ def compute_well_rates(
             )
 
             if is_gas:
-                phase_compressibility = typing.cast(
-                    float,
-                    injected_fluid.get_compressibility(
-                        pressure=cell_pressure, temperature=cell_temperature
-                    ),
-                )
+                # Only need for oil and water
+                phase_compressibility = None
             else:
                 phase_compressibility = typing.cast(
                     float,
@@ -273,7 +263,7 @@ def compute_well_rates(
                 temperature=cell_temperature,
                 well_index=well_index,
                 phase_viscosity=phase_viscosity,
-                phase_mobility=total_mobility,
+                phase_mobility=total_relative_mobility,
                 fluid=injected_fluid,
                 fluid_compressibility=phase_compressibility,
                 use_pseudo_pressure=use_pseudo_pressure,
@@ -290,6 +280,12 @@ def compute_well_rates(
                     rate_unit="ft³/day" if is_gas else "bbls/day",
                 )
 
+            phase_density = typing.cast(
+                float,
+                injected_fluid.get_density(
+                    pressure=cell_pressure, temperature=cell_temperature
+                ),
+            )
             if is_gas:
                 net_well_rate_grid[i, j, k] += flow_rate
                 net_gas_well_rate_grid[i, j, k] += flow_rate
@@ -366,7 +362,6 @@ def compute_well_rates(
                     phase_mobility = typing.cast(
                         float, gas_relative_mobility_grid[i, j, k]
                     )
-                    phase_density = typing.cast(float, gas_density_grid[i, j, k])
                     phase_compressibility = typing.cast(
                         float, gas_compressibility_grid[i, j, k]
                     )
@@ -378,7 +373,6 @@ def compute_well_rates(
                     phase_mobility = typing.cast(
                         float, water_relative_mobility_grid[i, j, k]
                     )
-                    phase_density = typing.cast(float, water_density_grid[i, j, k])
                     phase_compressibility = typing.cast(
                         float, water_compressibility_grid[i, j, k]
                     )
@@ -390,7 +384,6 @@ def compute_well_rates(
                     phase_mobility = typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]
                     )
-                    phase_density = typing.cast(float, oil_density_grid[i, j, k])
                     phase_compressibility = typing.cast(
                         float, oil_compressibility_grid[i, j, k]
                     )
@@ -423,6 +416,7 @@ def compute_well_rates(
                     )
 
                 if is_gas:
+                    phase_density = typing.cast(float, gas_density_grid[i, j, k])
                     net_well_rate_grid[i, j, k] += flow_rate
                     gas_flow_rate += flow_rate
                     gas_mass_flow_rate += flow_rate * phase_density
@@ -435,6 +429,7 @@ def compute_well_rates(
                     net_gas_well_rate_grid[i, j, k] += flow_rate
                     net_gas_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 elif is_water:
+                    phase_density = typing.cast(float, water_density_grid[i, j, k])
                     flow_rate *= bbl_to_ft3
                     net_well_rate_grid[i, j, k] += flow_rate
                     water_flow_rate += flow_rate
@@ -446,6 +441,7 @@ def compute_well_rates(
                     net_water_well_rate_grid[i, j, k] += flow_rate
                     net_water_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 else:
+                    phase_density = typing.cast(float, oil_density_grid[i, j, k])
                     flow_rate *= bbl_to_ft3
                     net_well_rate_grid[i, j, k] += flow_rate
                     oil_flow_rate += flow_rate

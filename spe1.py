@@ -553,7 +553,7 @@ oil_water_table = bores.TwoPhaseRelPermTable(
 relative_permeability_table = bores.ThreePhaseRelPermTable(
     oil_water_table=oil_water_table,
     gas_oil_table=gas_oil_table,
-    mixing_rule="eclipse_rule",
+    mixing_rule="stone_I_rule",
 )
 rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=relative_permeability_table
@@ -614,7 +614,6 @@ injector = bores.injection_well(
         specific_gravity=0.792,
         molecular_weight=gas_molecular_weight,
         is_miscible=False,
-        pvt_table=pvt_tables.gas,
         pseudo_pressure_table=pseudo_pressure_table,
     ),
     is_active=True,
@@ -668,8 +667,6 @@ timer = bores.Timer(
     simulation_time=bores.Time(years=10.0),
     maximum_cfl=0.8,
     ramp_up_factor=1.3,
-    backoff_factor=0.5,
-    aggressive_backoff_factor=0.25,
     maximum_rejections=20,
 )
 
@@ -688,11 +685,10 @@ config = bores.Config(
     # maximum_gas_saturation_change=0.7,
     # maximum_oil_saturation_change=0.7,
     # maximum_water_saturation_change=0.5,
-    maximum_pressure_change=500.0,
-    use_pseudo_pressure=True,
-    phase_appearance_tolerance=1e-6,
+    maximum_pressure_change=1500.0,
+    # use_pseudo_pressure=True,
     cfl_threshold=0.8,
-    # minimum_injector_gas_saturation=0.1,
+    # minimum_injector_gas_saturation=0.2,
 )
 
 # Run and monitor the simulation and collect states

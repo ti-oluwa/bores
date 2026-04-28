@@ -4,6 +4,7 @@ import enum
 import functools
 import threading
 import typing
+from dataclasses import KW_ONLY
 
 import attrs
 import numpy as np
@@ -729,10 +730,10 @@ class DirichletBoundary(BoundaryCondition[NDimension]):
     Example:
 
     ```python
-    # Fixed pressure inlet at 3 000 psi
+    # Fixed pressure inlet at 3000 psi
     inlet = DirichletBoundary(pressure=3000.0)
 
-    # Fixed pressure outlet at 1 200 psi
+    # Fixed pressure outlet at 1200 psi
     outlet = DirichletBoundary(pressure=1200.0)
     ```
     """
@@ -1411,8 +1412,8 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
     bc = BoundaryConditions(
         left=DirichletBoundary(pressure=3000.0),
         right=RobinBoundary(pressure=1500.0, alpha=alpha),
-        front=NeumannBoundary(),   # no-flow
-        back=NeumannBoundary(),    # no-flow
+        front=...,   # no-flow (by default)
+        back=...,    # no-flow (by default)
     )
 
     flux_grid, pressure_grid = bc.get_boundaries(
@@ -1423,17 +1424,19 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
     ```
     """
 
-    left: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    default: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    """Default boundary condition applied to unset faces."""
+    left: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
     """Condition for the x- face (west)."""
-    right: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    right: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
     """Condition for the x+ face (east)."""
-    front: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    front: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
     """Condition for the y- face (south)."""
-    back: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    back: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
     """Condition for the y+ face (north)."""
-    bottom: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    bottom: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
     """Condition for the z- face (shallowest layer)."""
-    top: BoundaryCondition = attrs.field(factory=NeumannBoundary)
+    top: BoundaryCondition = attrs.field(factory=BoundaryCondition, kw_only=True)
     """Condition for the z+ face (deepest layer)."""
 
     _flux_cache: typing.Optional[NDimensionalGrid] = attrs.field(
@@ -1453,6 +1456,65 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         default=None, init=False, repr=False
     )
     """Cache indicating whether all boundary conditions are static (determined on first call)."""
+
+    _all_no_flow: bool = attrs.field(default=False, init=False, repr=False)
+    """*True* if all boundary conditions are no-flow (`NeumannBoundary`)."""
+
+    _all_neumann: bool = attrs.field(default=False, init=False, repr=False)
+    """*True* if all boundary conditions are `NeumannBoundary`."""
+
+    _all_dirichlet: bool = attrs.field(default=False, init=False, repr=False)
+    """*True* if all boundary conditions are `DirichletBoundary`."""
+
+    def __attrs_post_init__(self) -> None:
+        # Fill faces that are the abstract base `BoundaryCondition` with the default
+        if type(self.left) is BoundaryCondition:
+            object.__setattr__(self, "left", self.default)
+        if type(self.right) is BoundaryCondition:
+            object.__setattr__(self, "right", self.default)
+        if type(self.front) is BoundaryCondition:
+            object.__setattr__(self, "front", self.default)
+        if type(self.back) is BoundaryCondition:
+            object.__setattr__(self, "back", self.default)
+        if type(self.bottom) is BoundaryCondition:
+            object.__setattr__(self, "bottom", self.default)
+        if type(self.top) is BoundaryCondition:
+            object.__setattr__(self, "top", self.default)
+
+        all_conditions = [
+            self.left,
+            self.right,
+            self.front,
+            self.back,
+            self.bottom,
+            self.top,
+        ]
+        all_no_flow = all(
+            isinstance(cond, NeumannBoundary) and cond.is_noflow()
+            for cond in all_conditions
+        )
+        all_neumann = all(isinstance(cond, NeumannBoundary) for cond in all_conditions)
+        all_dirichlet = all(
+            isinstance(cond, DirichletBoundary) for cond in all_conditions
+        )
+        object.__setattr__(self, "_all_no_flow", all_no_flow)
+        object.__setattr__(self, "_all_neumann", all_neumann)
+        object.__setattr__(self, "_all_dirichlet", all_dirichlet)
+
+    @property
+    def all_no_flow(self) -> bool:
+        """Return *True* if all boundary conditions are no-flow."""
+        return self._all_no_flow
+
+    @property
+    def all_neumann(self) -> bool:
+        """Return *True* if all boundary conditions are `NeumannBoundary`."""
+        return self._all_neumann
+
+    @property
+    def all_dirichlet(self) -> bool:
+        """Return *True* if all boundary conditions are `DirichletBoundary`."""
+        return self._all_dirichlet
 
     def _face_conditions(
         self, ndim: int
@@ -1645,6 +1707,7 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
 
     def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
         return {
+            "default": self.default.dump(recurse),
             "left": self.left.dump(recurse),
             "right": self.right.dump(recurse),
             "front": self.front.dump(recurse),
@@ -1658,10 +1721,11 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         def _load_face(key: str) -> BoundaryCondition:
             face_data = data.get(key)
             if face_data is None:
-                return NeumannBoundary()
+                return BoundaryCondition()
             return BoundaryCondition.load(face_data)  # type: ignore[return-value]
 
         return cls(
+            default=_load_face("default"),
             left=_load_face("left"),
             right=_load_face("right"),
             front=_load_face("front"),

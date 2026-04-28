@@ -189,12 +189,13 @@ timer = bores.Timer(
     maximum_rejections=20,
     maximum_cfl=0.7,
 )
-bc = bores.BoundaryConditions()
+boundary_conditions = bores.BoundaryConditions(default=bores.NeumannBoundary(0))
 
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
+    boundary_conditions=boundary_conditions,
     scheme="impes",
     pressure_solver="direct",
     transport_solver="direct",
