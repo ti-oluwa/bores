@@ -22,7 +22,6 @@ from bores.types import (
     OneDimension,
     ThreeDimensionalGrid,
     ThreeDimensions,
-    TwoDimensions,
 )
 from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
@@ -118,6 +117,9 @@ def compute_well_rates(
         denoting injection and negative values denoting production.
     """
     bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
+    md_per_cp_to_ft2_per_psi_per_day = (
+        c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
+    )
     pressure_grid = fluid_properties.pressure_grid
     grid_shape = pressure_grid.shape
     cell_count_x, cell_count_y, cell_count_z = grid_shape
@@ -296,13 +298,18 @@ def compute_well_rates(
             if can_flow:
                 if not is_gas:
                     # Regular linear
-                    well_transmissibility = well_index * phase_mobility * 7.08e-3
+                    well_transmissibility = (
+                        well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
+                    )
                     diagonal_contributions[cell_idx] += well_transmissibility
                     rhs_contributions[cell_idx] += well_transmissibility * effective_bhp
                 elif not use_pseudo_pressure:
                     # Pressure square linearization
                     well_transmissibility = (
-                        well_index * phase_mobility * phase_viscosity * 7.08e-3
+                        well_index
+                        * phase_mobility
+                        * phase_viscosity
+                        * md_per_cp_to_ft2_per_psi_per_day
                     )
                     coefficient = 2 * cell_pressure
                     diagonal_contributions[cell_idx] += (
@@ -314,7 +321,10 @@ def compute_well_rates(
                 else:
                     # Pseudo pressure linearization
                     well_transmissibility = (
-                        well_index * phase_mobility * phase_viscosity * 7.08e-3
+                        well_index
+                        * phase_mobility
+                        * phase_viscosity
+                        * md_per_cp_to_ft2_per_psi_per_day
                     )
                     _, pseudo_pressure_table = get_pseudo_pressure_table(
                         fluid=injected_fluid,
@@ -474,9 +484,13 @@ def compute_well_rates(
                     cell_count_y=cell_count_y,
                     cell_count_z=cell_count_z,
                 )
-                if can_flow:
+                if can_flow and control.is_bhp_control:
                     if not is_gas:
-                        phase_transmissibility = well_index * phase_mobility * 7.08e-3
+                        phase_transmissibility = (
+                            well_index
+                            * phase_mobility
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         diagonal_contributions[cell_idx] += phase_transmissibility
                         rhs_contributions[cell_idx] += (
                             phase_transmissibility * effective_bhp
@@ -484,7 +498,10 @@ def compute_well_rates(
                     elif not use_pseudo_pressure:
                         # Pressure square linearization
                         phase_transmissibility = (
-                            well_index * phase_mobility * phase_viscosity * 7.08e-3
+                            well_index
+                            * phase_mobility
+                            * phase_viscosity
+                            * md_per_cp_to_ft2_per_psi_per_day
                         )
                         coefficient = 2 * cell_pressure
                         diagonal_contributions[cell_idx] += (
@@ -496,7 +513,10 @@ def compute_well_rates(
                     else:
                         # Pseudo pressure linearization
                         phase_transmissibility = (
-                            well_index * phase_mobility * phase_viscosity * 7.08e-3
+                            well_index
+                            * phase_mobility
+                            * phase_viscosity
+                            * md_per_cp_to_ft2_per_psi_per_day
                         )
                         _, pseudo_pressure_table = get_pseudo_pressure_table(
                             fluid=produced_fluid,
@@ -512,6 +532,11 @@ def compute_well_rates(
                         rhs_contributions[cell_idx] += (
                             phase_transmissibility * dm_dp * effective_bhp
                         )
+                elif can_flow:
+                    if is_gas:
+                        rhs_contributions[cell_idx] += flow_rate
+                    else:
+                        rhs_contributions[cell_idx] += flow_rate * bbl_to_ft3
 
                 if is_gas:
                     phase_density = typing.cast(float, gas_density_grid[i, j, k])

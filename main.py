@@ -144,7 +144,6 @@ timer = bores.Timer(
     minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=30),
     maximum_rejections=20,
-    maximum_cfl=0.6,
 )
 
 # Simulation configuration
@@ -152,7 +151,7 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="impes",
+    scheme="si",
     pressure_solver="direct",
     transport_solver="direct",
     pressure_preconditioner=None,

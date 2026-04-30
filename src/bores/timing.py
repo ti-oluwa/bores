@@ -153,7 +153,7 @@ class Timer(StoreSerializable):
     """Minimum successful steps required before allowing aggressive growth. Higher values lead to more conservative growth."""
     maximum_growth_per_step: float = 1.3
     """Maximum multiplicative growth allowed per step (e.g., 1.3 = 30% max growth). Lower values lead to much smoother growth."""
-    cfl_safety_margin: float = 0.85
+    cfl_safety_margin: float = 0.95
     """Safety factor for CFL-based adjustments (target below max CFL)."""
     step_size_smoothing: float = 0.2
     """EMA smoothing factor (0 = no smoothing, 1 = maximum smoothing). Higher values lead to smoother step size changes and higher dampening of fluctuations."""
@@ -284,8 +284,6 @@ class Timer(StoreSerializable):
         Returns a factor in (0, 1] where:
         - 1.0 = excellent performance, allow normal growth
         - <1.0 = concerning trends, be more conservative
-
-        Uses rolling statistics to avoid expensive list comprehensions.
         """
         if self._recent_cfl_count < 3 and self._recent_newton_count < 3:
             return 1.0

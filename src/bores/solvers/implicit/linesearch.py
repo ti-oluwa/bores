@@ -1,0 +1,125 @@
+"""
+Cubic-interpolation line search (Moré-Thuente style).
+
+The cubic fit uses the current and previous residual norms and their approximate
+directional derivatives (taken as -||R||² since the Newton direction is a descent direction for 0.5·||R||²).
+"""
+
+import typing
+
+import numpy as np
+import numpy.typing as npt
+
+
+def cubic_min(
+    a: float, fa: float, dfa: float, b: float, fb: float, dfb: float
+) -> float:
+    """
+    Minimiser of the cubic through (a, fa) and (b, fb) with
+    derivatives dfa and dfb. Returns the minimiser clamped to [a, b].
+    """
+    d1 = dfa + dfb - 3.0 * (fb - fa) / (b - a)
+    discriminant = d1 * d1 - dfa * dfb
+    if discriminant < 0.0:
+        return 0.5 * (a + b)
+    
+    d2 = np.sqrt(discriminant)
+    alpha = b - (b - a) * (dfb + d2 - d1) / (dfb - dfa + 2.0 * d2)
+    return float(np.clip(alpha, a, b))
+
+
+def line_search(
+    saturation_vector: npt.NDArray,
+    saturation_change: npt.NDArray,
+    residual_norm_0: float,
+    compute_residual_norm_fn: typing.Callable[[npt.NDArray], float],
+    project_fn: typing.Callable[[npt.NDArray], npt.NDArray],
+    maximum_cuts: int = 8,
+    sufficient_decrease: float = 1e-4,
+    min_step: float = 1e-8,
+) -> typing.Tuple[npt.NDArray, float, float]:
+    """
+    Safeguarded cubic line search along `saturation_change`.
+
+    Implements the Armijo sufficient-decrease condition with a cubic interpolation fallback.
+
+    Parameters
+    ----------
+    saturation_vector:
+        Current packed [Sw, Sg, ...] iterate.
+    saturation_change:
+        Full Newton step  δS  (already damped by maximum_saturation_change).
+    residual_norm_0:
+        ||R(S_k)||  at the current iterate — used as the reference for the
+        Armijo condition.
+    compute_residual_norm_fn:
+        Callable that accepts a trial saturation vector and returns ||R||.
+        Must handle projection internally or caller must project before passing.
+    project_fn:
+        Projects a trial vector onto the feasible simplex (Sw>=0, Sg>=0,
+        Sw+Sg<=1).
+    maximum_cuts:
+        Maximum number of step-size reductions.
+    sufficient_decrease:
+        Armijo constant c₁.  Condition: ||R(S+α·δS)|| < (1 - c₁·α)·||R(S)||.
+        Use a small value (1e-4) so the condition is easy to satisfy initially.
+    min_step:
+        Minimum step size before giving up and accepting the best found.
+
+    Returns
+    -------
+    trial_vector:
+        Projected trial saturation vector.
+    alpha:
+        Accepted step size.
+    trial_norm:
+        ||R|| at the accepted step.
+    """
+    alpha_prev = 0.0
+    norm_prev = residual_norm_0
+    # Approximate directional derivative: d/dα ||R||² at α=0 ≈ -2·||R_0||²
+    # (Newton direction is a descent direction for 0.5·||R||²)
+    dfa = -residual_norm_0 * residual_norm_0
+
+    alpha = 1.0
+    best_alpha = 1.0
+    best_norm = float("inf")
+    best_vector = project_fn(saturation_vector + saturation_change)
+
+    for _ in range(maximum_cuts):
+        trial = project_fn(saturation_vector + alpha * saturation_change)
+        norm = compute_residual_norm_fn(trial)
+
+        if norm < best_norm:
+            best_norm = norm
+            best_alpha = alpha
+            best_vector = trial
+
+        # Armijo sufficient-decrease check
+        if norm < residual_norm_0 * (1.0 - sufficient_decrease * alpha):
+            return trial, alpha, norm
+
+        if alpha < min_step:
+            break
+
+        # Cubic interpolation for next trial step
+        # Approximate derivative at current α by finite difference
+        dfb = (norm * norm - norm_prev * norm_prev) / max(alpha - alpha_prev, 1e-14)
+        alpha_next = cubic_min(
+            alpha_prev,
+            norm_prev * norm_prev,
+            dfa,
+            alpha,
+            norm * norm,
+            dfb,
+        )
+        # Safety bounds: stay in (0.1·alpha, 0.9·alpha)
+        alpha_next = float(np.clip(alpha_next, 0.1 * alpha, 0.9 * alpha))
+
+        alpha_prev = alpha
+        norm_prev = norm
+        dfa = dfb
+        alpha = alpha_next
+
+    # No sufficient decrease found so we return the best we have
+    return best_vector, best_alpha, best_norm

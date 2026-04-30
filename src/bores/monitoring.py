@@ -1000,8 +1000,8 @@ def build_rich_panel(
 
     # Two-column grid: physics left, solver right
     cols_table = Table.grid(expand=True, padding=(0, 2))
-    cols_table.add_column(ratio=3)
-    cols_table.add_column(ratio=2)
+    cols_table.add_column(ratio=1)
+    cols_table.add_column(ratio=1)
     cols_table.add_row(
         Group(Text("  Reservoir State", style=hdr), physics_table),
         Group(Text("  Step / Solver", style=hdr), solver_table),

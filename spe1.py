@@ -12,7 +12,7 @@ from bores.correlations.core import (
 
 logging.basicConfig(level=logging.DEBUG)
 
-# bores.use_32bit_precision()
+bores.use_32bit_precision()
 
 # -------------------------------------------------------------------------
 # Grid geometry — SPE1 benchmark (Odeh, 1981, JPT)
@@ -257,7 +257,7 @@ oil_density_values = bores.array(
 # Raw values from paper (RB/MSCF):
 gas_fvf_values_bbl_per_mscf = bores.array(
     [
-        166.666,  # 14.7 
+        166.666,  # 14.7
         12.093,  # 264.7
         6.274,  # 514.7
         3.197,  # 1014.7
@@ -423,13 +423,13 @@ model = bores.reservoir_model(
     connate_water_saturation_grid=connate_water_saturation_grid,
     residual_gas_saturation_grid=residual_gas_saturation_grid,
     net_to_gross_grid=net_to_gross_grid,
-    water_salinity_grid=bores.array(np.zeros(grid_shape)),
+    # solution_gas_to_oil_ratio_grid=bores.uniform_grid(grid_shape),
+    water_salinity_grid=bores.uniform_grid(grid_shape),
     dip_angle=0.0,
     dip_azimuth=0.0,
     pvt_tables=pvt_tables,
     datum_depth=8325.0,  # ft - top of reservoir
 )
-
 
 # Relative permeability — Table 3 (Odeh 1981)
 sg_values = bores.array(
@@ -553,7 +553,7 @@ oil_water_table = bores.TwoPhaseRelPermTable(
 relative_permeability_table = bores.ThreePhaseRelPermTable(
     oil_water_table=oil_water_table,
     gas_oil_table=gas_oil_table,
-    mixing_rule="stone_I_rule",
+    mixing_rule="eclipse_rule",
 )
 rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=relative_permeability_table
@@ -614,7 +614,7 @@ injector = bores.injection_well(
         specific_gravity=0.792,
         molecular_weight=gas_molecular_weight,
         is_miscible=False,
-        pvt_table=pvt_tables.gas,
+        # pvt_table=pvt_tables.gas,
         pseudo_pressure_table=pseudo_pressure_table,
     ),
     is_active=True,
@@ -666,7 +666,6 @@ timer = bores.Timer(
     maximum_step_size=bores.Time(days=30.0),
     minimum_step_size=bores.Time(minutes=10.0),
     simulation_time=bores.Time(years=10.0),
-    maximum_cfl=0.9,
     ramp_up_factor=1.3,
     maximum_rejections=20,
 )
@@ -674,7 +673,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="impes",
+    scheme="si",
     output_frequency=1,
     pressure_solver="direct",
     transport_solver="direct",
@@ -688,7 +687,7 @@ config = bores.Config(
     # maximum_water_saturation_change=0.05,
     maximum_pressure_change=500.0,
     use_pseudo_pressure=True,
-    cfl_threshold=0.8,
+    cfl_threshold=0.9,
     # minimum_injector_gas_saturation=0.2,
 )
 

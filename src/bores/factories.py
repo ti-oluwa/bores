@@ -865,22 +865,22 @@ def reservoir_model(
         oil_api_gravity_grid=oil_api_gravity_grid,
         oil_density_grid=oil_density_grid,
         gas_saturation_grid=gas_saturation_grid,
-        gas_viscosity_grid=gas_viscosity_grid,  # type: ignore
-        gas_compressibility_grid=gas_compressibility_grid,  # type: ignore
-        gas_compressibility_factor_grid=gas_compressibility_factor_grid,  # type: ignore
-        gas_gravity_grid=gas_gravity_grid,  # type: ignore
-        gas_molecular_weight_grid=gas_molecular_weight_grid,  # type: ignore
-        gas_density_grid=gas_density_grid,  # type: ignore
+        gas_viscosity_grid=gas_viscosity_grid,
+        gas_compressibility_grid=gas_compressibility_grid,
+        gas_compressibility_factor_grid=gas_compressibility_factor_grid,
+        gas_gravity_grid=gas_gravity_grid,
+        gas_molecular_weight_grid=gas_molecular_weight_grid,
+        gas_density_grid=gas_density_grid,
         water_saturation_grid=water_saturation_grid,
-        water_viscosity_grid=water_viscosity_grid,  # type: ignore
-        water_compressibility_grid=water_compressibility_grid,  # type: ignore
-        water_density_grid=water_density_grid,  # type: ignore
-        water_bubble_point_pressure_grid=water_bubble_point_pressure_grid,  # type: ignore
+        water_viscosity_grid=water_viscosity_grid,
+        water_compressibility_grid=water_compressibility_grid,
+        water_density_grid=water_density_grid,
+        water_bubble_point_pressure_grid=water_bubble_point_pressure_grid,
         solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
-        gas_solubility_in_water_grid=gas_solubility_in_water_grid,  # type: ignore
-        oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,  # type: ignore
-        gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,  # type: ignore
-        water_formation_volume_factor_grid=water_formation_volume_factor_grid,  # type: ignore
+        gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+        oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,  # type: ignore[arg-type]
+        gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
+        water_formation_volume_factor_grid=water_formation_volume_factor_grid,
         water_salinity_grid=water_salinity_grid,
         solvent_concentration_grid=solvent_concentration_grid,
         oil_effective_viscosity_grid=oil_effective_viscosity_grid,
@@ -918,7 +918,9 @@ def reservoir_model(
         datum_depth=datum_depth,
     )
     if fractures is not None and len(model.grid_shape) == 3:
-        return apply_fractures(model, *fractures)  # type: ignore[return-value]
+        return typing.cast(
+            ReservoirModel[NDimension], apply_fractures(model, *fractures)
+        )
     return model
 
 
@@ -926,7 +928,7 @@ def injection_well(
     well_name: str,
     perforating_intervals: typing.Sequence[typing.Tuple[Coordinates, Coordinates]],
     radius: float,
-    control: WellControl,
+    control: WellControl[InjectedFluid],
     injected_fluid: InjectedFluid,
     is_active: bool = True,
     **kwargs: typing.Any,
@@ -957,7 +959,7 @@ def production_well(
     well_name: str,
     perforating_intervals: typing.Sequence[typing.Tuple[Coordinates, Coordinates]],
     radius: float,
-    control: WellControl,
+    control: WellControl[ProducedFluid],
     produced_fluids: typing.Sequence[ProducedFluid],
     skin_factor: float = 0.0,
     is_active: bool = True,

@@ -283,58 +283,6 @@ def overload_to_1d(x, dtype=None):
     return None
 
 
-@numba.njit(cache=True, inline="always")
-def _piecewise_linear_slope_scalar(
-    q: float,
-    table_x: npt.NDArray,
-    segment_slopes: npt.NDArray,
-) -> float:
-    """Inner scalar kernel — always returns a single float64."""
-    if q < table_x[0] or q > table_x[-1]:
-        return 0.0
-    idx = np.searchsorted(table_x, q, side="right") - 1
-    idx = min(max(idx, 0), len(segment_slopes) - 1)
-    return segment_slopes[idx]
-
-
-@numba.njit(cache=True)
-def piecewise_linear_slope(
-    query: FloatOrArray,
-    table_x: npt.NDArray,
-    table_y: npt.NDArray,
-) -> FloatOrArray:
-    """
-    Return the slope of the piecewise-linear interpolant defined by
-    `(table_x, table_y)` at each point in `query`.
-
-    This is the exact derivative of `np.interp(query, table_x, table_y)`
-    with respect to `query`.  The slope is the rise-over-run of the segment
-    that contains the query point.
-
-    Outside the table range the interpolant is constant (same behaviour as
-    `np.interp`), so the slope is zero there.
-
-    :param query: Scalar or array of query saturation values.
-    :param table_x: Monotonically increasing x-axis values of the lookup
-        table (the `xp` argument of `np.interp`).
-    :param table_y: Function values at each `table_x` point (the `fp`
-        argument of `np.interp`).
-    :return: Slope value(s) with the same shape as `query`.
-    """
-    dx = np.diff(table_x)
-    # Avoid division by zero on degenerate segments
-    safe_dx = np.where(dx != 0.0, dx, 1.0)
-    segment_slopes = np.diff(table_y) / safe_dx
-
-    q = np.asarray(query, dtype=np.float64)
-    flat_q = q.ravel()
-    out = np.empty(flat_q.shape, dtype=np.float64)
-
-    for i in numba.prange(flat_q.shape[0]):  # type: ignore
-        out[i] = _piecewise_linear_slope_scalar(flat_q[i], table_x, segment_slopes)
-    return out.reshape(q.shape)
-
-
 def _numpy_default(obj: typing.Any) -> typing.Mapping[str, typing.Any]:
     if isinstance(obj, np.ndarray):
         # Small arrays are stored as JSON list

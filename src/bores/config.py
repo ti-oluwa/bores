@@ -127,13 +127,13 @@ class Config(
     """Interval (in time steps) at which to log simulation progress."""
 
     pressure_solver: typing.Union[SolverStr, typing.Iterable[SolverStr]] = "bicgstab"
-    """Pressure matrix system solver(s) (can be a list of solver to use in sequence) to use for solving linear systems."""
+    """Pressure system solver(s) (can be a list of solver to use in sequence)."""
 
     transport_solver: typing.Union[SolverStr, typing.Iterable[SolverStr]] = "bicgstab"
-    """Transport matrix system solver(s) (can be a list of solver to use in sequence) to use for solving linear systems."""
+    """Transport system solver(s) (can be a list of solver to use in sequence)."""
 
     pressure_preconditioner: typing.Optional[PreconditionerStr] = "ilu"
-    """Preconditioner to use for pressure syetem solvers."""
+    """Preconditioner to use for pressure system solvers."""
 
     transport_preconditioner: typing.Optional[PreconditionerStr] = "ilu"
     """Preconditioner to use for transport system solvers."""
