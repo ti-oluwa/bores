@@ -815,12 +815,12 @@ def assemble_flux_contributions(
                 else:
                     pei, pej, pek = east_i + 1, j + 1, k + 1
                     pressure_boundary = pressure_boundaries[pei, pej, pek]
-                    T = (
-                        face_transmissibilities_x[pei, pej, pek]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_x[pei, pej, pek]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -837,7 +837,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pei, pej, pek]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -919,12 +919,12 @@ def assemble_flux_contributions(
                     volumetric_outflow += abs(min(0.0, gas_flux))
                 else:
                     pressure_boundary = pressure_boundaries[pwi, pwj, pwk]
-                    T = (
-                        face_transmissibilities_x[pwi, pwj, pwk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_x[pwi, pwj, pwk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -941,7 +941,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pwi, pwj, pwk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1027,12 +1027,12 @@ def assemble_flux_contributions(
                 else:
                     psi, psj, psk = i + 1, south_j + 1, k + 1
                     pressure_boundary = pressure_boundaries[psi, psj, psk]
-                    T = (
-                        face_transmissibilities_y[psi, psj, psk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_y[psi, psj, psk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -1049,7 +1049,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[psi, psj, psk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1133,12 +1133,12 @@ def assemble_flux_contributions(
                     volumetric_outflow += abs(min(0.0, gas_flux))
                 else:
                     pressure_boundary = pressure_boundaries[pni, pnj, pnk]
-                    T = (
-                        face_transmissibilities_y[pni, pnj, pnk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_y[pni, pnj, pnk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -1155,7 +1155,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pni, pnj, pnk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1242,12 +1242,12 @@ def assemble_flux_contributions(
                 else:
                     pbi, pbj, pbk = i + 1, j + 1, bottom_k + 1
                     pressure_boundary = pressure_boundaries[pbi, pbj, pbk]
-                    T = (
-                        face_transmissibilities_z[pbi, pbj, pbk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_z[pbi, pbj, pbk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -1264,7 +1264,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pbi, pbj, pbk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1346,12 +1346,12 @@ def assemble_flux_contributions(
                     volumetric_outflow += abs(min(0.0, gas_flux))
                 else:
                     pressure_boundary = pressure_boundaries[pti, ptj, ptk]
-                    T = (
-                        face_transmissibilities_z[pti, ptj, ptk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_z[pti, ptj, ptk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -1368,7 +1368,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pti, ptj, ptk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility

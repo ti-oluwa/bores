@@ -516,12 +516,12 @@ def _compute_saturation_residuals(
                 else:
                     pei, pej, pek = east_i + 1, j + 1, k + 1
                     pressure_boundary = pressure_boundaries[pei, pej, pek]
-                    T = (
-                        face_transmissibilities_x[pei, pej, pek]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_x[pei, pej, pek]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -535,7 +535,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pei, pej, pek]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -614,12 +614,12 @@ def _compute_saturation_residuals(
                     )
                 else:
                     pressure_boundary = pressure_boundaries[pwi, pwj, pwk]
-                    T = (
-                        face_transmissibilities_x[pwi, pwj, pwk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_x[pwi, pwj, pwk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -633,7 +633,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pwi, pwj, pwk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -716,12 +716,12 @@ def _compute_saturation_residuals(
                 else:
                     psi, psj, psk = i + 1, south_j + 1, k + 1
                     pressure_boundary = pressure_boundaries[psi, psj, psk]
-                    T = (
-                        face_transmissibilities_y[psi, psj, psk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_y[psi, psj, psk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -735,7 +735,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[psi, psj, psk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -816,12 +816,12 @@ def _compute_saturation_residuals(
                     )
                 else:
                     pressure_boundary = pressure_boundaries[pni, pnj, pnk]
-                    T = (
-                        face_transmissibilities_y[pni, pnj, pnk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_y[pni, pnj, pnk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -835,7 +835,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pni, pnj, pnk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -919,12 +919,12 @@ def _compute_saturation_residuals(
                 else:
                     pbi, pbj, pbk = i + 1, j + 1, bottom_k + 1
                     pressure_boundary = pressure_boundaries[pbi, pbj, pbk]
-                    T = (
-                        face_transmissibilities_z[pbi, pbj, pbk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_z[pbi, pbj, pbk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -938,7 +938,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pbi, pbj, pbk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1017,12 +1017,12 @@ def _compute_saturation_residuals(
                     )
                 else:
                     pressure_boundary = pressure_boundaries[pti, ptj, ptk]
-                    T = (
-                        face_transmissibilities_z[pti, ptj, ptk]
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
                     if not np.isnan(pressure_boundary):
                         pressure_difference = pressure_boundary - cell_pressure
+                        T = (
+                            face_transmissibilities_z[pti, ptj, ptk]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                         water_flux = cell_water_mobility * T * pressure_difference
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
@@ -1036,7 +1036,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pti, ptj, ptk]
-                        if flux_boundary > 0 and cell_total_mobility > 0.0:
+                        if flux_boundary != 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1056,19 +1056,28 @@ def _compute_saturation_residuals(
                             )
 
                 # Well mass rates
-                well_water_mass_rate = net_water_well_mass_rate_grid[i, j, k]
-                well_gas_mass_rate = (
-                    net_gas_well_mass_rate_grid[i, j, k]
-                    + cell_alpha_solution_gor * net_oil_well_mass_rate_grid[i, j, k]
-                    + cell_alpha_gas_solubility_in_water
-                    * net_water_well_mass_rate_grid[i, j, k]
+                net_oil_mass_rate = net_oil_well_mass_rate_grid[i, j, k]
+                net_water_mass_rate = net_water_well_mass_rate_grid[i, j, k]
+                net_gas_mass_rate = net_gas_well_mass_rate_grid[i, j, k]
+
+                # Dissolved gas only applies to produced fluids (negative rates)
+                # Injected fluids are at surface conditions, so no dissolved gas
+                produced_oil_mass_rate = min(net_oil_mass_rate, 0.0)  # negative or zero
+                produced_water_mass_rate = min(
+                    net_water_mass_rate, 0.0
+                )  # negative or zero
+
+                net_gas_mass_rate = (
+                    net_gas_mass_rate
+                    + cell_alpha_solution_gor * produced_oil_mass_rate
+                    + cell_alpha_gas_solubility_in_water * produced_water_mass_rate
                 )
 
                 water_residual[cell_idx] = (
-                    water_accumulation - net_mass_water_flux - well_water_mass_rate
+                    water_accumulation - net_mass_water_flux - net_water_mass_rate
                 )
                 gas_residual[cell_idx] = (
-                    gas_accumulation - net_mass_gas_flux - well_gas_mass_rate
+                    gas_accumulation - net_mass_gas_flux - net_gas_mass_rate
                 )
 
     return water_residual, gas_residual
@@ -2547,10 +2556,6 @@ def assemble_well_contributions(
                 _add(cell_idx, 0, 0, -rho_w * dqw_dSw)
                 _add(cell_idx, 0, 1, -rho_w * dqw_dSg)
 
-                # dR_g/dSw, dR_g/dSg from dissolved gas in injected water
-                _add(cell_idx, 1, 0, -rho_w * alpha_rsw * dqw_dSw)
-                _add(cell_idx, 1, 1, -rho_w * alpha_rsw * dqw_dSg)
-
             if np.isfinite(gas_bhp) and gas_bhp != 0.0:
                 drawdown = gas_bhp - cell_pressure
                 mu_g = float(gas_viscosity_grid[i, j, k])
@@ -3146,7 +3151,10 @@ def solve_transport(
 
     stagnation_patience = config.newton_stagnation_patience
     stagnation_improvement_threshold = config.newton_stagnation_improvement_threshold
-    weak_problem_saturation_threshold = config.newton_weak_problem_saturation_threshold
+    weak_problem_saturation_threshold = max(
+        config.newton_weak_problem_saturation_threshold,
+        float(np.sqrt(np.finfo(np.float32).eps)),
+    )
     minimum_step_size = float(np.sqrt(np.finfo(dtype).eps))  # type: ignore
     maximum_newton_iterations = config.maximum_newton_iterations
     newton_tolerance = config.newton_tolerance
@@ -3155,14 +3163,14 @@ def solve_transport(
     transport_convergence_tolerance = config.transport_convergence_tolerance
 
     for iteration in range(maximum_newton_iterations):
-        water_saturation_grid = np.clip(water_saturation_grid, 0.0, 1.0)
-        gas_saturation_grid = np.clip(gas_saturation_grid, 0.0, 1.0)
-        oil_saturation_grid = np.clip(oil_saturation_grid, 0.0, 1.0)
-        total = water_saturation_grid + oil_saturation_grid + gas_saturation_grid
-        total = np.where(total > 0, total, 1.0)
-        water_saturation_grid /= total
-        oil_saturation_grid /= total
-        gas_saturation_grid /= total
+        # water_saturation_grid = np.clip(water_saturation_grid, 0.0, 1.0)
+        # gas_saturation_grid = np.clip(gas_saturation_grid, 0.0, 1.0)
+        # oil_saturation_grid = np.clip(oil_saturation_grid, 0.0, 1.0)
+        # total = water_saturation_grid + oil_saturation_grid + gas_saturation_grid
+        # total = np.where(total > 0, total, 1.0)
+        # water_saturation_grid /= total
+        # oil_saturation_grid /= total
+        # gas_saturation_grid /= total
 
         relative_mobility_grids, capillary_pressure_grids, _ = (
             compute_rock_fluid_properties(
@@ -3219,7 +3227,7 @@ def solve_transport(
             initial_residual_norm = max(residual_norm, 1e-30)
 
         relative_residual_norm = residual_norm / initial_residual_norm
-        last_max_ds = (
+        last_max_saturation_update = (
             convergence_history[-1].max_saturation_update
             if convergence_history
             else float("inf")
@@ -3228,11 +3236,11 @@ def solve_transport(
         residual_converged = relative_residual_norm < newton_tolerance and iteration > 0
         saturation_converged = (
             (
-                last_max_ds < transport_convergence_tolerance
+                last_max_saturation_update < transport_convergence_tolerance
                 and relative_residual_norm < 1e-3
             )
             or (
-                last_max_ds < weak_problem_saturation_threshold
+                last_max_saturation_update < weak_problem_saturation_threshold
                 and iteration >= 2
                 and residual_norm <= best_residual_norm * 1.5
             )
@@ -3250,7 +3258,7 @@ def solve_transport(
                     iteration,
                     reason,
                     relative_residual_norm,
-                    last_max_ds,
+                    last_max_saturation_update,
                 )
             convergence_history.append(
                 NewtonConvergenceInfo(
@@ -3479,14 +3487,14 @@ def solve_transport(
         and maximum_newton_iterations > 0
         and final_iteration >= maximum_newton_iterations
     ):
-        last_max_ds = (
+        last_max_saturation_update = (
             convergence_history[-1].max_saturation_update
             if convergence_history
             else float("inf")
         )
         final_relative_residual = final_residual_norm / initial_residual_norm
         if (
-            last_max_ds < weak_problem_saturation_threshold
+            last_max_saturation_update < weak_problem_saturation_threshold
             and final_relative_residual < 1.0
             and final_residual_norm <= best_residual_norm * 1.5
         ):
@@ -3495,7 +3503,7 @@ def solve_transport(
                 logger.debug(
                     "Newton max iterations reached; accepting weak-problem solution: "
                     "max |ΔS| = %.2e, ||R||/||R0|| = %.2e",
-                    last_max_ds,
+                    last_max_saturation_update,
                     final_relative_residual,
                 )
 

@@ -2,7 +2,7 @@ import typing
 
 import bores
 
-bores.use_32bit_precision()
+# bores.use_32bit_precision()
 
 # Grid dimensions: 10x10x3 cells, each 1000 ft x 1000 ft, 100 ft thick
 grid_shape = typing.cast(bores.ThreeDimensions, (10, 10, 3))
@@ -140,7 +140,7 @@ rock_fluid_tables = bores.RockFluidTables(
 )
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1),
-    maximum_step_size=bores.Time(days=30),
+    maximum_step_size=bores.Time(days=10),
     minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=30),
     maximum_rejections=20,
@@ -153,7 +153,7 @@ config = bores.Config(
     wells=wells,
     scheme="si",
     pressure_solver="direct",
-    transport_solver="cgs",
+    transport_solver="direct",
     pressure_preconditioner=None,
     transport_preconditioner="ilu",
     maximum_pressure_change=500,

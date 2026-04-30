@@ -59,7 +59,7 @@ class Config(
     )
     """Relative convergence tolerance for saturation iterative solvers (default is 1e-4). Transport matrix tend to be more well conditioned."""
 
-    maximum_solver_iterations: int = attrs.field(  # type: ignore
+    maximum_solver_iterations: int = attrs.field(
         default=250,
         validator=attrs.validators.and_(
             attrs.validators.ge(1),  # type: ignore[arg-type]
@@ -84,7 +84,7 @@ class Config(
     use_pseudo_pressure: bool = False
     """Whether to use pseudo-pressure for gas (when applicable)."""
 
-    capillary_strength_factor: float = attrs.field(  # type: ignore
+    capillary_strength_factor: float = attrs.field(
         default=1.0,
         validator=attrs.validators.and_(attrs.validators.ge(0), attrs.validators.le(1)),  # type: ignore[arg-type]
     )
@@ -123,7 +123,7 @@ class Config(
     warn_well_anomalies: bool = True
     """Whether to warn about anomalous flow rates during the simulation."""
 
-    log_interval: int = attrs.field(default=5, validator=attrs.validators.ge(0))  # type: ignore
+    log_interval: int = attrs.field(default=5, validator=attrs.validators.ge(0))
     """Interval (in time steps) at which to log simulation progress."""
 
     pressure_solver: typing.Union[SolverStr, typing.Iterable[SolverStr]] = "bicgstab"
@@ -138,9 +138,8 @@ class Config(
     transport_preconditioner: typing.Optional[PreconditionerStr] = "ilu"
     """Preconditioner to use for transport system solvers."""
 
-    phase_appearance_tolerance: float = attrs.field(  # type: ignore
-        default=1e-6,
-        validator=attrs.validators.ge(0),
+    phase_appearance_tolerance: float = attrs.field(
+        default=1e-6, validator=attrs.validators.ge(0)
     )
     """
     Tolerance for determining phase appearance/disappearance based on saturation levels.
@@ -176,7 +175,7 @@ class Config(
     step is reduced or rejected.
     """
 
-    maximum_water_saturation_change: float = attrs.field(  # type: ignore
+    maximum_water_saturation_change: float = attrs.field(
         default=0.6, validator=attrs.validators.ge(0)
     )
     """
@@ -187,7 +186,7 @@ class Config(
     step is reduced or rejected.
     """
 
-    maximum_gas_saturation_change: float = attrs.field(  # type: ignore
+    maximum_gas_saturation_change: float = attrs.field(
         default=0.5, validator=attrs.validators.ge(0)
     )
     """
@@ -198,7 +197,7 @@ class Config(
     step is reduced or rejected.
     """
 
-    maximum_pressure_change: float = attrs.field(  # type: ignore
+    maximum_pressure_change: float = attrs.field(
         default=1000.0, validator=attrs.validators.ge(0)
     )
     """
@@ -275,8 +274,8 @@ class Config(
     most realistic models where connate water is already present.
     """
 
-    maximum_newton_iterations: int = attrs.field(  # type: ignore
-        default=15,
+    maximum_newton_iterations: int = attrs.field(
+        default=10,
         validator=attrs.validators.and_(
             attrs.validators.ge(1),  # type: ignore[arg-type]
             attrs.validators.le(50),  # type: ignore[arg-type]
@@ -289,8 +288,8 @@ class Config(
     )
     """Relative residual tolerance for Newton convergence in implicit solvers."""
 
-    maximum_line_search_cuts: int = attrs.field(  # type: ignore
-        default=4,
+    maximum_line_search_cuts: int = attrs.field(
+        default=8,
         validator=attrs.validators.and_(
             attrs.validators.ge(0),  # type: ignore[arg-type]
             attrs.validators.le(10),  # type: ignore[arg-type]
@@ -321,7 +320,7 @@ class Config(
     """
 
     newton_stagnation_patience: int = attrs.field(
-        default=3,
+        default=4,
         validator=attrs.validators.ge(1),
     )
     """
@@ -347,7 +346,7 @@ class Config(
     """
 
     newton_stagnation_improvement_threshold: float = attrs.field(
-        default=0.01,
+        default=0.005,
         validator=attrs.validators.gt(0),
     )
     """
@@ -363,7 +362,7 @@ class Config(
     `newton_stagnation_patience` consecutive iterations, stagnation is declared.
 
     Typical interpretation:
-    - 0.01 means that we require at least 1% residual reduction per iteration
+    - 0.005 means that we require at least 0.5% residual reduction per iteration
     - Smaller values means more tolerant of slow convergence
     - Larger values means stricter, may trigger stagnation earlier
 
@@ -371,8 +370,8 @@ class Config(
     where Newton updates oscillate or make negligible progress.
     """
 
-    newton_weak_problem_saturation_threshold: float = attrs.field(  # type: ignore
-        default=1e-8,
+    newton_weak_problem_saturation_threshold: float = attrs.field(
+        default=1e-5,
         validator=attrs.validators.gt(0),
     )
     """
@@ -387,10 +386,8 @@ class Config(
     Typical use case:
     - Natural field depletion with no wells: saturations remain nearly constant
       due to capillary balance, but residuals may be 1-5% of initial
-    - Reduce this value (e.g., 1e-10) for stricter saturation requirements
+    - Reduce this value (e.g., 1e-8) for stricter saturation requirements
     - Increase this value (e.g., 1e-6) for more lenient weak problem detection
-
-    Default: 1e-8 (approximately machine precision for 32-bit floats)
     """
 
     pressure_outer_convergence_tolerance: float = attrs.field(

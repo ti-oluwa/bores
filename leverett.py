@@ -88,7 +88,7 @@ gas_gravity_grid = bores.uniform_grid(grid_shape, value=gas_gravity)
 oil_bubble_point_grid = bores.uniform_grid(grid_shape, value=2700.0)
 
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.BrooksCoreyRelPermModel(water_exponent=1.0)
+    relative_permeability_table=bores.BrooksCoreyRelPermModel()
 )
 
 model = bores.reservoir_model(

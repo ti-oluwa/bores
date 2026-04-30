@@ -7,25 +7,34 @@ directional derivatives (taken as -||R||² since the Newton direction is a desce
 
 import typing
 
+import numba
 import numpy as np
 import numpy.typing as npt
 
 
+@numba.njit(cache=True)
 def cubic_min(
     a: float, fa: float, dfa: float, b: float, fb: float, dfb: float
 ) -> float:
     """
-    Minimiser of the cubic through (a, fa) and (b, fb) with
-    derivatives dfa and dfb. Returns the minimiser clamped to [a, b].
+    Minimiser of the cubic through two points with prescribed derivatives.
+
+    :param a: Left endpoint.
+    :param fa: Function value at a.
+    :param dfa: Derivative at a.
+    :param b: Right endpoint.
+    :param fb: Function value at b.
+    :param dfb: Derivative at b.
+    :return: Minimiser of the cubic, clamped to [a, b].
     """
     d1 = dfa + dfb - 3.0 * (fb - fa) / (b - a)
     discriminant = d1 * d1 - dfa * dfb
     if discriminant < 0.0:
         return 0.5 * (a + b)
-    
+
     d2 = np.sqrt(discriminant)
     alpha = b - (b - a) * (dfb + d2 - d1) / (dfb - dfa + 2.0 * d2)
-    return float(np.clip(alpha, a, b))
+    return float(min(max(alpha, a), b))
 
 
 def line_search(
@@ -39,41 +48,30 @@ def line_search(
     min_step: float = 1e-8,
 ) -> typing.Tuple[npt.NDArray, float, float]:
     """
-    Safeguarded cubic line search along `saturation_change`.
+    Safeguarded cubic line search along the Newton step direction.
 
-    Implements the Armijo sufficient-decrease condition with a cubic interpolation fallback.
+    Implements the Armijo sufficient-decrease condition with cubic interpolation
+    fallback to find a step size that reduces the residual norm while respecting
+    saturation constraints.
 
-    Parameters
-    ----------
-    saturation_vector:
-        Current packed [Sw, Sg, ...] iterate.
-    saturation_change:
-        Full Newton step  δS  (already damped by maximum_saturation_change).
-    residual_norm_0:
-        ||R(S_k)||  at the current iterate — used as the reference for the
-        Armijo condition.
-    compute_residual_norm_fn:
-        Callable that accepts a trial saturation vector and returns ||R||.
-        Must handle projection internally or caller must project before passing.
-    project_fn:
-        Projects a trial vector onto the feasible simplex (Sw>=0, Sg>=0,
-        Sw+Sg<=1).
-    maximum_cuts:
-        Maximum number of step-size reductions.
-    sufficient_decrease:
-        Armijo constant c₁.  Condition: ||R(S+α·δS)|| < (1 - c₁·α)·||R(S)||.
-        Use a small value (1e-4) so the condition is easy to satisfy initially.
-    min_step:
-        Minimum step size before giving up and accepting the best found.
-
-    Returns
-    -------
-    trial_vector:
-        Projected trial saturation vector.
-    alpha:
-        Accepted step size.
-    trial_norm:
-        ||R|| at the accepted step.
+    :param saturation_vector: Current packed [Sw, Sg, ...] iterate.
+    :param saturation_change: Full Newton step δS (already damped by
+        maximum_saturation_change).
+    :param residual_norm_0: ||R(S_k)|| at the current iterate — used as the
+        reference for the Armijo condition.
+    :param compute_residual_norm_fn: Callable that accepts a trial saturation
+        vector and returns ||R||. Must handle projection internally or caller
+        must project before passing.
+    :param project_fn: Projects a trial vector onto the feasible simplex
+        (Sw>=0, Sg>=0, Sw+Sg<=1).
+    :param maximum_cuts: Maximum number of step-size reductions.
+    :param sufficient_decrease: Armijo constant c₁. Condition:
+        ||R(S+α·δS)|| < (1 - c₁·α)·||R(S)||. Use a small value (1e-4) so the
+        condition is easy to satisfy initially.
+    :param min_step: Minimum step size before giving up and accepting the best
+        found.
+    :return: Tuple of (projected trial saturation vector, accepted step size α,
+        ||R|| at the accepted step).
     """
     alpha_prev = 0.0
     norm_prev = residual_norm_0

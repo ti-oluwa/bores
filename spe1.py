@@ -614,7 +614,7 @@ injector = bores.injection_well(
         specific_gravity=0.792,
         molecular_weight=gas_molecular_weight,
         is_miscible=False,
-        # pvt_table=pvt_tables.gas,
+        pvt_table=pvt_tables.gas,
         pseudo_pressure_table=pseudo_pressure_table,
     ),
     is_active=True,
@@ -659,7 +659,7 @@ producer = bores.production_well(
     skin_factor=0.0,
     is_active=True,
 )
-wells = bores.wells_(injectors=[], producers=[])
+wells = bores.wells_(injectors=[injector], producers=[producer])
 
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1.0),
