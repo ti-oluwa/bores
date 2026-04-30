@@ -17,7 +17,7 @@ class PerforationIndex:
 
     cell: typing.Tuple[int, int, int]  # (i, j, k)
     """Perforated cell indices"""
-    cell_1d_index: int
+    cell_idx: int
     """Perforated cell 1D index"""
     well_index: float
     """Perforated cell well index"""
@@ -109,13 +109,13 @@ def build_wells_indices(
                     net_to_gross=net_to_gross_grid[i, j, k],
                     regime_constant=regime_constant,
                 )
-                cell_1d_index = to_1D_index(
+                cell_idx = to_1D_index(
                     i, j, k, cell_count_x, cell_count_y, cell_count_z
                 )
                 perforations.append(
                     PerforationIndex(
                         cell=(i, j, k),
-                        cell_1d_index=cell_1d_index,
+                        cell_idx=cell_idx,
                         well_index=well_index,
                     )
                 )

@@ -972,6 +972,7 @@ def _run_sequential_implicit_step(
         config=config,
         flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
+        wells_indices=wells_indices,
         rates=well_rates,
         dtype=dtype,
     )
@@ -1411,6 +1412,7 @@ def _run_full_sequential_implicit_step(
             config=config,
             flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
+            wells_indices=wells_indices,
             rates=well_rates,
             dtype=dtype,
         )

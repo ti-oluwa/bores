@@ -9,6 +9,7 @@ from scipy.sparse import coo_matrix
 
 from bores.config import Config
 from bores.constants import c
+from bores.datastructures import BottomHolePressures
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
@@ -25,6 +26,7 @@ from bores.solvers.rates import WellRates
 from bores.tables.rock_fluid import RockFluidTables
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
+from bores.wells.indices import WellsIndices
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +84,7 @@ def pack_saturation_grids_to_vector(
     for i in numba.prange(cell_count_x):  # type: ignore
         for j in range(cell_count_y):
             for k in range(cell_count_z):
-                cell_1d_index = to_1D_index(
+                cell_idx = to_1D_index(
                     i=i,
                     j=j,
                     k=k,
@@ -90,8 +92,8 @@ def pack_saturation_grids_to_vector(
                     cell_count_y=cell_count_y,
                     cell_count_z=cell_count_z,
                 )
-                saturation_vector[2 * cell_1d_index] = water_saturation_grid[i, j, k]
-                saturation_vector[2 * cell_1d_index + 1] = gas_saturation_grid[i, j, k]
+                saturation_vector[2 * cell_idx] = water_saturation_grid[i, j, k]
+                saturation_vector[2 * cell_idx + 1] = gas_saturation_grid[i, j, k]
     return saturation_vector
 
 
@@ -121,7 +123,7 @@ def unpack_vector_to_saturation_grids(
     for i in numba.prange(cell_count_x):  # type: ignore
         for j in range(cell_count_y):
             for k in range(cell_count_z):
-                cell_1d_index = to_1D_index(
+                cell_idx = to_1D_index(
                     i=i,
                     j=j,
                     k=k,
@@ -129,8 +131,8 @@ def unpack_vector_to_saturation_grids(
                     cell_count_y=cell_count_y,
                     cell_count_z=cell_count_z,
                 )
-                water_saturation = saturation_vector[2 * cell_1d_index]
-                gas_saturation = saturation_vector[2 * cell_1d_index + 1]
+                water_saturation = saturation_vector[2 * cell_idx]
+                gas_saturation = saturation_vector[2 * cell_idx + 1]
                 water_saturation_grid[i, j, k] = water_saturation
                 gas_saturation_grid[i, j, k] = gas_saturation
                 oil_saturation_grid[i, j, k] = max(
@@ -150,15 +152,15 @@ def project_to_feasible(saturation_vector: npt.NDArray) -> npt.NDArray:
     :return: The same vector after projection.
     """
     total_cell_count = len(saturation_vector) // 2
-    for cell_1d_index in numba.prange(total_cell_count):  # type: ignore
-        water_saturation = max(0.0, saturation_vector[2 * cell_1d_index])
-        gas_saturation = max(0.0, saturation_vector[2 * cell_1d_index + 1])
+    for cell_idx in numba.prange(total_cell_count):  # type: ignore
+        water_saturation = max(0.0, saturation_vector[2 * cell_idx])
+        gas_saturation = max(0.0, saturation_vector[2 * cell_idx + 1])
         total_saturation = water_saturation + gas_saturation
         if total_saturation > 1.0:
             water_saturation = water_saturation / total_saturation
             gas_saturation = gas_saturation / total_saturation
-        saturation_vector[2 * cell_1d_index] = water_saturation
-        saturation_vector[2 * cell_1d_index + 1] = gas_saturation
+        saturation_vector[2 * cell_idx] = water_saturation
+        saturation_vector[2 * cell_idx + 1] = gas_saturation
     return saturation_vector
 
 
@@ -178,9 +180,9 @@ def interleave_residuals(
     """
     total_cell_count = len(water_residual)
     result = np.empty(2 * total_cell_count)
-    for cell_1d_index in numba.prange(total_cell_count):  # type: ignore
-        result[2 * cell_1d_index] = water_residual[cell_1d_index]
-        result[2 * cell_1d_index + 1] = gas_residual[cell_1d_index]
+    for cell_idx in numba.prange(total_cell_count):  # type: ignore
+        result[2 * cell_idx] = water_residual[cell_idx]
+        result[2 * cell_idx + 1] = gas_residual[cell_idx]
     return result
 
 
@@ -317,7 +319,7 @@ def _compute_saturation_residuals(
     for i in numba.prange(cell_count_x):  # type: ignore
         for j in range(cell_count_y):
             for k in range(cell_count_z):
-                cell_1d_index = to_1D_index(
+                cell_idx = to_1D_index(
                     i=i,
                     j=j,
                     k=k,
@@ -1062,10 +1064,10 @@ def _compute_saturation_residuals(
                     * net_water_well_mass_rate_grid[i, j, k]
                 )
 
-                water_residual[cell_1d_index] = (
+                water_residual[cell_idx] = (
                     water_accumulation - net_mass_water_flux - well_water_mass_rate
                 )
-                gas_residual[cell_1d_index] = (
+                gas_residual[cell_idx] = (
                     gas_accumulation - net_mass_gas_flux - well_gas_mass_rate
                 )
 
@@ -1515,16 +1517,16 @@ def assemble_numerical_jacobian(
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
 
-    for cell_1d_index in range(total_cell_count):
+    for cell_idx in range(total_cell_count):
         i, j, k = from_1D_index(
-            cell_1d_index,
+            cell_idx,
             cell_count_x,
             cell_count_y,
             cell_count_z,
         )
 
         # Affected cells: this cell + all face neighbours (for sparsity)
-        affected_cell_indices = [cell_1d_index]
+        affected_cell_indices = [cell_idx]
         for delta_i, delta_j, delta_k in (
             (1, 0, 0),
             (-1, 0, 0),
@@ -1555,7 +1557,7 @@ def assemble_numerical_jacobian(
         cell_oil_saturation = 1.0 - cell_water_saturation - cell_gas_saturation
 
         for var_offset in range(2):
-            column = 2 * cell_1d_index + var_offset
+            column = 2 * cell_idx + var_offset
             s_j = saturation_vector[column]
 
             epsilon = base_epsilon * max(abs(s_j), 1.0)
@@ -1586,7 +1588,7 @@ def assemble_numerical_jacobian(
                 water_saturation_grid=water_saturation_grid,
                 oil_saturation_grid=oil_saturation_grid,
                 gas_saturation_grid=gas_saturation_grid,
-                **residual_kwargs,  # type: ignore[arg-type]
+                **residual_kwargs,  # type: ignore
             )
             residual_perturbed = interleave_residuals(
                 water_residual=perturbed_water_residual,
@@ -1767,7 +1769,7 @@ def compute_rock_fluid_derivatives(
 
 
 @numba.njit(parallel=True, cache=True)
-def assemble_jacobian_contributions(
+def assemble_flux_contributions(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
@@ -1908,7 +1910,7 @@ def assemble_jacobian_contributions(
 
         for j in range(cell_count_y):
             for k in range(cell_count_z):
-                cell_1d_index = to_1D_index(
+                cell_idx = to_1D_index(
                     i=i,
                     j=j,
                     k=k,
@@ -1916,10 +1918,10 @@ def assemble_jacobian_contributions(
                     cell_count_y=cell_count_y,
                     cell_count_z=cell_count_z,
                 )
-                water_row = 2 * cell_1d_index
-                gas_row = 2 * cell_1d_index + 1
-                cell_water_column = 2 * cell_1d_index
-                cell_gas_column = 2 * cell_1d_index + 1
+                water_row = 2 * cell_idx
+                gas_row = 2 * cell_idx + 1
+                cell_water_column = 2 * cell_idx
+                cell_gas_column = 2 * cell_idx + 1
 
                 pore_volume = (
                     cell_size_x
@@ -2448,6 +2450,187 @@ def assemble_jacobian_contributions(
     return out_rows, out_cols, out_vals
 
 
+def assemble_well_contributions(
+    pressure_grid: ThreeDimensionalGrid,
+    water_density_grid: ThreeDimensionalGrid,
+    oil_density_grid: ThreeDimensionalGrid,
+    gas_density_grid: ThreeDimensionalGrid,
+    solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    water_formation_volume_factor_grid: ThreeDimensionalGrid,
+    water_viscosity_grid: ThreeDimensionalGrid,
+    oil_viscosity_grid: ThreeDimensionalGrid,
+    gas_viscosity_grid: ThreeDimensionalGrid,
+    dkrw_dSw_grid: ThreeDimensionalGrid,
+    dkrw_dSo_grid: ThreeDimensionalGrid,
+    dkrw_dSg_grid: ThreeDimensionalGrid,
+    dkro_dSw_grid: ThreeDimensionalGrid,
+    dkro_dSo_grid: ThreeDimensionalGrid,
+    dkro_dSg_grid: ThreeDimensionalGrid,
+    dkrg_dSw_grid: ThreeDimensionalGrid,
+    dkrg_dSo_grid: ThreeDimensionalGrid,
+    dkrg_dSg_grid: ThreeDimensionalGrid,
+    wells_indices: WellsIndices,
+    injection_bhps: BottomHolePressures[float, ThreeDimensions],
+    production_bhps: BottomHolePressures[float, ThreeDimensions],
+    md_per_cp_to_ft2_per_psi_per_day: float,
+) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    """
+    Assemble well contributions to the mass-based saturation Jacobian.
+
+    For BHP-controlled wells, phase mass rates depend on saturation through
+    relative permeability, giving non-zero Jacobian entries. Rate-controlled
+    injection wells have fixed rates so their Jacobian is zero.
+
+    The mass residual for water is:
+        R_w = accum - rho_w * F_w - rho_w * q_w_vol
+    So dR_w/dS_well = -rho_w * WI * (dkr_w/dS / mu_w) * drawdown * T
+
+    The mass residual for gas includes dissolved components:
+        R_g includes: -rho_g*q_g - rho_o*alpha_Rs*q_o - rho_w*alpha_Rsw*q_w
+    So dR_g/dS_well = -rho_g * WI * (dkrg/dS / mu_g) * drawdown_g * T
+                      - rho_o * alpha_Rs * WI * (dkro/dS / mu_o) * drawdown_o * T
+                      - rho_w * alpha_Rsw * WI * (dkrw/dS / mu_w) * drawdown_w * T
+    """
+    rows: typing.List[int] = []
+    cols: typing.List[int] = []
+    vals: typing.List[float] = []
+
+    def _add(cell_idx: int, row_offset: int, col_offset: int, value: float) -> None:
+        if value == 0.0:
+            return
+        rows.append(2 * cell_idx + row_offset)
+        cols.append(2 * cell_idx + col_offset)
+        vals.append(value)
+
+    def _alpha_rs(i: int, j: int, k: int) -> float:
+        bg = max(gas_formation_volume_factor_grid[i, j, k], 1e-30)
+        bo = max(oil_formation_volume_factor_grid[i, j, k], 1e-30)
+        return solution_gas_to_oil_ratio_grid[i, j, k] * bg / bo
+
+    def _alpha_rsw(i: int, j: int, k: int) -> float:
+        bg = max(gas_formation_volume_factor_grid[i, j, k], 1e-30)
+        bw = max(water_formation_volume_factor_grid[i, j, k], 1e-30)
+        return gas_solubility_in_water_grid[i, j, k] * bg / bw
+
+    def _eff(dkr_dSw, dkr_dSo, dkr_dSg, i, j, k):
+        """So-eliminated effective derivatives."""
+        dkr_dSw_eff = dkr_dSw[i, j, k] - dkr_dSo[i, j, k]
+        dkr_dSg_eff = dkr_dSg[i, j, k] - dkr_dSo[i, j, k]
+        return dkr_dSw_eff, dkr_dSg_eff
+
+    for well_indices in wells_indices.injection.values():
+        for perf in well_indices:
+            i, j, k = perf.cell
+            cell_idx = perf.cell_idx
+            well_index = perf.well_index
+            cell_pressure = float(pressure_grid[i, j, k])
+            water_bhp, _, gas_bhp = injection_bhps[i, j, k]
+
+            T = well_index * md_per_cp_to_ft2_per_psi_per_day
+
+            if np.isfinite(water_bhp) and water_bhp != 0.0:
+                drawdown = water_bhp - cell_pressure
+                mu_w = float(water_viscosity_grid[i, j, k])
+                inv_mu_w = 1.0 / mu_w if mu_w > 0.0 else 0.0
+                rho_w = float(water_density_grid[i, j, k])
+                alpha_rsw = _alpha_rsw(i, j, k)
+                dkrw_dSw_eff, dkrw_dSg_eff = _eff(
+                    dkrw_dSw_grid, dkrw_dSo_grid, dkrw_dSg_grid, i, j, k
+                )
+
+                # dR_w/dSw, dR_w/dSg from water well
+                dqw_dSw = T * inv_mu_w * dkrw_dSw_eff * drawdown
+                dqw_dSg = T * inv_mu_w * dkrw_dSg_eff * drawdown
+                _add(cell_idx, 0, 0, -rho_w * dqw_dSw)
+                _add(cell_idx, 0, 1, -rho_w * dqw_dSg)
+
+                # dR_g/dSw, dR_g/dSg from dissolved gas in injected water
+                _add(cell_idx, 1, 0, -rho_w * alpha_rsw * dqw_dSw)
+                _add(cell_idx, 1, 1, -rho_w * alpha_rsw * dqw_dSg)
+
+            if np.isfinite(gas_bhp) and gas_bhp != 0.0:
+                drawdown = gas_bhp - cell_pressure
+                mu_g = float(gas_viscosity_grid[i, j, k])
+                inv_mu_g = 1.0 / mu_g if mu_g > 0.0 else 0.0
+                rho_g = float(gas_density_grid[i, j, k])
+                dkrg_dSw_eff, dkrg_dSg_eff = _eff(
+                    dkrg_dSw_grid, dkrg_dSo_grid, dkrg_dSg_grid, i, j, k
+                )
+
+                dqg_dSw = T * inv_mu_g * dkrg_dSw_eff * drawdown
+                dqg_dSg = T * inv_mu_g * dkrg_dSg_eff * drawdown
+                _add(cell_idx, 1, 0, -rho_g * dqg_dSw)
+                _add(cell_idx, 1, 1, -rho_g * dqg_dSg)
+
+    for well_indices in wells_indices.production.values():
+        for perf in well_indices:
+            i, j, k = perf.cell
+            cell_idx = perf.cell_idx
+            well_index = perf.well_index
+            cell_pressure = float(pressure_grid[i, j, k])
+            water_bhp, oil_bhp, gas_bhp = production_bhps[i, j, k]
+
+            T = well_index * md_per_cp_to_ft2_per_psi_per_day
+            alpha_rs = _alpha_rs(i, j, k)
+            alpha_rsw = _alpha_rsw(i, j, k)
+
+            if np.isfinite(water_bhp) and water_bhp != 0.0:
+                drawdown = water_bhp - cell_pressure
+                mu_w = float(water_viscosity_grid[i, j, k])
+                inv_mu_w = 1.0 / mu_w if mu_w > 0.0 else 0.0
+                rho_w = float(water_density_grid[i, j, k])
+                dkrw_dSw_eff, dkrw_dSg_eff = _eff(
+                    dkrw_dSw_grid, dkrw_dSo_grid, dkrw_dSg_grid, i, j, k
+                )
+
+                dqw_dSw = T * inv_mu_w * dkrw_dSw_eff * drawdown
+                dqw_dSg = T * inv_mu_w * dkrw_dSg_eff * drawdown
+                # dR_w/dS from water production
+                _add(cell_idx, 0, 0, -rho_w * dqw_dSw)
+                _add(cell_idx, 0, 1, -rho_w * dqw_dSg)
+                # dR_g/dS from dissolved gas in produced water
+                _add(cell_idx, 1, 0, -rho_w * alpha_rsw * dqw_dSw)
+                _add(cell_idx, 1, 1, -rho_w * alpha_rsw * dqw_dSg)
+
+            if np.isfinite(oil_bhp) and oil_bhp != 0.0:
+                drawdown = oil_bhp - cell_pressure
+                mu_o = float(oil_viscosity_grid[i, j, k])
+                inv_mu_o = 1.0 / mu_o if mu_o > 0.0 else 0.0
+                rho_o = float(oil_density_grid[i, j, k])
+                dkro_dSw_eff, dkro_dSg_eff = _eff(
+                    dkro_dSw_grid, dkro_dSo_grid, dkro_dSg_grid, i, j, k
+                )
+
+                dqo_dSw = T * inv_mu_o * dkro_dSw_eff * drawdown
+                dqo_dSg = T * inv_mu_o * dkro_dSg_eff * drawdown
+                # dR_g/dS from dissolved gas in produced oil
+                _add(cell_idx, 1, 0, -rho_o * alpha_rs * dqo_dSw)
+                _add(cell_idx, 1, 1, -rho_o * alpha_rs * dqo_dSg)
+
+            if np.isfinite(gas_bhp) and gas_bhp != 0.0:
+                drawdown = gas_bhp - cell_pressure
+                mu_g = float(gas_viscosity_grid[i, j, k])
+                inv_mu_g = 1.0 / mu_g if mu_g > 0.0 else 0.0
+                rho_g = float(gas_density_grid[i, j, k])
+                dkrg_dSw_eff, dkrg_dSg_eff = _eff(
+                    dkrg_dSw_grid, dkrg_dSo_grid, dkrg_dSg_grid, i, j, k
+                )
+
+                dqg_dSw = T * inv_mu_g * dkrg_dSw_eff * drawdown
+                dqg_dSg = T * inv_mu_g * dkrg_dSg_eff * drawdown
+                _add(cell_idx, 1, 0, -rho_g * dqg_dSw)
+                _add(cell_idx, 1, 1, -rho_g * dqg_dSg)
+
+    return (
+        np.array(rows, dtype=np.int32),
+        np.array(cols, dtype=np.int32),
+        np.array(vals, dtype=np.float64),
+    )
+
+
 def assemble_analytical_jacobian(
     cell_count_x: int,
     cell_count_y: int,
@@ -2480,6 +2663,11 @@ def assemble_analytical_jacobian(
     time_step_in_days: float,
     config: Config,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    wells_indices: WellsIndices,
+    injection_bhps: typing.Optional[BottomHolePressures[float, ThreeDimensions]] = None,
+    production_bhps: typing.Optional[
+        BottomHolePressures[float, ThreeDimensions]
+    ] = None,
 ) -> coo_matrix:
     """
     Assemble the full mass-based analytical saturation Jacobian.
@@ -2547,7 +2735,7 @@ def assemble_analytical_jacobian(
         gas_relative_mobility_grid,
     ) = relative_mobility_grids
 
-    rows, cols, vals = assemble_jacobian_contributions(
+    flux_rows, flux_cols, flux_vals = assemble_flux_contributions(
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
@@ -2594,8 +2782,48 @@ def assemble_analytical_jacobian(
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
     system_size = 2 * total_cell_count
+
+    if injection_bhps is None or production_bhps is None:
+        return coo_matrix(
+            (flux_vals, (flux_rows, flux_cols)),
+            shape=(system_size, system_size),
+            dtype=np.float64,
+        )
+
+    well_rows, well_cols, well_vals = assemble_well_contributions(
+        pressure_grid=pressure_grid,
+        water_density_grid=water_density_grid,
+        oil_density_grid=oil_density_grid,
+        gas_density_grid=gas_density_grid,
+        solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
+        gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+        gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
+        oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
+        water_formation_volume_factor_grid=water_formation_volume_factor_grid,
+        water_viscosity_grid=water_viscosity_grid,
+        oil_viscosity_grid=oil_viscosity_grid,
+        gas_viscosity_grid=gas_viscosity_grid,
+        dkrw_dSw_grid=dkrw_dSw_grid,
+        dkrw_dSo_grid=dkrw_dSo_grid,
+        dkrw_dSg_grid=dkrw_dSg_grid,
+        dkro_dSw_grid=dkro_dSw_grid,
+        dkro_dSo_grid=dkro_dSo_grid,
+        dkro_dSg_grid=dkro_dSg_grid,
+        dkrg_dSw_grid=dkrg_dSw_grid,
+        dkrg_dSo_grid=dkrg_dSo_grid,
+        dkrg_dSg_grid=dkrg_dSg_grid,
+        wells_indices=wells_indices,
+        injection_bhps=injection_bhps,
+        production_bhps=production_bhps,
+        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+    )
+    all_rows = np.concatenate([flux_rows, well_rows])
+    all_cols = np.concatenate([flux_cols, well_cols])
+    all_vals = np.concatenate([flux_vals, well_vals])
     return coo_matrix(
-        (vals, (rows, cols)), shape=(system_size, system_size), dtype=np.float64
+        (all_vals, (all_rows, all_cols)),
+        shape=(system_size, system_size),
+        dtype=np.float64,
     )
 
 
@@ -2639,6 +2867,11 @@ def assemble_jacobian(
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     md_per_cp_to_ft2_per_psi_per_day: float,
+    wells_indices: WellsIndices,
+    injection_bhps: typing.Optional[BottomHolePressures[float, ThreeDimensions]] = None,
+    production_bhps: typing.Optional[
+        BottomHolePressures[float, ThreeDimensions]
+    ] = None,
 ) -> coo_matrix:
     """
     Dispatch Jacobian assembly to the numerical or analytical path.
@@ -2715,6 +2948,9 @@ def assemble_jacobian(
             time_step_in_days=time_step_in_days,
             config=config,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+            wells_indices=wells_indices,
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
         )
 
     return assemble_numerical_jacobian(
@@ -2777,6 +3013,7 @@ def solve_transport(
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     config: Config,
+    wells_indices: WellsIndices,
     rates: typing.Optional[WellRates[ThreeDimensions]] = None,
     dtype: npt.DTypeLike = np.float64,
 ) -> Solution[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
@@ -2829,11 +3066,15 @@ def solve_transport(
         net_water_well_mass_rate_grid = rates.net_water_well_mass_rate_grid
         net_oil_well_mass_rate_grid = rates.net_oil_well_mass_rate_grid
         net_gas_well_mass_rate_grid = rates.net_gas_well_mass_rate_grid
+        injection_bhps = rates.injection_bhps
+        production_bhps = rates.production_bhps
     else:
         zeros_grid = np.zeros_like(pressure_grid, dtype=dtype)
         net_water_well_mass_rate_grid = zeros_grid
         net_oil_well_mass_rate_grid = zeros_grid
         net_gas_well_mass_rate_grid = zeros_grid
+        injection_bhps = None
+        production_bhps = None
 
     old_water_saturation_grid = fluid_properties.water_saturation_grid
     old_oil_saturation_grid = fluid_properties.oil_saturation_grid
@@ -3060,6 +3301,9 @@ def solve_transport(
             pressure_boundaries=pressure_boundaries,
             flux_boundaries=flux_boundaries,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+            wells_indices=wells_indices,
+            injection_bhps=injection_bhps,
+            production_bhps=production_bhps,
             capillary_pressure_grids=capillary_pressure_grids,
             relative_mobility_grids=relative_mobility_grids,
         )

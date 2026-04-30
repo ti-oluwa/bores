@@ -12,7 +12,7 @@ from bores.correlations.core import (
 
 logging.basicConfig(level=logging.DEBUG)
 
-bores.use_32bit_precision()
+# bores.use_32bit_precision()
 
 # -------------------------------------------------------------------------
 # Grid geometry — SPE1 benchmark (Odeh, 1981, JPT)
@@ -659,7 +659,7 @@ producer = bores.production_well(
     skin_factor=0.0,
     is_active=True,
 )
-wells = bores.wells_(injectors=[injector], producers=[producer])
+wells = bores.wells_(injectors=[], producers=[])
 
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1.0),

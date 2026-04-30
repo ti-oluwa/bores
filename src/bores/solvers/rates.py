@@ -484,7 +484,7 @@ def compute_well_rates(
                     cell_count_y=cell_count_y,
                     cell_count_z=cell_count_z,
                 )
-                if can_flow and control.is_bhp_control:
+                if can_flow:
                     if not is_gas:
                         phase_transmissibility = (
                             well_index
@@ -532,11 +532,6 @@ def compute_well_rates(
                         rhs_contributions[cell_idx] += (
                             phase_transmissibility * dm_dp * effective_bhp
                         )
-                elif can_flow:
-                    if is_gas:
-                        rhs_contributions[cell_idx] += flow_rate
-                    else:
-                        rhs_contributions[cell_idx] += flow_rate * bbl_to_ft3
 
                 if is_gas:
                     phase_density = typing.cast(float, gas_density_grid[i, j, k])

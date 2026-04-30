@@ -1650,7 +1650,7 @@ def apply_updates(
                     net_gas_total_mass_flux_grid[i, j, k] + well_gas_mass_rate
                 )
 
-                # Free gas saturation — simultaneous solution (THE FIX)
+                # Free gas saturation — simultaneous solution
                 #
                 # Substituting So = 1 - Sw - Sg into the gas mass balance:
                 #   M_g = rho_g*Sg + rho_o*alpha*(1-Sw-Sg) + rho_w*alpha_w*Sw
@@ -1661,21 +1661,21 @@ def apply_updates(
                 #
                 # Above bubble point rho_o*alpha > rho_g so both num and denom
                 # are negative — their ratio is still the correct positive Sg.
-                numerator_sg = (
+                new_free_gas_mass = (
                     new_total_gas_mass
                     - current_oil_density
                     * current_alpha_rs
                     * (1.0 - new_water_saturation)
                     - current_water_density * current_alpha_rsw * new_water_saturation
                 )
-                denominator_sg = (
+                effective_gas_density = (
                     current_gas_density - current_oil_density * current_alpha_rs
                 )
 
-                if abs(denominator_sg) < 1e-20:
+                if abs(effective_gas_density) < 1e-20:
                     new_gas_saturation = 0.0
                 else:
-                    new_gas_saturation = numerator_sg / denominator_sg
+                    new_gas_saturation = new_free_gas_mass / effective_gas_density
 
                 if new_gas_saturation < 0.0:
                     new_gas_saturation = 0.0

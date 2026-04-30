@@ -140,7 +140,7 @@ rock_fluid_tables = bores.RockFluidTables(
 )
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1),
-    maximum_step_size=bores.Time(days=10),
+    maximum_step_size=bores.Time(days=30),
     minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=30),
     maximum_rejections=20,
@@ -153,14 +153,13 @@ config = bores.Config(
     wells=wells,
     scheme="si",
     pressure_solver="direct",
-    transport_solver="direct",
+    transport_solver="cgs",
     pressure_preconditioner=None,
-    transport_preconditioner=None,
+    transport_preconditioner="ilu",
     maximum_pressure_change=500,
     # freeze_saturation_pressure=True,
     # disable_capillary_effects=True,
-    cfl_threshold=0.5,
-    minimum_injector_water_saturation=0.5
+    cfl_threshold=0.5,    
 )
 
 

@@ -520,7 +520,7 @@ def assemble_flux_contributions(
 
         for j in range(cell_count_y):
             for k in range(cell_count_z):
-                this_cell_1d_index = to_1D_index(
+                this_cell_idx = to_1D_index(
                     i=i,
                     j=j,
                     k=k,
@@ -566,7 +566,7 @@ def assemble_flux_contributions(
                         cell_count_z=cell_count_z,
                     )
                     # Entry 0: A[this, east]
-                    thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
+                    thread_sparse_row_indices[ii, local_slot] = this_cell_idx
                     thread_sparse_col_indices[ii, local_slot] = east_1d
                     thread_sparse_off_diag_vals[ii, local_slot] = -T
                     thread_transmissibility[ii, local_slot] = T
@@ -576,7 +576,7 @@ def assemble_flux_contributions(
                     local_slot += 1
                     # Entry 1: A[east, this]
                     thread_sparse_row_indices[ii, local_slot] = east_1d
-                    thread_sparse_col_indices[ii, local_slot] = this_cell_1d_index
+                    thread_sparse_col_indices[ii, local_slot] = this_cell_idx
                     thread_sparse_off_diag_vals[ii, local_slot] = -T
                     thread_transmissibility[ii, local_slot] = T
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
@@ -608,7 +608,7 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                    thread_owner_cell[ii, local_slot] = this_cell_idx
                     thread_transmissibility[ii, local_slot] = T
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
                     pressure_boundary = pressure_boundaries[pei, pej, pek]
@@ -645,7 +645,7 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                    thread_owner_cell[ii, local_slot] = this_cell_idx
                     thread_transmissibility[ii, local_slot] = T
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
                     pressure_boundary = pressure_boundaries[pwi, pwj, pwk]
@@ -688,7 +688,7 @@ def assemble_flux_contributions(
                         cell_count_y=cell_count_y,
                         cell_count_z=cell_count_z,
                     )
-                    thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
+                    thread_sparse_row_indices[ii, local_slot] = this_cell_idx
                     thread_sparse_col_indices[ii, local_slot] = south_1d
                     thread_sparse_off_diag_vals[ii, local_slot] = -T
                     thread_transmissibility[ii, local_slot] = T
@@ -697,7 +697,7 @@ def assemble_flux_contributions(
                     thread_is_neumann[ii, local_slot] = False
                     local_slot += 1
                     thread_sparse_row_indices[ii, local_slot] = south_1d
-                    thread_sparse_col_indices[ii, local_slot] = this_cell_1d_index
+                    thread_sparse_col_indices[ii, local_slot] = this_cell_idx
                     thread_sparse_off_diag_vals[ii, local_slot] = -T
                     thread_transmissibility[ii, local_slot] = T
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
@@ -724,7 +724,7 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                    thread_owner_cell[ii, local_slot] = this_cell_idx
                     thread_transmissibility[ii, local_slot] = T
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
                     pressure_boundary = pressure_boundaries[psi, psj, psk]
@@ -758,7 +758,7 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                    thread_owner_cell[ii, local_slot] = this_cell_idx
                     thread_transmissibility[ii, local_slot] = T
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
                     pressure_boundary = pressure_boundaries[pni, pnj, pnk]
@@ -801,7 +801,7 @@ def assemble_flux_contributions(
                         cell_count_y=cell_count_y,
                         cell_count_z=cell_count_z,
                     )
-                    thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
+                    thread_sparse_row_indices[ii, local_slot] = this_cell_idx
                     thread_sparse_col_indices[ii, local_slot] = bottom_1d
                     thread_sparse_off_diag_vals[ii, local_slot] = -T
                     thread_transmissibility[ii, local_slot] = T
@@ -810,7 +810,7 @@ def assemble_flux_contributions(
                     thread_is_neumann[ii, local_slot] = False
                     local_slot += 1
                     thread_sparse_row_indices[ii, local_slot] = bottom_1d
-                    thread_sparse_col_indices[ii, local_slot] = this_cell_1d_index
+                    thread_sparse_col_indices[ii, local_slot] = this_cell_idx
                     thread_sparse_off_diag_vals[ii, local_slot] = -T
                     thread_transmissibility[ii, local_slot] = T
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
@@ -837,7 +837,7 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                    thread_owner_cell[ii, local_slot] = this_cell_idx
                     thread_transmissibility[ii, local_slot] = T
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
                     pressure_boundary = pressure_boundaries[pbi, pbj, pbk]
@@ -871,7 +871,7 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    thread_owner_cell[ii, local_slot] = this_cell_1d_index
+                    thread_owner_cell[ii, local_slot] = this_cell_idx
                     thread_transmissibility[ii, local_slot] = T
                     thread_rhs_term[ii, local_slot] = capillary_flux + gravity_flux
                     pressure_boundary = pressure_boundaries[pti, ptj, ptk]
