@@ -27,7 +27,7 @@ from bores.grids.pvt import (
     build_water_viscosity_grid,
 )
 from bores.grids.rock_fluid import build_effective_residual_saturation_grids
-from bores.models import FluidProperties, RockProperties, SaturationHistory
+from bores.models import FluidProperties, HysteresisState, RockProperties
 from bores.solvers.base import normalize_saturations
 from bores.tables.pvt import PVTTables
 from bores.types import (
@@ -466,37 +466,39 @@ def update_fluid_properties(
 
 def update_residual_saturation_grids(
     rock_properties: RockProperties[ThreeDimensions],
-    saturation_history: SaturationHistory[ThreeDimensions],
+    hysteresis_state: HysteresisState[ThreeDimensions],
     water_saturation_grid: NDimensionalGrid[ThreeDimensions],
     gas_saturation_grid: NDimensionalGrid[ThreeDimensions],
     residual_oil_drainage_ratio_water_flood: float = 0.6,  # Sorw_drainage = 0.6 x Sorw_imbibition
     residual_oil_drainage_ratio_gas_flood: float = 0.6,  # Sorg_drainage = 0.6 x Sorg_imbibition
     residual_gas_drainage_ratio: float = 0.5,  # Sgr_drainage = 0.5 x Sgr_imbibition
     tolerance: float = 1e-6,
-) -> typing.Tuple[RockProperties[ThreeDimensions], SaturationHistory[ThreeDimensions]]:
+) -> typing.Tuple[RockProperties[ThreeDimensions], HysteresisState[ThreeDimensions]]:
     """
     Updates the effective residual saturation grids based on current displacement regimes
-    (drainage or imbibition) determined from saturation history and current saturations.
+    (drainage or imbibition) determined from hysteresis state and current saturations.
 
     :param rock_properties: Current rock properties including residual saturations
-    :param saturation_history: Current saturation history including max saturations and imbibition flags
+    :param hysteresis_state: Current hysteresis state including max saturations and imbibition flags
     :param water_saturation_grid: Current water saturation grid
     :param gas_saturation_grid: Current gas saturation grid
     :param residual_oil_drainage_ratio_water_flood: Ratio to compute oil drainage residual from imbibition value.
     :param residual_gas_drainage_ratio: Ratio to compute gas drainage residual from imbibition value.
     :param residual_oil_drainage_ratio_gas_flood: Ratio to compute oil drainage residual from gas flooding imbibition value.
     :param tolerance: Tolerance to determine significant saturation changes.
-    :return: Tuple of updated `RockProperties` and `SaturationHistory` with new effective residual saturations
+    :return: Tuple of updated `RockProperties` and `HysteresisState` with new effective residual saturations
     """
     residual_oil_saturation_water_grid = (
         rock_properties.residual_oil_saturation_water_grid
     )
     residual_oil_saturation_gas_grid = rock_properties.residual_oil_saturation_gas_grid
     residual_gas_saturation_grid = rock_properties.residual_gas_saturation_grid
-    max_water_saturation_grid = saturation_history.max_water_saturation_grid
-    max_gas_saturation_grid = saturation_history.max_gas_saturation_grid
-    water_imbibition_flag_grid = saturation_history.water_imbibition_flag_grid
-    gas_imbibition_flag_grid = saturation_history.gas_imbibition_flag_grid
+    max_water_saturation_grid = hysteresis_state.max_water_saturation_grid
+    max_gas_saturation_grid = hysteresis_state.max_gas_saturation_grid
+    water_imbibition_flag_grid = hysteresis_state.water_imbibition_flag_grid
+    gas_imbibition_flag_grid = hysteresis_state.gas_imbibition_flag_grid
+    water_reversal_saturation_grid = hysteresis_state.water_reversal_saturation_grid
+    gas_reversal_saturation_grid = hysteresis_state.gas_reversal_saturation_grid
 
     (
         new_max_water_saturation_grid,
@@ -506,6 +508,8 @@ def update_residual_saturation_grids(
         effective_residual_gas_saturation_grid,
         new_water_imbibition_flag_grid,
         new_gas_imbibition_flag_grid,
+        new_water_reversal_saturation_grid,
+        new_gas_reversal_saturation_grid,
     ) = build_effective_residual_saturation_grids(
         water_saturation_grid=water_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
@@ -516,6 +520,8 @@ def update_residual_saturation_grids(
         max_gas_saturation_grid=max_gas_saturation_grid,
         water_imbibition_flag_grid=water_imbibition_flag_grid,
         gas_imbibition_flag_grid=gas_imbibition_flag_grid,
+        water_reversal_saturation_grid=water_reversal_saturation_grid,
+        gas_reversal_saturation_grid=gas_reversal_saturation_grid,
         residual_oil_drainage_ratio_water_flood=residual_oil_drainage_ratio_water_flood,
         residual_oil_drainage_ratio_gas_flood=residual_oil_drainage_ratio_gas_flood,
         residual_gas_drainage_ratio=residual_gas_drainage_ratio,
@@ -528,11 +534,13 @@ def update_residual_saturation_grids(
         residual_oil_saturation_gas_grid=effective_residual_oil_saturation_gas_grid,
         residual_gas_saturation_grid=effective_residual_gas_saturation_grid,
     )
-    updated_saturation_history = attrs.evolve(
-        saturation_history,
+    updated_hysteresis_state = attrs.evolve(
+        hysteresis_state,
         max_water_saturation_grid=new_max_water_saturation_grid,
         max_gas_saturation_grid=new_max_gas_saturation_grid,
         water_imbibition_flag_grid=new_water_imbibition_flag_grid,
         gas_imbibition_flag_grid=new_gas_imbibition_flag_grid,
+        water_reversal_saturation_grid=new_water_reversal_saturation_grid,
+        gas_reversal_saturation_grid=new_gas_reversal_saturation_grid,
     )
-    return updated_rock_properties, updated_saturation_history
+    return updated_rock_properties, updated_hysteresis_state

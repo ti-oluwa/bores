@@ -648,13 +648,7 @@ producer = bores.production_well(
             specific_gravity=0.792,
             molecular_weight=gas_molecular_weight,
             pseudo_pressure_table=pseudo_pressure_table,
-        ),
-        bores.ProducedFluid(
-            name="Water",
-            phase=bores.FluidPhase.WATER,
-            specific_gravity=1.00,
-            molecular_weight=bores.c.MOLECULAR_WEIGHT_WATER,
-        ),
+        )
     ],
     skin_factor=0.0,
     is_active=True,
@@ -665,7 +659,7 @@ timer = bores.Timer(
     initial_step_size=bores.Time(days=1.0),
     maximum_step_size=bores.Time(days=30.0),
     minimum_step_size=bores.Time(minutes=10.0),
-    simulation_time=bores.Time(years=10.0),
+    simulation_time=bores.Time(years=3.5),
     ramp_up_factor=1.3,
     maximum_rejections=20,
 )
@@ -682,13 +676,12 @@ config = bores.Config(
     wells=wells,
     disable_capillary_effects=True,
     # freeze_saturation_pressure=True,
-    # maximum_gas_saturation_change=0.05,
-    # maximum_oil_saturation_change=0.05,
-    # maximum_water_saturation_change=0.05,
-    maximum_pressure_change=500.0,
-    use_pseudo_pressure=True,
-    cfl_threshold=0.9,
-    # minimum_injector_gas_saturation=0.2,
+    maximum_gas_saturation_change=0.05,
+    maximum_oil_saturation_change=0.05,
+    maximum_water_saturation_change=0.05,
+    maximum_newton_saturation_change=0.05,
+    maximum_pressure_change=300.0,
+    cfl_threshold=0.6,
 )
 
 # Run and monitor the simulation and collect states

@@ -82,7 +82,7 @@ model = bores.reservoir_model(
 | `FluidProperties` | class | Oil, gas, and water PVT properties at reservoir conditions. |
 | `RockProperties` | class | Porosity, permeability, and compressibility. |
 | `RockPermeability` | class | Directional permeability (kx, ky, kz). |
-| `SaturationHistory` | class | Historical saturation data for hysteresis tracking. |
+| `HysteresisState` | class | Historical saturation data for hysteresis tracking. |
 
 All data model classes are frozen `attrs` classes. You modify them using `attrs.evolve()` to create new instances with changed fields.
 

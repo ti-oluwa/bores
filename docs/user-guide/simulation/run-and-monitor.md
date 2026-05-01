@@ -336,7 +336,7 @@ monitor_cfg = bores.MonitorConfig(
 )
 
 pressure_history = []
-saturation_history = []
+hysteresis_state = []
 
 for state, stats in bores.monitor(
     model,
@@ -345,7 +345,7 @@ for state, stats in bores.monitor(
     return_stats=True,
 ):
     pressure_history.append(state.average_pressure)
-    saturation_history.append(state.average_water_saturation)
+    hysteresis_state.append(state.average_water_saturation)
 
 # Post-simulation analysis
 print("\n" + "="*60)

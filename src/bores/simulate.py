@@ -23,8 +23,10 @@ from bores.datastructures import (
 )
 from bores.errors import SimulationError, StopSimulation, TimingError, ValidationError
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids, RelPermGrids
-from bores.grids.pvt import build_three_phase_relative_mobilities_grids
-from bores.grids.rock_fluid import build_rock_fluid_properties_grids
+from bores.grids.rock_fluid import (
+    build_rock_fluid_properties_grids,
+    build_three_phase_relative_mobilities_grids,
+)
 from bores.initialization import (
     apply_minimum_injector_saturations,
     check_zero_flow_initialization,
@@ -36,9 +38,9 @@ from bores.material_balance import (
 )
 from bores.models import (
     FluidProperties,
+    HysteresisState,
     ReservoirModel,
     RockProperties,
-    SaturationHistory,
 )
 from bores.precision import get_dtype
 from bores.solvers import explicit, implicit
@@ -97,8 +99,8 @@ class StepResult(typing.Generic[NDimension]):
     """Size of the current time step (seconds)."""
     time: float
     """Total elapsed simulation time (seconds)."""
-    saturation_history: typing.Optional[SaturationHistory[NDimension]] = None
-    """Updated saturation history after the time step."""
+    hysteresis_state: typing.Optional[HysteresisState[NDimension]] = None
+    """Updated hysteresis state after the time step."""
     rates: typing.Optional[WellRates[NDimension]] = None
     """Well rate info for the step"""
     success: bool = True
@@ -134,7 +136,7 @@ def _validate_pressure_range(
     time: float,
     fluid_properties: FluidProperties[ThreeDimensions],
     rock_properties: RockProperties[ThreeDimensions],
-    saturation_history: typing.Optional[SaturationHistory[ThreeDimensions]] = None,
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]] = None,
 ) -> typing.Optional[StepResult[ThreeDimensions]]:
     """
     Check for out-of-range pressures and return a failure `StepResult` if found.
@@ -145,7 +147,7 @@ def _validate_pressure_range(
     :param time: Total elapsed simulation time (seconds).
     :param fluid_properties: Fluid properties for the current state.
     :param rock_properties: Rock properties for the current state.
-    :param saturation_history: Saturation history for the current state.
+    :param hysteresis_state: Saturation history for the current state.
     :return: `StepResult` with failure if pressures are out of range, *None* otherwise.
     """
     min_allowable = c.MINIMUM_VALID_PRESSURE - 1e-3
@@ -180,7 +182,7 @@ def _validate_pressure_range(
             time_step=time_step,
             time_step_size=time_step_size,
             time=time,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             success=False,
             message=message,
         )
@@ -297,6 +299,7 @@ def _make_bhps(grid_shape: NDimension) -> BottomHolePressures[float, NDimension]
 def _rebuild_rock_fluid_grids(
     fluid_properties: FluidProperties[ThreeDimensions],
     rock_properties: RockProperties[ThreeDimensions],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     config: Config,
 ) -> typing.Tuple[
     RelPermGrids[ThreeDimensions],
@@ -326,6 +329,7 @@ def _rebuild_rock_fluid_grids(
         permeability_grid=rock_properties.absolute_permeability.mean,
         relative_permeability_table=config.rock_fluid_tables.relative_permeability_table,
         capillary_pressure_table=config.rock_fluid_tables.capillary_pressure_table,
+        hysteresis_state=hysteresis_state,
         disable_capillary_effects=config.disable_capillary_effects,
         capillary_strength_factor=config.capillary_strength_factor,
         phase_appearance_tolerance=config.phase_appearance_tolerance,
@@ -346,7 +350,7 @@ def _run_impes_step(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    saturation_history: typing.Optional[SaturationHistory[ThreeDimensions]],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     relperm_grids: RelPermGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
@@ -361,7 +365,8 @@ def _run_impes_step(
     saturation_epsilon: float = 1e-12,
 ) -> StepResult[ThreeDimensions]:
     """
-    Execute one time step using IMPES (Implicit Pressure, Explicit Saturation).
+    Execute one time step using IMPES (Implicit Pressure, Explicit Saturation)
+    with semi-implicit well handling.
 
     :param time_step: Current time step index.
     :param grid_shape: Model grid shape (nx, ny, nz).
@@ -373,7 +378,7 @@ def _run_impes_step(
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
     :param rock_properties: Rock properties.
     :param fluid_properties: Fluid properties.
-    :param saturation_history: Saturation history, or *None* if hysteresis is disabled.
+    :param hysteresis_state: Saturation history, or *None* if hysteresis is disabled.
     :param relperm_grids: Three-phase relative permeability grids.
     :param relative_mobility_grids: Three-phase relative mobility grids.
     :param capillary_pressure_grids: Oil-water and gas-oil capillary pressure grids.
@@ -453,7 +458,7 @@ def _run_impes_step(
             time_step=time_step,
             time_step_size=time_step_size,
             time=time,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             success=False,
             message=pressure_result.message,
         )
@@ -476,7 +481,7 @@ def _run_impes_step(
             time_step=time_step,
             time_step_size=time_step_size,
             time=time,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             success=False,
             message=message,
             maximum_pressure_change=maximum_pressure_change,
@@ -493,7 +498,7 @@ def _run_impes_step(
         time=time,
         fluid_properties=fluid_properties,
         rock_properties=rock_properties,
-        saturation_history=saturation_history,
+        hysteresis_state=hysteresis_state,
     )
     if result is not None:
         return result
@@ -547,6 +552,20 @@ def _run_impes_step(
         water_relative_mobility=water_relative_mobility_grid,
         gas_relative_mobility=gas_relative_mobility_grid,
     )
+
+    if has_open_wells:
+        logger.debug("Re-computing well rates after pressure solve for consistency...")
+        well_rates = compute_well_rates(
+            fluid_properties=fluid_properties,
+            water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
+            oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
+            gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+            wells=wells,
+            time=time,
+            config=config,
+            wells_indices=wells_indices,
+            dtype=dtype,
+        )
 
     # Refresh boundary conditions after pressure update so that dynamic BCs (Robin,
     # Carter-Tracy) see the new interior pressures before saturation evolves.
@@ -620,7 +639,7 @@ def _run_impes_step(
             time_step=time_step,
             time_step_size=time_step_size,
             time=time,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             success=False,
             message=transport_result.message,
             maximum_pressure_change=maximum_pressure_change,
@@ -645,7 +664,7 @@ def _run_impes_step(
             time_step=time_step,
             time_step_size=time_step_size,
             time=time,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             success=False,
             message=message,
             maximum_pressure_change=maximum_pressure_change,
@@ -693,10 +712,10 @@ def _run_impes_step(
             saturation_epsilon=saturation_epsilon,
         )
 
-    if saturation_history is not None:
-        rock_properties, saturation_history = update_residual_saturation_grids(
+    if hysteresis_state is not None:
+        rock_properties, hysteresis_state = update_residual_saturation_grids(
             rock_properties=rock_properties,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             water_saturation_grid=fluid_properties.water_saturation_grid,
             gas_saturation_grid=fluid_properties.gas_saturation_grid,
             residual_oil_drainage_ratio_water_flood=config.residual_oil_drainage_ratio_water_flood,
@@ -737,7 +756,7 @@ def _run_impes_step(
         time_step=time_step,
         time_step_size=time_step_size,
         time=time,
-        saturation_history=saturation_history,
+        hysteresis_state=hysteresis_state,
         rates=well_rates,
         success=True,
         message=transport_result.message,
@@ -761,7 +780,7 @@ def _run_sequential_implicit_step(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    saturation_history: typing.Optional[SaturationHistory[ThreeDimensions]],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     relperm_grids: RelPermGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
@@ -780,7 +799,7 @@ def _run_sequential_implicit_step(
 
     Pressure is solved implicitly, then saturation is solved implicitly using
     Newton-Raphson iteration. This eliminates the CFL stability constraint on
-    saturation transport, allowing larger time steps than IMPES.
+    saturation transport, allowing larger time steps than IMPES in some cases.
 
     :param time_step: Current time step index.
     :param grid_shape: Model grid shape (nx, ny, nz).
@@ -792,7 +811,7 @@ def _run_sequential_implicit_step(
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
     :param rock_properties: Rock properties.
     :param fluid_properties: Fluid properties.
-    :param saturation_history: Saturation history, or *None* if hysteresis is disabled.
+    :param hysteresis_state: Saturation history, or *None* if hysteresis is disabled.
     :param relperm_grids: Three-phase relative permeability grids.
     :param relative_mobility_grids: Three-phase relative mobility grids.
     :param capillary_pressure_grids: Oil-water and gas-oil capillary pressure grids.
@@ -871,7 +890,7 @@ def _run_sequential_implicit_step(
             time_step=time_step,
             time_step_size=time_step_size,
             time=time,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             success=False,
             message=pressure_result.message,
         )
@@ -894,7 +913,7 @@ def _run_sequential_implicit_step(
             time_step=time_step,
             time_step_size=time_step_size,
             time=time,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             success=False,
             message=message,
             timer_context={
@@ -910,7 +929,7 @@ def _run_sequential_implicit_step(
         time=time,
         fluid_properties=fluid_properties,
         rock_properties=rock_properties,
-        saturation_history=saturation_history,
+        hysteresis_state=hysteresis_state,
     )
     if result is not None:
         return result
@@ -945,6 +964,39 @@ def _run_sequential_implicit_step(
         pvt_tables=config.pvt_tables,
         freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
+
+    # Partially update mobility grids (kr/μ) using updated viscosities
+    (
+        water_relative_mobility_grid,
+        oil_relative_mobility_grid,
+        gas_relative_mobility_grid,
+    ) = build_three_phase_relative_mobilities_grids(
+        oil_relative_permeability_grid=relperm_grids.kro,
+        water_relative_permeability_grid=relperm_grids.krw,
+        gas_relative_permeability_grid=relperm_grids.krg,
+        water_viscosity_grid=fluid_properties.water_viscosity_grid,
+        oil_viscosity_grid=fluid_properties.oil_effective_viscosity_grid,
+        gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
+    )
+    relative_mobility_grids = RelativeMobilityGrids(
+        oil_relative_mobility=oil_relative_mobility_grid,
+        water_relative_mobility=water_relative_mobility_grid,
+        gas_relative_mobility=gas_relative_mobility_grid,
+    )
+
+    if has_open_wells:
+        logger.debug("Re-computing well rates after pressure solve for consistency...")
+        well_rates = compute_well_rates(
+            fluid_properties=fluid_properties,
+            water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
+            oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
+            gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+            wells=wells,
+            time=time,
+            config=config,
+            wells_indices=wells_indices,
+            dtype=dtype,
+        )
 
     # Refresh boundary conditions so the saturation solve sees post-pressure BC values.
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
@@ -1013,7 +1065,7 @@ def _run_sequential_implicit_step(
             time_step=time_step,
             time_step_size=time_step_size,
             time=time,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             success=False,
             message=transport_result.message,
             maximum_pressure_change=maximum_pressure_change,
@@ -1024,29 +1076,46 @@ def _run_sequential_implicit_step(
         )
 
     if saturation_check.violated:
-        message = (
-            f"At time step {time_step}, saturation change limits were violated:\n"
-            f"{saturation_check.message}\n"
-            f"Oil: {maximum_oil_saturation_change:.6f}, "
-            f"Water: {maximum_water_saturation_change:.6f}, "
-            f"Gas: {maximum_gas_saturation_change:.6f}."
-        )
-        logger.warning(message)
-        return StepResult(
-            fluid_properties=fluid_properties,
-            rock_properties=rock_properties,
-            time_step=time_step,
-            time_step_size=time_step_size,
-            time=time,
-            saturation_history=saturation_history,
-            success=False,
-            message=message,
-            maximum_pressure_change=maximum_pressure_change,
-            maximum_oil_saturation_change=maximum_oil_saturation_change,
-            maximum_water_saturation_change=maximum_water_saturation_change,
-            maximum_gas_saturation_change=maximum_gas_saturation_change,
-            timer_context=timer_context,
-        )
+        if (
+            saturation_check.max_phase_saturation_change
+            and saturation_check.max_allowed_phase_saturation_change
+        ):
+            relative_change = (
+                abs(
+                    saturation_check.max_allowed_phase_saturation_change
+                    - saturation_check.max_phase_saturation_change
+                )
+                / saturation_check.max_allowed_phase_saturation_change
+            )
+        else:
+            relative_change = float("inf")
+
+        if relative_change > config.saturation_change_violation_tolerance:
+            message = (
+                f"At time step {time_step}, saturation change limits were violated:\n"
+                f"{saturation_check.message}\n"
+                f"Oil: {maximum_oil_saturation_change:.6f}, "
+                f"Water: {maximum_water_saturation_change:.6f}, "
+                f"Gas: {maximum_gas_saturation_change:.6f}."
+            )
+            logger.warning(message)
+            return StepResult(
+                fluid_properties=fluid_properties,
+                rock_properties=rock_properties,
+                time_step=time_step,
+                time_step_size=time_step_size,
+                time=time,
+                hysteresis_state=hysteresis_state,
+                success=False,
+                message=message,
+                maximum_pressure_change=maximum_pressure_change,
+                maximum_oil_saturation_change=maximum_oil_saturation_change,
+                maximum_water_saturation_change=maximum_water_saturation_change,
+                maximum_gas_saturation_change=maximum_gas_saturation_change,
+                timer_context=timer_context,
+            )
+        # Accept but signal timer to reduce next step
+        # Pass the violation info through timer_context
 
     logger.debug("Updating fluid properties with new saturation grids...")
     water_saturation_grid = transport_solution.water_saturation_grid.astype(
@@ -1073,10 +1142,10 @@ def _run_sequential_implicit_step(
             saturation_epsilon=saturation_epsilon,
         )
 
-    if saturation_history is not None:
-        rock_properties, saturation_history = update_residual_saturation_grids(
+    if hysteresis_state is not None:
+        rock_properties, hysteresis_state = update_residual_saturation_grids(
             rock_properties=rock_properties,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             water_saturation_grid=fluid_properties.water_saturation_grid,
             gas_saturation_grid=fluid_properties.gas_saturation_grid,
             residual_oil_drainage_ratio_water_flood=config.residual_oil_drainage_ratio_water_flood,
@@ -1117,7 +1186,7 @@ def _run_sequential_implicit_step(
         time_step=time_step,
         time_step_size=time_step_size,
         time=time,
-        saturation_history=saturation_history,
+        hysteresis_state=hysteresis_state,
         rates=well_rates,
         success=True,
         message=transport_result.message,
@@ -1141,7 +1210,7 @@ def _run_full_sequential_implicit_step(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    saturation_history: typing.Optional[SaturationHistory[ThreeDimensions]],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     relperm_grids: RelPermGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
@@ -1173,7 +1242,7 @@ def _run_full_sequential_implicit_step(
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
     :param rock_properties: Rock properties.
     :param fluid_properties: Fluid properties.
-    :param saturation_history: Saturation history, or *None* if hysteresis is disabled.
+    :param hysteresis_state: Saturation history, or *None* if hysteresis is disabled.
     :param relperm_grids: Three-phase relative permeability grids.
     :param relative_mobility_grids: Three-phase relative mobility grids.
     :param capillary_pressure_grids: Oil-water and gas-oil capillary pressure grids.
@@ -1296,7 +1365,7 @@ def _run_full_sequential_implicit_step(
                 time_step=time_step,
                 time_step_size=time_step_size,
                 time=time,
-                saturation_history=saturation_history,
+                hysteresis_state=hysteresis_state,
                 success=False,
                 message=pressure_result.message,
             )
@@ -1319,7 +1388,7 @@ def _run_full_sequential_implicit_step(
                 time_step=time_step,
                 time_step_size=time_step_size,
                 time=time,
-                saturation_history=saturation_history,
+                hysteresis_state=hysteresis_state,
                 success=False,
                 message=message,
                 maximum_pressure_change=maximum_pressure_change,
@@ -1336,7 +1405,7 @@ def _run_full_sequential_implicit_step(
             time=time,
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
         )
         if result is not None:
             return result
@@ -1437,7 +1506,7 @@ def _run_full_sequential_implicit_step(
                 time_step=time_step,
                 time_step_size=time_step_size,
                 time=time,
-                saturation_history=saturation_history,
+                hysteresis_state=hysteresis_state,
                 success=False,
                 message=transport_result.message,
                 maximum_pressure_change=maximum_pressure_change,
@@ -1456,32 +1525,47 @@ def _run_full_sequential_implicit_step(
             tolerance=1e-4,
         )
         if saturation_check.violated:
-            message = (
-                f"At time step {time_step}, outer iteration {iteration + 1}, "
-                f"saturation change limits were violated:\n{saturation_check.message}\n"
-                f"Oil: {maximum_oil_saturation_change:.6f}, "
-                f"Water: {maximum_water_saturation_change:.6f}, "
-                f"Gas: {maximum_gas_saturation_change:.6f}."
-            )
-            logger.warning(message)
-            return StepResult(
-                fluid_properties=fluid_properties,
-                rock_properties=rock_properties,
-                time_step=time_step,
-                time_step_size=time_step_size,
-                time=time,
-                saturation_history=saturation_history,
-                success=False,
-                message=message,
-                maximum_pressure_change=maximum_pressure_change,
-                maximum_oil_saturation_change=maximum_oil_saturation_change,
-                maximum_water_saturation_change=maximum_water_saturation_change,
-                maximum_gas_saturation_change=maximum_gas_saturation_change,
-                timer_context={
-                    "maximum_saturation_change": saturation_check.max_phase_saturation_change,
-                    "maximum_allowed_saturation_change": saturation_check.max_allowed_phase_saturation_change,
-                },
-            )
+            if (
+                saturation_check.max_phase_saturation_change
+                and saturation_check.max_allowed_phase_saturation_change
+            ):
+                relative_change = (
+                    abs(
+                        saturation_check.max_allowed_phase_saturation_change
+                        - saturation_check.max_phase_saturation_change
+                    )
+                    / saturation_check.max_allowed_phase_saturation_change
+                )
+            else:
+                relative_change = float("inf")
+
+            if relative_change > config.saturation_change_violation_tolerance:
+                message = (
+                    f"At time step {time_step}, outer iteration {iteration + 1}, "
+                    f"saturation change limits were violated:\n{saturation_check.message}\n"
+                    f"Oil: {maximum_oil_saturation_change:.6f}, "
+                    f"Water: {maximum_water_saturation_change:.6f}, "
+                    f"Gas: {maximum_gas_saturation_change:.6f}."
+                )
+                logger.warning(message)
+                return StepResult(
+                    fluid_properties=fluid_properties,
+                    rock_properties=rock_properties,
+                    time_step=time_step,
+                    time_step_size=time_step_size,
+                    time=time,
+                    hysteresis_state=hysteresis_state,
+                    success=False,
+                    message=message,
+                    maximum_pressure_change=maximum_pressure_change,
+                    maximum_oil_saturation_change=maximum_oil_saturation_change,
+                    maximum_water_saturation_change=maximum_water_saturation_change,
+                    maximum_gas_saturation_change=maximum_gas_saturation_change,
+                    timer_context={
+                        "maximum_saturation_change": saturation_check.max_phase_saturation_change,
+                        "maximum_allowed_saturation_change": saturation_check.max_allowed_phase_saturation_change,
+                    },
+                )
 
         water_saturation_grid = transport_solution.water_saturation_grid.astype(
             dtype, copy=False
@@ -1622,7 +1706,12 @@ def _run_full_sequential_implicit_step(
             iter_relperm_grids,
             iter_relative_mobility_grids,
             iter_capillary_pressure_grids,
-        ) = _rebuild_rock_fluid_grids(iter_fluid_properties, rock_properties, config)
+        ) = _rebuild_rock_fluid_grids(
+            fluid_properties=iter_fluid_properties,
+            rock_properties=rock_properties,
+            hysteresis_state=hysteresis_state,
+            config=config,
+        )
 
         previous_pressure_grid = new_pressure_grid.copy()
         previous_water_saturation_grid = (
@@ -1641,10 +1730,10 @@ def _run_full_sequential_implicit_step(
         "Saturation solve must have run at least once."
     )
 
-    if saturation_history is not None:
-        rock_properties, saturation_history = update_residual_saturation_grids(
+    if hysteresis_state is not None:
+        rock_properties, hysteresis_state = update_residual_saturation_grids(
             rock_properties=rock_properties,
-            saturation_history=saturation_history,
+            hysteresis_state=hysteresis_state,
             water_saturation_grid=iter_fluid_properties.water_saturation_grid,
             gas_saturation_grid=iter_fluid_properties.gas_saturation_grid,
             residual_oil_drainage_ratio_water_flood=config.residual_oil_drainage_ratio_water_flood,
@@ -1685,7 +1774,7 @@ def _run_full_sequential_implicit_step(
         time_step=time_step,
         time_step_size=time_step_size,
         time=time,
-        saturation_history=saturation_history,
+        hysteresis_state=hysteresis_state,
         rates=well_rates,
         success=True,
         message=transport_result.message,
@@ -1958,7 +2047,7 @@ def run(
 
         fluid_properties = model.fluid_properties
         rock_properties = model.rock_properties
-        saturation_history = model.saturation_history if enable_hysteresis else None
+        hysteresis_state = model.hysteresis_state if enable_hysteresis else None
         thickness_grid = model.thickness_grid
         absolute_permeability = rock_properties.absolute_permeability
         net_to_gross_grid = rock_properties.net_to_gross_grid
@@ -2049,7 +2138,12 @@ def run(
 
         logger.debug("Building initial rock-fluid property grids...")
         relperm_grids, relative_mobility_grids, capillary_pressure_grids = (
-            _rebuild_rock_fluid_grids(fluid_properties, rock_properties, config)
+            _rebuild_rock_fluid_grids(
+                fluid_properties=fluid_properties,
+                rock_properties=rock_properties,
+                hysteresis_state=hysteresis_state,
+                config=config,
+            )
         )
         rates = RatesInfo(
             injection_rates=_make_rates(grid_shape),
@@ -2092,11 +2186,9 @@ def run(
                         "Updating wells configuration for time step %d", new_step
                     )
                     assert well_schedules is not None
-                    well_schedules.apply(wells, state)  # type: ignore[attr-defined]
+                    well_schedules.apply(wells, state)
 
                 if new_step > 1:
-                    # Apply minimum injector saturations BEFORE mobility rebuild to ensure
-                    # non-zero mobilities in the pressure Jacobian.
                     if has_wells:
                         logger.debug(
                             "Enforcing minimum injector saturations for time step %d...",
@@ -2110,18 +2202,21 @@ def run(
                             minimum_injector_gas_saturation=config.minimum_injector_gas_saturation,
                             dtype=dtype,
                         )
-
-                    # Rebuild rock-fluid grids from the current saturation state
-                    # at the start of every step so the solvers see consistent mobilities.
-                    logger.debug(
-                        "Rebuilding rock-fluid property grids for time step %d...",
-                        new_step,
-                    )
-                    relperm_grids, relative_mobility_grids, capillary_pressure_grids = (
-                        _rebuild_rock_fluid_grids(
-                            fluid_properties, rock_properties, config
+                        # Rebuild rock-fluid grids
+                        logger.debug(
+                            "Rebuilding rock-fluid property grids after enforcing minimum injector saturations for time step %d...",
+                            new_step,
                         )
-                    )
+                        (
+                            relperm_grids,
+                            relative_mobility_grids,
+                            capillary_pressure_grids,
+                        ) = _rebuild_rock_fluid_grids(
+                            fluid_properties=fluid_properties,
+                            rock_properties=rock_properties,
+                            hysteresis_state=hysteresis_state,
+                            config=config,
+                        )
 
                     with update_wells_indices as should_update:
                         if should_update:
@@ -2148,7 +2243,7 @@ def run(
                     face_transmissibilities=face_transmissibilities,
                     rock_properties=rock_properties,
                     fluid_properties=fluid_properties,
-                    saturation_history=saturation_history,
+                    hysteresis_state=hysteresis_state,
                     relperm_grids=relperm_grids,
                     relative_mobility_grids=relative_mobility_grids,
                     capillary_pressure_grids=capillary_pressure_grids,
@@ -2164,11 +2259,11 @@ def run(
                 )
 
                 if scheme == "impes":
-                    result = _run_impes_step(**kwds)  # type: ignore[arg-type]
+                    result = _run_impes_step(**kwds)  # type: ignore
                 elif scheme in {"sequential-implicit", "si"}:
-                    result = _run_sequential_implicit_step(**kwds)  # type: ignore[arg-type]
+                    result = _run_sequential_implicit_step(**kwds)  # type: ignore
                 elif scheme in {"full-sequential-implicit", "full-si"}:
-                    result = _run_full_sequential_implicit_step(**kwds)  # type: ignore[arg-type]
+                    result = _run_full_sequential_implicit_step(**kwds)  # type: ignore
                 else:
                     raise ValidationError(
                         f"Invalid simulation scheme {scheme!r}. Supported schemes: 'impes', 'sequential-implicit', or 'full-sequential-implicit'."
@@ -2217,9 +2312,23 @@ def run(
 
                     continue
 
+                # Update rock-fluid grids using the new pressure and saturation state
+                logger.debug(
+                    "Updating rock-fluid property grids after time step %d...",
+                    new_step,
+                )
+                relperm_grids, relative_mobility_grids, capillary_pressure_grids = (
+                    _rebuild_rock_fluid_grids(
+                        fluid_properties=fluid_properties,
+                        rock_properties=rock_properties,
+                        hysteresis_state=hysteresis_state,
+                        config=config,
+                    )
+                )
+
                 fluid_properties = result.fluid_properties
                 rock_properties = result.rock_properties
-                saturation_history = result.saturation_history
+                hysteresis_state = result.hysteresis_state
 
                 if (
                     timer.step == 1
@@ -2228,25 +2337,17 @@ def run(
                 ):
                     logger.debug("Capturing model state at time step %d", timer.step)
                     wells_snapshot = copy.deepcopy(wells)
-                    if saturation_history is not None:
+                    if hysteresis_state is not None:
                         model_snapshot = model.evolve(
                             fluid_properties=fluid_properties,
                             rock_properties=rock_properties,
-                            saturation_history=saturation_history,
+                            hysteresis_state=hysteresis_state,
                         )
                     else:
                         model_snapshot = model.evolve(
                             fluid_properties=fluid_properties,
                             rock_properties=rock_properties,
                         )
-
-                    # Rebuild grids for the snapshot so the yielded state is
-                    # consistent with the accepted fluid properties.
-                    relperm_snapshot, mobilities_snapshot, capillary_snapshot = (
-                        _rebuild_rock_fluid_grids(
-                            fluid_properties, rock_properties, config
-                        )
-                    )
 
                     material_balance_errors = result.material_balance_errors
                     material_balance_errors = (
@@ -2283,9 +2384,9 @@ def run(
                         time=timer.elapsed_time,
                         model=model_snapshot,
                         wells=wells_snapshot,
-                        relative_mobilities=mobilities_snapshot,
-                        relative_permeabilities=relperm_snapshot,
-                        capillary_pressures=capillary_snapshot,
+                        relative_mobilities=relative_mobility_grids,
+                        relative_permeabilities=relperm_grids,
+                        capillary_pressures=capillary_pressure_grids,
                         rates=rates,
                         timer_state=timer.dump_state() if capture_timer_state else None,
                         material_balance_errors=material_balance_errors,

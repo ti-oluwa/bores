@@ -12,7 +12,7 @@ from bores.constants import c
 from bores.datastructures import BottomHolePressures
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
-from bores.models import FluidProperties, RockProperties
+from bores.models import FluidProperties, HysteresisState, RockProperties
 from bores.solvers.base import (
     Solution,
     compute_mobility_grids,
@@ -1089,6 +1089,7 @@ def compute_rock_fluid_properties(
     gas_saturation_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     config: Config,
 ) -> typing.Tuple[
     RelativeMobilityGrids[ThreeDimensions],
@@ -1125,6 +1126,7 @@ def compute_rock_fluid_properties(
             permeability_grid=rock_properties.absolute_permeability.mean,
             relative_permeability_table=config.rock_fluid_tables.relative_permeability_table,
             capillary_pressure_table=config.rock_fluid_tables.capillary_pressure_table,
+            hysteresis_state=hysteresis_state,
             disable_capillary_effects=config.disable_capillary_effects,
             capillary_strength_factor=config.capillary_strength_factor,
             phase_appearance_tolerance=config.phase_appearance_tolerance,
@@ -1296,6 +1298,7 @@ def compute_residuals(
     old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     face_transmissibilities: FaceTransmissibilities,
     config: Config,
     cell_count_x: int,
@@ -1359,6 +1362,7 @@ def compute_residuals(
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
         config=config,
+        hysteresis_state=hysteresis_state,
     )
     return _compute_residuals(
         water_saturation_grid=water_saturation_grid,
@@ -1424,6 +1428,7 @@ def assemble_numerical_jacobian(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     config: Config,
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
@@ -1508,6 +1513,7 @@ def assemble_numerical_jacobian(
         face_transmissibilities=face_transmissibilities,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
+        hysteresis_state=hysteresis_state,
         config=config,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
@@ -1643,6 +1649,7 @@ def compute_rock_fluid_derivatives(
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     rock_fluid_tables: RockFluidTables,
     disable_capillary_effects: bool = False,
     capillary_strength_factor: float = 1.0,
@@ -1704,6 +1711,28 @@ def compute_rock_fluid_derivatives(
     residual_gas_saturation_grid = rock_properties.residual_gas_saturation_grid.astype(
         np.float64, copy=False
     )
+    hysteresis_kwargs = {}
+    if hysteresis_state is not None:
+        hysteresis_kwargs = dict(
+            max_water_saturation=hysteresis_state.max_water_saturation_grid.astype(
+                np.float64, copy=False
+            ),
+            max_gas_saturation=hysteresis_state.max_gas_saturation_grid.astype(
+                np.float64, copy=False
+            ),
+            water_imbibition_flag=hysteresis_state.water_imbibition_flag_grid.astype(
+                np.float64, copy=False
+            ),
+            gas_imbibition_flag=hysteresis_state.gas_imbibition_flag_grid.astype(
+                np.float64, copy=False
+            ),
+            water_reversal_saturation=hysteresis_state.water_reversal_saturation_grid.astype(
+                np.float64, copy=False
+            ),
+            gas_reversal_saturation=hysteresis_state.gas_reversal_saturation_grid.astype(
+                np.float64, copy=False
+            ),
+        )
 
     relperm_derivatives = relperm_table.derivatives(
         water_saturation=water_saturation_grid,
@@ -1713,6 +1742,7 @@ def compute_rock_fluid_derivatives(
         residual_oil_saturation_water=residual_oil_saturation_water_grid,
         residual_oil_saturation_gas=residual_oil_saturation_gas_grid,
         residual_gas_saturation=residual_gas_saturation_grid,
+        **hysteresis_kwargs,
     )
 
     dkrw_dSw = relperm_derivatives["dKrw_dSw"]
@@ -1736,6 +1766,7 @@ def compute_rock_fluid_derivatives(
             residual_gas_saturation=residual_gas_saturation_grid,
             porosity=rock_properties.porosity_grid,
             permeability=rock_properties.absolute_permeability.mean,
+            **hysteresis_kwargs,
         )
         dPcow_dSw = (
             capillary_pressure_derivatives["dPcow_dSw"] * capillary_strength_factor
@@ -2661,6 +2692,7 @@ def assemble_analytical_jacobian(
     gas_viscosity_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     elevation_grid: ThreeDimensionalGrid,
@@ -2726,6 +2758,7 @@ def assemble_analytical_jacobian(
         oil_saturation_grid=oil_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
         rock_properties=rock_properties,
+        hysteresis_state=hysteresis_state,
         rock_fluid_tables=config.rock_fluid_tables,
         disable_capillary_effects=config.disable_capillary_effects,
         capillary_strength_factor=config.capillary_strength_factor,
@@ -2858,6 +2891,7 @@ def assemble_jacobian(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
@@ -2943,6 +2977,7 @@ def assemble_jacobian(
             water_formation_volume_factor_grid=fluid_properties.water_formation_volume_factor_grid,
             elevation_grid=elevation_grid,
             rock_properties=rock_properties,
+            hysteresis_state=hysteresis_state,
             face_transmissibilities=face_transmissibilities,
             gravitational_constant=gravitational_constant,
             water_viscosity_grid=fluid_properties.water_viscosity_grid,
@@ -2983,6 +3018,7 @@ def assemble_jacobian(
         face_transmissibilities=face_transmissibilities,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
+        hysteresis_state=hysteresis_state,
         config=config,
         thickness_grid=thickness_grid,
         cell_size_x=cell_size_x,
@@ -3020,6 +3056,7 @@ def solve_transport(
     config: Config,
     wells_indices: WellsIndices,
     rates: typing.Optional[WellRates[ThreeDimensions]] = None,
+    hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]] = None,
     dtype: npt.DTypeLike = np.float64,
 ) -> Solution[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
@@ -3124,6 +3161,7 @@ def solve_transport(
         pressure_grid=pressure_grid,
         face_transmissibilities=face_transmissibilities,
         fluid_properties=fluid_properties,
+        hysteresis_state=hysteresis_state,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
@@ -3159,19 +3197,10 @@ def solve_transport(
     maximum_newton_iterations = config.maximum_newton_iterations
     newton_tolerance = config.newton_tolerance
     maximum_line_search_cuts = config.maximum_line_search_cuts
-    maximum_saturation_change = config.maximum_saturation_change
+    maximum_saturation_change = config.maximum_newton_saturation_change
     transport_convergence_tolerance = config.transport_convergence_tolerance
 
     for iteration in range(maximum_newton_iterations):
-        # water_saturation_grid = np.clip(water_saturation_grid, 0.0, 1.0)
-        # gas_saturation_grid = np.clip(gas_saturation_grid, 0.0, 1.0)
-        # oil_saturation_grid = np.clip(oil_saturation_grid, 0.0, 1.0)
-        # total = water_saturation_grid + oil_saturation_grid + gas_saturation_grid
-        # total = np.where(total > 0, total, 1.0)
-        # water_saturation_grid /= total
-        # oil_saturation_grid /= total
-        # gas_saturation_grid /= total
-
         relative_mobility_grids, capillary_pressure_grids, _ = (
             compute_rock_fluid_properties(
                 water_saturation_grid=water_saturation_grid,
@@ -3179,6 +3208,7 @@ def solve_transport(
                 gas_saturation_grid=gas_saturation_grid,
                 rock_properties=rock_properties,
                 fluid_properties=fluid_properties,
+                hysteresis_state=hysteresis_state,
                 config=config,
             )
         )
@@ -3297,6 +3327,7 @@ def solve_transport(
             face_transmissibilities=face_transmissibilities,
             rock_properties=rock_properties,
             fluid_properties=fluid_properties,
+            hysteresis_state=hysteresis_state,
             thickness_grid=thickness_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,

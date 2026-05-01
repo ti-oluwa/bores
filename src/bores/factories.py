@@ -38,10 +38,10 @@ from bores.grids.pvt import (
 )
 from bores.models import (
     FluidProperties,
+    HysteresisState,
     ReservoirModel,
     RockPermeability,
     RockProperties,
-    SaturationHistory,
 )
 from bores.tables.pvt import PVTTables
 from bores.types import Coordinates, NDimension, NDimensionalGrid
@@ -213,7 +213,7 @@ def reservoir_model(
     solvent_concentration_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
     oil_effective_viscosity_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
     oil_effective_density_grid: typing.Optional[NDimensionalGrid[NDimension]] = None,
-    saturation_history: typing.Optional[SaturationHistory[NDimension]] = None,
+    hysteresis_state: typing.Optional[HysteresisState[NDimension]] = None,
     fractures: typing.Optional[typing.Iterable[Fracture]] = None,
     dip_angle: float = 0.0,
     dip_azimuth: float = 0.0,
@@ -899,9 +899,9 @@ def reservoir_model(
         connate_water_saturation_grid=connate_water_saturation_grid,
     )
 
-    if saturation_history is None:
+    if hysteresis_state is None:
         # Just store the initial saturations as the max saturations
-        saturation_history = SaturationHistory.from_initial_saturations(
+        hysteresis_state = HysteresisState.from_initial_saturations(
             water_saturation_grid=water_saturation_grid.copy(),
             gas_saturation_grid=gas_saturation_grid.copy(),
         )
@@ -912,7 +912,7 @@ def reservoir_model(
         thickness_grid=thickness_grid,
         fluid_properties=fluid_properties,
         rock_properties=rock_properties,
-        saturation_history=saturation_history,
+        hysteresis_state=hysteresis_state,
         dip_angle=dip_angle,
         dip_azimuth=dip_azimuth,
         datum_depth=datum_depth,

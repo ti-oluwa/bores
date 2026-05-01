@@ -296,28 +296,13 @@ def compute_well_rates(
                 cell_count_z=cell_count_z,
             )
             if can_flow:
-                if not is_gas:
+                if not use_pseudo_pressure:
                     # Regular linear
                     well_transmissibility = (
                         well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
                     )
                     diagonal_contributions[cell_idx] += well_transmissibility
                     rhs_contributions[cell_idx] += well_transmissibility * effective_bhp
-                elif not use_pseudo_pressure:
-                    # Pressure square linearization
-                    well_transmissibility = (
-                        well_index
-                        * phase_mobility
-                        * phase_viscosity
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
-                    coefficient = 2 * cell_pressure
-                    diagonal_contributions[cell_idx] += (
-                        well_transmissibility * coefficient
-                    )
-                    rhs_contributions[cell_idx] += (
-                        well_transmissibility * coefficient * effective_bhp
-                    )
                 else:
                     # Pseudo pressure linearization
                     well_transmissibility = (
@@ -485,7 +470,7 @@ def compute_well_rates(
                     cell_count_z=cell_count_z,
                 )
                 if can_flow:
-                    if not is_gas:
+                    if not use_pseudo_pressure:
                         phase_transmissibility = (
                             well_index
                             * phase_mobility
@@ -494,21 +479,6 @@ def compute_well_rates(
                         diagonal_contributions[cell_idx] += phase_transmissibility
                         rhs_contributions[cell_idx] += (
                             phase_transmissibility * effective_bhp
-                        )
-                    elif not use_pseudo_pressure:
-                        # Pressure square linearization
-                        phase_transmissibility = (
-                            well_index
-                            * phase_mobility
-                            * phase_viscosity
-                            * md_per_cp_to_ft2_per_psi_per_day
-                        )
-                        coefficient = 2 * cell_pressure
-                        diagonal_contributions[cell_idx] += (
-                            phase_transmissibility * coefficient
-                        )
-                        rhs_contributions[cell_idx] += (
-                            phase_transmissibility * coefficient * effective_bhp
                         )
                     else:
                         # Pseudo pressure linearization

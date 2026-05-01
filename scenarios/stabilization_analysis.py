@@ -28,9 +28,9 @@ def _():
 def _(bores, itertools, np, states):
     analyst = bores.ModelAnalyst(states)
 
-    oil_saturation_history = []
-    water_saturation_history = []
-    gas_saturation_history = []
+    oil_hysteresis_state = []
+    water_hysteresis_state = []
+    gas_hysteresis_state = []
     avg_pressure_history = []
     oil_relative_mobility_history = []
     oil_effective_viscosity_history = []
@@ -41,9 +41,9 @@ def _(bores, itertools, np, states):
     krw_history = []
     kro_history = []
     krg_history = []
-    krw_saturation_history = []
-    kro_saturation_history = []
-    krg_saturation_history = []
+    krw_hysteresis_state = []
+    kro_hysteresis_state = []
+    krg_hysteresis_state = []
 
     for state in itertools.islice(states, 0, None, 1):
         model = state.model
@@ -63,18 +63,18 @@ def _(bores, itertools, np, states):
         avg_kro = np.mean(state.relative_permeabilities.kro)
         avg_krg = np.mean(state.relative_permeabilities.krg)
 
-        oil_saturation_history.append((time_step, avg_oil_sat))
-        water_saturation_history.append((time_step, avg_water_sat))
-        gas_saturation_history.append((time_step, avg_gas_sat))
+        oil_hysteresis_state.append((time_step, avg_oil_sat))
+        water_hysteresis_state.append((time_step, avg_water_sat))
+        gas_hysteresis_state.append((time_step, avg_gas_sat))
         avg_pressure_history.append((time_step, avg_pressure))
         oil_water_capillary_pressure_history.append((time_step, avg_pcow))
         gas_oil_capillary_pressure_history.append((time_step, avg_pcgo))
         krw_history.append((time_step, avg_krw))
         kro_history.append((time_step, avg_kro))
         krg_history.append((time_step, avg_krg))
-        krg_saturation_history.append((avg_krg, avg_gas_sat))
-        kro_saturation_history.append((avg_kro, avg_oil_sat))
-        krw_saturation_history.append((avg_krw, avg_water_sat))
+        krg_hysteresis_state.append((avg_krg, avg_gas_sat))
+        kro_hysteresis_state.append((avg_kro, avg_oil_sat))
+        krw_hysteresis_state.append((avg_krw, avg_water_sat))
         oil_effective_viscosity_history.append((time_step, avg_viscosity))
         oil_effective_density_history.append((time_step, avg_density))
         oil_relative_mobility_history.append((time_step, avg_oil_rel_mobility))
@@ -82,19 +82,19 @@ def _(bores, itertools, np, states):
         analyst,
         avg_pressure_history,
         gas_oil_capillary_pressure_history,
-        gas_saturation_history,
+        gas_hysteresis_state,
         krg_history,
-        krg_saturation_history,
+        krg_hysteresis_state,
         kro_history,
-        kro_saturation_history,
+        kro_hysteresis_state,
         krw_history,
-        krw_saturation_history,
+        krw_hysteresis_state,
         oil_effective_density_history,
         oil_effective_viscosity_history,
         oil_relative_mobility_history,
-        oil_saturation_history,
+        oil_hysteresis_state,
         oil_water_capillary_pressure_history,
-        water_saturation_history,
+        water_hysteresis_state,
     )
 
 
@@ -124,17 +124,17 @@ def _(avg_pressure_history, bores, np):
 @app.cell
 def _(
     bores,
-    gas_saturation_history,
+    gas_hysteresis_state,
     np,
-    oil_saturation_history,
-    water_saturation_history,
+    oil_hysteresis_state,
+    water_hysteresis_state,
 ):
     # Saturation
     saturation_fig = bores.make_series_plot(
         data={
-            "Avg. Oil Saturation": np.array(oil_saturation_history),
-            "Avg. Water Saturation": np.array(water_saturation_history),
-            "Avg. Gas Saturation": np.array(gas_saturation_history),
+            "Avg. Oil Saturation": np.array(oil_hysteresis_state),
+            "Avg. Water Saturation": np.array(water_hysteresis_state),
+            "Avg. Gas Saturation": np.array(gas_hysteresis_state),
         },
         title="Saturation Stability Analysis (Case 1)",
         x_label="Time Step",
@@ -192,11 +192,11 @@ def _(bores, krg_history, kro_history, krw_history, np):
 
 
 @app.cell
-def _(bores, krw_saturation_history, np):
+def _(bores, krw_hysteresis_state, np):
     # RelPerm-Saturation
     water_relperm_saturation_fig = bores.make_series_plot(
         data={
-            "Krw/Sw": np.array(krw_saturation_history),
+            "Krw/Sw": np.array(krw_hysteresis_state),
         },
         title="Water RelPerm-Saturation Stability Analysis (Case 1)",
         x_label="Avg. Water Saturation",
@@ -210,10 +210,10 @@ def _(bores, krw_saturation_history, np):
 
 
 @app.cell
-def _(bores, kro_saturation_history, np):
+def _(bores, kro_hysteresis_state, np):
     oil_relperm_saturation_fig = bores.make_series_plot(
         data={
-            "Kro/So": np.array(kro_saturation_history),
+            "Kro/So": np.array(kro_hysteresis_state),
         },
         title="Oil RelPerm-Saturation Stability Analysis (Case 1)",
         x_label="Avg. Oil Saturation",
@@ -227,10 +227,10 @@ def _(bores, kro_saturation_history, np):
 
 
 @app.cell
-def _(bores, krg_saturation_history, np):
+def _(bores, krg_hysteresis_state, np):
     gas_relperm_saturation_fig = bores.make_series_plot(
         data={
-            "Krg/Sg": np.array(krg_saturation_history),
+            "Krg/Sg": np.array(krg_hysteresis_state),
         },
         title="Gas RelPerm-Saturation Stability Analysis (Case 1)",
         x_label="Avg. Gas Saturation",

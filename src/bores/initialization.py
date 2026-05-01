@@ -511,6 +511,7 @@ def check_zero_flow_initialization(
             permeability_grid=rock_properties.absolute_permeability.mean,
             relative_permeability_table=config.rock_fluid_tables.relative_permeability_table,
             capillary_pressure_table=config.rock_fluid_tables.capillary_pressure_table,
+            hysteresis_state=None,
             disable_capillary_effects=config.disable_capillary_effects,
             capillary_strength_factor=config.capillary_strength_factor,
             phase_appearance_tolerance=config.phase_appearance_tolerance,

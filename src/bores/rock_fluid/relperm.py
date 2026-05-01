@@ -58,7 +58,7 @@ __all__ = [
 ]
 
 
-#: Sentinel type for the `min_*_relperm` attributes on relperm tables and
+#: Sentinel type for the `minimum_*_relperm` attributes on relperm tables and
 #: analytical models. `"auto"` derives the floor from the active dtype;
 #: `None` disables the floor entirely; a `float` sets an explicit floor.
 RelPermFloor = typing.Union[typing.Literal["auto"], None, float]
@@ -1805,6 +1805,10 @@ class RelativePermeabilityTable(StoreSerializable):
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         raise NotImplementedError
 
+    def get_oil_relperm_endpoint(self) -> float:
+        """Resolve the oil relative permeability at connate water saturation. Defaults to 1.0"""
+        return 1.0
+
     def get_relative_permeabilities(
         self,
         water_saturation: FloatOrArray,
@@ -2460,7 +2464,7 @@ class ThreePhaseRelPermTable(
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         return self.gas_oil_table.wetting_phase  # type:ignore[return-value]
 
-    def _get_kro_endpoint(self) -> float:
+    def get_oil_relperm_endpoint(self) -> float:
         """
         Resolve the oil relative permeability at connate water saturation.
 
@@ -2554,7 +2558,7 @@ class ThreePhaseRelPermTable(
                 sg, non_wetting_saturation=so
             )
 
-        kro_endpoint = self._get_kro_endpoint()
+        kro_endpoint = self.get_oil_relperm_endpoint()
 
         # Three-phase oil mixing rule
         if self.mixing_rule is not None:
@@ -2807,10 +2811,10 @@ class ThreePhaseRelPermTable(
                 sg, non_wetting_saturation=so
             )
 
-        kro_endpoint = self._get_kro_endpoint()
+        kro_endpoint = self.get_oil_relperm_endpoint()
 
         # Three-phase oil mixing rule derivatives
-        mixing_rule = self.mixing_rule
+        mixing_rule = typing.cast(typing.Optional[MixingRule], self.mixing_rule)
         if mixing_rule is None:
             # Fallback: kro = min(kro_w, kro_g)
             kro_w_arr = np.asarray(kro_w, dtype=np.float64)
@@ -2925,9 +2929,9 @@ def compute_corey_three_phase_relative_permeabilities(
     mixing_rule: MixingRule = eclipse_rule,
     saturation_epsilon: float = 1e-6,
     minimum_mobile_pore_space: float = 1e-9,
-    min_water_relperm: typing.Optional[float] = None,
-    min_oil_relperm: typing.Optional[float] = None,
-    min_gas_relperm: typing.Optional[float] = None,
+    minimum_water_relperm: typing.Optional[float] = None,
+    minimum_oil_relperm: typing.Optional[float] = None,
+    minimum_gas_relperm: typing.Optional[float] = None,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     Computes relative permeability for water, oil, and gas in a three-phase system.
@@ -2952,9 +2956,9 @@ def compute_corey_three_phase_relative_permeabilities(
     :param mixing_rule: Mixing rule function for three-phase oil relative permeability.
     :param saturation_epsilon: Tolerance for checking if saturations sum to 1.
     :param minimum_mobile_pore_space: Minimum mobile pore space to avoid division by zero in effective saturation calculations.
-    :param min_water_relperm: Resolved minimum floor for water kr (`None` = no floor).
-    :param min_oil_relperm: Resolved minimum floor for oil kr (`None` = no floor).
-    :param min_gas_relperm: Resolved minimum floor for gas kr (`None` = no floor).
+    :param minimum_water_relperm: Resolved minimum floor for water kr (`None` = no floor).
+    :param minimum_oil_relperm: Resolved minimum floor for oil kr (`None` = no floor).
+    :param minimum_gas_relperm: Resolved minimum floor for gas kr (`None` = no floor).
     :return: Tuple of (water_relative_permeability, oil_relative_permeability, gas_relative_permeability)
     """
     # Convert to arrays for vectorized operations
@@ -3172,9 +3176,9 @@ def compute_corey_three_phase_relative_permeabilities(
     krw = np.clip(krw, 0.0, 1.0)
     kro = np.clip(kro, 0.0, 1.0)
     krg = np.clip(krg, 0.0, 1.0)
-    krw = _apply_relperm_floor(krw, min_water_relperm)
-    kro = _apply_relperm_floor(kro, min_oil_relperm)
-    krg = _apply_relperm_floor(krg, min_gas_relperm)
+    krw = _apply_relperm_floor(krw, minimum_water_relperm)
+    kro = _apply_relperm_floor(kro, minimum_oil_relperm)
+    krg = _apply_relperm_floor(krg, minimum_gas_relperm)
     if is_scalar:
         krw = krw.item()  # type: ignore
         kro = kro.item()  # type: ignore
@@ -3196,7 +3200,7 @@ class BrooksCoreyRelPermModel(
 
     Supports water-wet and oil-wet wettability assumptions.
 
-    **Minimum relperm floors** (`min_water_relperm`, `min_oil_relperm`, `min_gas_relperm`):
+    **Minimum relperm floors** (`minimum_water_relperm`, `minimum_oil_relperm`, `minimum_gas_relperm`):
 
     `"auto"` - `max(4 * machine_epsilon, 1e-8)` (dtype-aware, same as
     the CMG IMEX/GEM minimum mobility approach). `None` - no floor
@@ -3258,21 +3262,21 @@ class BrooksCoreyRelPermModel(
     and return the mixed oil relative permeability.
     """
 
-    min_water_relperm: RelPermFloor = "auto"
+    minimum_water_relperm: RelPermFloor = "auto"
     """
     Minimum floor for the water relative permeability.
 
     `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
     """
 
-    min_oil_relperm: RelPermFloor = "auto"
+    minimum_oil_relperm: RelPermFloor = "auto"
     """
     Minimum floor for the oil relative permeability.
 
     `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
     """
 
-    min_gas_relperm: RelPermFloor = "auto"
+    minimum_gas_relperm: RelPermFloor = "auto"
     """
     Minimum floor for the gas relative permeability.
 
@@ -3287,9 +3291,9 @@ class BrooksCoreyRelPermModel(
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
         # Validate floor sentinels eagerly
-        _resolve_relperm_floor(self.min_water_relperm)
-        _resolve_relperm_floor(self.min_oil_relperm)
-        _resolve_relperm_floor(self.min_gas_relperm)
+        _resolve_relperm_floor(self.minimum_water_relperm)
+        _resolve_relperm_floor(self.minimum_oil_relperm)
+        _resolve_relperm_floor(self.minimum_gas_relperm)
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
         wettability = self.wettability
@@ -3380,9 +3384,9 @@ class BrooksCoreyRelPermModel(
             mixing_rule=self.mixing_rule,  # type: ignore[arg-type]
             saturation_epsilon=c.SATURATION_EPSILON,
             minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
-            min_water_relperm=_resolve_relperm_floor(self.min_water_relperm),
-            min_oil_relperm=_resolve_relperm_floor(self.min_oil_relperm),
-            min_gas_relperm=_resolve_relperm_floor(self.min_gas_relperm),
+            minimum_water_relperm=_resolve_relperm_floor(self.minimum_water_relperm),
+            minimum_oil_relperm=_resolve_relperm_floor(self.minimum_oil_relperm),
+            minimum_gas_relperm=_resolve_relperm_floor(self.minimum_gas_relperm),
         )
         return RelativePermeabilities(water=krw, oil=kro, gas=krg)  # type: ignore[typeddict-item]
 
@@ -3479,9 +3483,9 @@ class BrooksCoreyRelPermModel(
         wettability = self.wettability
         mixing_rule = typing.cast(MixingRule, self.mixing_rule)
 
-        floor_w = _resolve_relperm_floor(self.min_water_relperm)
-        floor_o = _resolve_relperm_floor(self.min_oil_relperm)
-        floor_g = _resolve_relperm_floor(self.min_gas_relperm)
+        floor_w = _resolve_relperm_floor(self.minimum_water_relperm)
+        floor_o = _resolve_relperm_floor(self.minimum_oil_relperm)
+        floor_g = _resolve_relperm_floor(self.minimum_gas_relperm)
 
         is_scalar = (
             np.isscalar(water_saturation)
@@ -4165,17 +4169,17 @@ def compute_let_three_phase_relative_permeabilities(
     gas_L: float,
     gas_E: float,
     gas_T: float,
-    max_water_relperm: float = 1.0,
-    max_oil_relperm: float = 1.0,
-    max_gas_relperm: float = 1.0,
+    maximum_water_relperm: float = 1.0,
+    maximum_oil_relperm: float = 1.0,
+    maximum_gas_relperm: float = 1.0,
     wettability: Wettability = Wettability.WATER_WET,
     mixed_wet_water_fraction: float = 0.5,
     mixing_rule: MixingRule = eclipse_rule,
     saturation_epsilon: float = 1e-6,
     minimum_mobile_pore_space: float = 1e-9,
-    min_water_relperm: typing.Optional[float] = None,
-    min_oil_relperm: typing.Optional[float] = None,
-    min_gas_relperm: typing.Optional[float] = None,
+    minimum_water_relperm: typing.Optional[float] = None,
+    minimum_oil_relperm: typing.Optional[float] = None,
+    minimum_gas_relperm: typing.Optional[float] = None,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     Compute three-phase relative permeabilities using the LET correlation.
@@ -4207,15 +4211,15 @@ def compute_let_three_phase_relative_permeabilities(
     :param gas_L: Gas LET `L` parameter.
     :param gas_E: Gas LET `E` parameter.
     :param gas_T: Gas LET `T` parameter.
-    :param max_water_relperm: Endpoint relative permeability for water (krw_max).
-    :param max_oil_relperm: Endpoint relative permeability for oil (kro_max).
-    :param max_gas_relperm: Endpoint relative permeability for gas (krg_max).
+    :param maximum_water_relperm: Endpoint relative permeability for water (krw_max).
+    :param maximum_oil_relperm: Endpoint relative permeability for oil (kro_max).
+    :param maximum_gas_relperm: Endpoint relative permeability for gas (krg_max).
     :param wettability: Wettability type (water-wet or oil-wet).
     :param mixed_wet_water_fraction: Fraction of water-wet behavior in mixed-wet case (0 to 1).
     :param mixing_rule: Three-phase mixing rule for oil relative permeability.
-    :param min_water_relperm: Resolved minimum floor for water kr (`None` = no floor).
-    :param min_oil_relperm: Resolved minimum floor for oil kr (`None` = no floor).
-    :param min_gas_relperm: Resolved minimum floor for gas kr (`None` = no floor).
+    :param minimum_water_relperm: Resolved minimum floor for water kr (`None` = no floor).
+    :param minimum_oil_relperm: Resolved minimum floor for oil kr (`None` = no floor).
+    :param minimum_gas_relperm: Resolved minimum floor for gas kr (`None` = no floor).
     :return: (krw, kro, krg) tuple of relative permeabilities.
     """
     sw = np.atleast_1d(water_saturation)
@@ -4250,8 +4254,8 @@ def compute_let_three_phase_relative_permeabilities(
     Sorg = residual_oil_saturation_gas
     Sgr = residual_gas_saturation
 
-    # kro_endpoint for LET models: max_oil_relperm
-    kro_endpoint = max_oil_relperm
+    # kro_endpoint for LET models: maximum_oil_relperm
+    kro_endpoint = maximum_oil_relperm
 
     if wettability == Wettability.WATER_WET:
         # Water kr (wetting phase)
@@ -4261,7 +4265,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sw),
             np.clip((sw - Swc) / movable_water_range, 0.0, 1.0),
         )
-        krw = max_water_relperm * _let_relperm(sw_star, water_L, water_E, water_T)
+        krw = maximum_water_relperm * _let_relperm(sw_star, water_L, water_E, water_T)
 
         # Gas kr (non-wetting phase)
         movable_gas_range = 1.0 - Swc - Sgr - Sorg  # type: ignore[operator]
@@ -4270,7 +4274,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - Sgr) / movable_gas_range, 0.0, 1.0),
         )
-        krg = max_gas_relperm * _let_relperm(sg_star, gas_L, gas_E, gas_T)
+        krg = maximum_gas_relperm * _let_relperm(sg_star, gas_L, gas_E, gas_T)
 
         # Oil kr (intermediate phase, three-phase mixing)
         movable_oil_water_range = 1.0 - Swc - Sorw  # type: ignore[operator]
@@ -4299,7 +4303,7 @@ def compute_let_three_phase_relative_permeabilities(
             oil_saturation=so,
             gas_saturation=sg,
         )
-        kro = max_oil_relperm * np.clip(kro_mixed, 0.0, 1.0)
+        kro = maximum_oil_relperm * np.clip(kro_mixed, 0.0, 1.0)
 
     elif wettability == Wettability.OIL_WET:
         # Oil is wetting, water becomes intermediate
@@ -4310,7 +4314,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(so),
             np.clip((so - max_residual) / movable_oil_range, 0.0, 1.0),
         )
-        kro = max_oil_relperm * _let_relperm(
+        kro = maximum_oil_relperm * _let_relperm(
             so_star, oil_water_L, oil_water_E, oil_water_T
         )
 
@@ -4320,7 +4324,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - Sgr) / movable_gas_range, 0.0, 1.0),
         )
-        krg = max_gas_relperm * _let_relperm(sg_star, gas_L, gas_E, gas_T)
+        krg = maximum_gas_relperm * _let_relperm(sg_star, gas_L, gas_E, gas_T)
 
         movable_water_range_ow = 1.0 - Swc - Sorw  # type: ignore[operator]
         sw_star_ow = np.where(
@@ -4348,7 +4352,7 @@ def compute_let_three_phase_relative_permeabilities(
             oil_saturation=so,
             gas_saturation=sg,
         )
-        krw = max_water_relperm * np.clip(krw_mixed, 0.0, 1.0)
+        krw = maximum_water_relperm * np.clip(krw_mixed, 0.0, 1.0)
 
     elif wettability == Wettability.MIXED_WET:
         # Water-wet sub-system
@@ -4358,7 +4362,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sw),
             np.clip((sw - Swc) / movable_water_range, 0.0, 1.0),
         )
-        krw_ww = max_water_relperm * _let_relperm(sw_star_ww, water_L, water_E, water_T)
+        krw_ww = maximum_water_relperm * _let_relperm(sw_star_ww, water_L, water_E, water_T)
 
         movable_gas_range = 1.0 - Swc - Sgr - Sorg  # type: ignore[operator]
         sg_star_ww = np.where(
@@ -4366,7 +4370,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - Sgr) / movable_gas_range, 0.0, 1.0),
         )
-        krg_ww = max_gas_relperm * _let_relperm(sg_star_ww, gas_L, gas_E, gas_T)
+        krg_ww = maximum_gas_relperm * _let_relperm(sg_star_ww, gas_L, gas_E, gas_T)
 
         movable_oil_water_range = 1.0 - Swc - Sorw  # type: ignore[operator]
         so_star_w_ww = np.where(
@@ -4384,7 +4388,7 @@ def compute_let_three_phase_relative_permeabilities(
         )
         kro_g_ww = _let_relperm(so_star_g_ww, gas_oil_L, gas_oil_E, gas_oil_T)
 
-        kro_ww = max_oil_relperm * np.clip(
+        kro_ww = maximum_oil_relperm * np.clip(
             mixing_rule(
                 kro_w=kro_w_ww,
                 kro_g=kro_g_ww,
@@ -4407,7 +4411,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(so),
             np.clip((so - max_residual_ow) / movable_oil_range_ow, 0.0, 1.0),
         )
-        kro_ow = max_oil_relperm * _let_relperm(
+        kro_ow = maximum_oil_relperm * _let_relperm(
             so_star_ow, oil_water_L, oil_water_E, oil_water_T
         )
 
@@ -4417,7 +4421,7 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - Sgr) / movable_gas_range_ow, 0.0, 1.0),
         )
-        krg_ow = max_gas_relperm * _let_relperm(sg_star_ow, gas_L, gas_E, gas_T)
+        krg_ow = maximum_gas_relperm * _let_relperm(sg_star_ow, gas_L, gas_E, gas_T)
 
         movable_water_range_ow = 1.0 - Swc - Sorw  # type: ignore[operator]
         sw_star_ow = np.where(
@@ -4435,7 +4439,7 @@ def compute_let_three_phase_relative_permeabilities(
         )
         krw_gw_proxy = _let_relperm(sw_star_gw, water_L, water_E, water_T)
 
-        krw_ow = max_water_relperm * np.clip(
+        krw_ow = maximum_water_relperm * np.clip(
             mixing_rule(
                 kro_w=krw_ow_proxy,
                 kro_g=krw_gw_proxy,
@@ -4470,9 +4474,9 @@ def compute_let_three_phase_relative_permeabilities(
     krw = np.clip(krw, 0.0, 1.0)
     kro = np.clip(kro, 0.0, 1.0)
     krg = np.clip(krg, 0.0, 1.0)
-    krw = _apply_relperm_floor(krw, min_water_relperm)
-    kro = _apply_relperm_floor(kro, min_oil_relperm)
-    krg = _apply_relperm_floor(krg, min_gas_relperm)
+    krw = _apply_relperm_floor(krw, minimum_water_relperm)
+    kro = _apply_relperm_floor(kro, minimum_oil_relperm)
+    krg = _apply_relperm_floor(krg, minimum_gas_relperm)
     if is_scalar:
         krw = krw.item()  # type: ignore
         kro = kro.item()  # type: ignore
@@ -4557,8 +4561,8 @@ class LETThreePhaseRelPermModel(
     Supports water-wet and oil-wet wettability assumptions. Supports both
     scalar and array inputs for saturations (`supports_arrays=True`).
 
-    **Minimum relperm floors** (``min_water_relperm``, ``min_oil_relperm``,
-    ``min_gas_relperm``): same semantics as ``BrooksCoreyRelPermModel``.
+    **Minimum relperm floors** (``minimum_water_relperm``, ``minimum_oil_relperm``,
+    ``minimum_gas_relperm``): same semantics as ``BrooksCoreyRelPermModel``.
     """
 
     __type__ = "let_three_phase_relperm_model"
@@ -4581,11 +4585,11 @@ class LETThreePhaseRelPermModel(
     gas: LETParameters = LETParameters()
     """LET parameters for the gas relative permeability curve."""
 
-    max_water_relperm: float = 1.0
+    maximum_water_relperm: float = 1.0
     """Endpoint (maximum) relative permeability for water."""
-    max_oil_relperm: float = 1.0
+    maximum_oil_relperm: float = 1.0
     """Endpoint (maximum) relative permeability for oil."""
-    max_gas_relperm: float = 1.0
+    maximum_gas_relperm: float = 1.0
     """Endpoint (maximum) relative permeability for gas."""
 
     wettability: Wettability = Wettability.WATER_WET
@@ -4599,21 +4603,21 @@ class LETThreePhaseRelPermModel(
     three-phase system. Accepts a function or a registered name string.
     """
 
-    min_water_relperm: RelPermFloor = "auto"
+    minimum_water_relperm: RelPermFloor = "auto"
     """
     Minimum floor for the water relative permeability.
 
     `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
     """
 
-    min_oil_relperm: RelPermFloor = "auto"
+    minimum_oil_relperm: RelPermFloor = "auto"
     """
     Minimum floor for the oil relative permeability.
 
     `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
     """
 
-    min_gas_relperm: RelPermFloor = "auto"
+    minimum_gas_relperm: RelPermFloor = "auto"
     """
     Minimum floor for the gas relative permeability.
 
@@ -4628,9 +4632,9 @@ class LETThreePhaseRelPermModel(
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
         # Validate floor sentinels eagerly
-        _resolve_relperm_floor(self.min_water_relperm)
-        _resolve_relperm_floor(self.min_oil_relperm)
-        _resolve_relperm_floor(self.min_gas_relperm)
+        _resolve_relperm_floor(self.minimum_water_relperm)
+        _resolve_relperm_floor(self.minimum_oil_relperm)
+        _resolve_relperm_floor(self.minimum_gas_relperm)
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
         wettability = self.wettability
@@ -4726,17 +4730,17 @@ class LETThreePhaseRelPermModel(
             gas_L=self.gas.L,
             gas_E=self.gas.E,
             gas_T=self.gas.T,
-            max_water_relperm=self.max_water_relperm,
-            max_oil_relperm=self.max_oil_relperm,
-            max_gas_relperm=self.max_gas_relperm,
+            maximum_water_relperm=self.maximum_water_relperm,
+            maximum_oil_relperm=self.maximum_oil_relperm,
+            maximum_gas_relperm=self.maximum_gas_relperm,
             wettability=self.wettability,
             mixed_wet_water_fraction=self.mixed_wet_water_fraction,
             mixing_rule=self.mixing_rule,  # type: ignore[arg-type]
             saturation_epsilon=c.SATURATION_EPSILON,
             minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
-            min_water_relperm=_resolve_relperm_floor(self.min_water_relperm),
-            min_oil_relperm=_resolve_relperm_floor(self.min_oil_relperm),
-            min_gas_relperm=_resolve_relperm_floor(self.min_gas_relperm),
+            minimum_water_relperm=_resolve_relperm_floor(self.minimum_water_relperm),
+            minimum_oil_relperm=_resolve_relperm_floor(self.minimum_oil_relperm),
+            minimum_gas_relperm=_resolve_relperm_floor(self.minimum_gas_relperm),
         )
         return RelativePermeabilities(water=krw, oil=kro, gas=krg)  # type: ignore[typeddict-item]
 
@@ -4836,16 +4840,16 @@ class LETThreePhaseRelPermModel(
         oil_water_params = self.oil_water
         gas_oil_params = self.gas_oil
         gas_params = self.gas
-        krw_max = self.max_water_relperm
-        kro_max = self.max_oil_relperm
-        krg_max = self.max_gas_relperm
+        krw_max = self.maximum_water_relperm
+        kro_max = self.maximum_oil_relperm
+        krg_max = self.maximum_gas_relperm
 
         # Resolve floors once up front
-        floor_w = _resolve_relperm_floor(self.min_water_relperm)
-        floor_o = _resolve_relperm_floor(self.min_oil_relperm)
-        floor_g = _resolve_relperm_floor(self.min_gas_relperm)
+        floor_w = _resolve_relperm_floor(self.minimum_water_relperm)
+        floor_o = _resolve_relperm_floor(self.minimum_oil_relperm)
+        floor_g = _resolve_relperm_floor(self.minimum_gas_relperm)
 
-        # kro_endpoint for mixing rule calls: max_oil_relperm for LET
+        # kro_endpoint for mixing rule calls: maximum_oil_relperm for LET
         kro_endpoint = kro_max
 
         is_scalar = (

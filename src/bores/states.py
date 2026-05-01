@@ -18,10 +18,10 @@ from bores.grids.base import (
 from bores.material_balance import MaterialBalanceErrors
 from bores.models import (
     FluidProperties,
+    HysteresisState,
     ReservoirModel,
     RockPermeability,
     RockProperties,
-    SaturationHistory,
 )
 from bores.precision import get_dtype
 from bores.serialization import Serializable
@@ -341,7 +341,7 @@ def validate_state(
                     f"expected {model_shape}."
                 )
 
-    # Validate and coerce thickness grid and saturation history
+    # Validate and coerce thickness grid and hysteresis state
     if dtype is not None:
         thickness_grid = _validate_array(
             model_shape=model_shape,
@@ -349,8 +349,8 @@ def validate_state(
             field_name="Thickness grid",
             dtype=dtype,
         )
-        sat_hist = model.saturation_history
-        saturation_history = SaturationHistory(
+        sat_hist = model.hysteresis_state
+        hysteresis_state = HysteresisState(
             max_water_saturation_grid=_validate_array(
                 model_shape=model_shape,
                 grid=sat_hist.max_water_saturation_grid,
@@ -385,7 +385,7 @@ def validate_state(
                 thickness_grid=thickness_grid,
                 fluid_properties=fluid_properties,  # type:ignore[arg-type]
                 rock_properties=rock_properties,  # type:ignore[arg-type]
-                saturation_history=saturation_history,
+                hysteresis_state=hysteresis_state,
                 boundary_conditions=model.boundary_conditions,  # type: ignore
                 dip_angle=model.dip_angle,
                 dip_azimuth=model.dip_azimuth,

@@ -888,13 +888,13 @@ class KilloughLandRelPermModel(
 
     When the flow reverses (*imbibition*) two things happen simultaneously.
 
-    **Land trapping** — a portion of the non-wetting phase becomes
-    disconnected.  The dynamic residual saturation depends on the saturation
+    **Land trapping**: a portion of the non-wetting phase becomes
+    disconnected. The dynamic residual saturation depends on the saturation
     at the reversal point via Land's formula::
 
         S_r(S_i) = S_r_max / (1 + C * S_i)
 
-    **Killough scanning curves** — between the reversal point and the
+    **Killough scanning curves**: between the reversal point and the
     maximum historical saturation, kr follows a scanning curve that
     interpolates between the primary drainage and imbibition bounds.
 
@@ -905,8 +905,7 @@ class KilloughLandRelPermModel(
     model is wettability-agnostic.
 
     The hysteresis history is passed as additional keyword arguments to
-    `get_relative_permeabilities` and
-    `get_relative_permeability_derivatives`. When these arguments are
+    `get_relative_permeabilities` and `get_relative_permeability_derivatives`. When these arguments are
     absent the model degenerates to the primary drainage curves, which is the
     physically correct behaviour for the first drainage cycle (see
     `simulate.py` — the `enable_hysteresis` flag in `Config` controls
@@ -941,19 +940,19 @@ class KilloughLandRelPermModel(
     land_coefficient_gas: float = 1.0
     """Land trapping coefficient *C* for the gas-oil system (≥ 0)."""
 
-    residual_oil_saturation_max_water: typing.Optional[float] = None
+    maximum_residual_oil_saturation_water: typing.Optional[float] = None
     """
     Maximum residual oil saturation S_r_max used by Land's formula for the
     oil-water system. Required when `oil_water_imbibition_table` is set.
     """
 
-    residual_oil_saturation_max_gas: typing.Optional[float] = None
+    maximum_residual_oil_saturation_gas: typing.Optional[float] = None
     """
     Maximum residual oil saturation S_r_max for the gas-oil system. Required
     when `gas_oil_imbibition_table` is set.
     """
 
-    residual_gas_saturation_max: typing.Optional[float] = None
+    maximum_residual_gas_saturation: typing.Optional[float] = None
     """
     Maximum residual gas saturation S_r_max used by Land's formula. Required
     when `gas_oil_imbibition_table` is set.
@@ -1030,6 +1029,16 @@ class KilloughLandRelPermModel(
             gas-wet systems, as reported by the drainage table.
         """
         return self.gas_oil_drainage_table.get_gas_oil_wetting_phase()
+
+    def get_oil_relperm_endpoint(self) -> float:
+        """Resolve kro at connate water from the drainage table."""
+        drain = self.oil_water_drainage_table
+        if isinstance(drain, TwoPhaseRelPermTable):
+            if drain.wetting_phase == FluidPhase.WATER:
+                return float(np.max(drain.non_wetting_phase_relative_permeability))
+            return float(np.max(drain.wetting_phase_relative_permeability))
+        # For full three-phase tables
+        return drain.get_oil_relperm_endpoint()
 
     def _parse_hysteresis_kwargs(
         self,
@@ -1183,10 +1192,10 @@ class KilloughLandRelPermModel(
         # Oil-water system — Land trapping on oil
         so_at_ow_reversal = np.maximum(1.0 - sw_rev - sg, 0.0)
         imb_ow_kwargs = dict(kwargs)
-        if use_hysteresis and self.residual_oil_saturation_max_water is not None:
+        if use_hysteresis and self.maximum_residual_oil_saturation_water is not None:
             sor_dyn_water = _land_residual_saturation(
                 so_at_ow_reversal,
-                self.residual_oil_saturation_max_water,
+                self.maximum_residual_oil_saturation_water,
                 self.land_coefficient_water,
             )
             imb_ow_kwargs["residual_oil_saturation_water"] = sor_dyn_water
@@ -1216,17 +1225,17 @@ class KilloughLandRelPermModel(
         # Gas-oil system — Land trapping on gas and oil
         so_at_go_reversal = np.maximum(1.0 - sg_rev - sw, 0.0)
         imb_go_kwargs = dict(kwargs)
-        if use_hysteresis and self.residual_gas_saturation_max is not None:
+        if use_hysteresis and self.maximum_residual_gas_saturation is not None:
             sgr_dyn = _land_residual_saturation(
                 sg_rev,
-                self.residual_gas_saturation_max,
+                self.maximum_residual_gas_saturation,
                 self.land_coefficient_gas,
             )
             imb_go_kwargs["residual_gas_saturation"] = sgr_dyn
-        if use_hysteresis and self.residual_oil_saturation_max_gas is not None:
+        if use_hysteresis and self.maximum_residual_oil_saturation_gas is not None:
             sor_dyn_gas = _land_residual_saturation(
                 so_at_go_reversal,
-                self.residual_oil_saturation_max_gas,
+                self.maximum_residual_oil_saturation_gas,
                 self.land_coefficient_gas,
             )
             imb_go_kwargs["residual_oil_saturation_gas"] = sor_dyn_gas
@@ -1252,10 +1261,16 @@ class KilloughLandRelPermModel(
             sg_imb,
             exponent=self.scanning_interpolation_exponent,
         )
+        kro_endpoint = self.get_oil_relperm_endpoint()
+        
         # Three-phase oil via mixing rule
-        kro = self.mixing_rule(  # type: ignore[operator]
+        mixing_rule = typing.cast(MixingRule, self.mixing_rule)
+        kro = mixing_rule(
             kro_w=kro_w,
             kro_g=kro_g,
+            krw=krw,
+            krg=krg,
+            kro_endpoint=kro_endpoint,
             water_saturation=sw,
             oil_saturation=so,
             gas_saturation=sg,
@@ -1345,27 +1360,27 @@ class KilloughLandRelPermModel(
         # Build kwargs for imbibition tables (Land trapping)
         so_at_ow_reversal = np.maximum(1.0 - sw_rev - sg, 0.0)
         imb_ow_kwargs = dict(kwargs)
-        if use_hysteresis and self.residual_oil_saturation_max_water is not None:
+        if use_hysteresis and self.maximum_residual_oil_saturation_water is not None:
             sor_dyn_water = _land_residual_saturation(
                 so_at_ow_reversal,
-                self.residual_oil_saturation_max_water,
+                self.maximum_residual_oil_saturation_water,
                 self.land_coefficient_water,
             )
             imb_ow_kwargs["residual_oil_saturation_water"] = sor_dyn_water
 
         so_at_go_reversal = np.maximum(1.0 - sg_rev - sw, 0.0)
         imb_go_kwargs = dict(kwargs)
-        if use_hysteresis and self.residual_gas_saturation_max is not None:
+        if use_hysteresis and self.maximum_residual_gas_saturation is not None:
             sgr_dyn = _land_residual_saturation(
                 sg_rev,
-                self.residual_gas_saturation_max,
+                self.maximum_residual_gas_saturation,
                 self.land_coefficient_gas,
             )
             imb_go_kwargs["residual_gas_saturation"] = sgr_dyn
-        if use_hysteresis and self.residual_oil_saturation_max_gas is not None:
+        if use_hysteresis and self.maximum_residual_oil_saturation_gas is not None:
             sor_dyn_gas = _land_residual_saturation(
                 so_at_go_reversal,
-                self.residual_oil_saturation_max_gas,
+                self.maximum_residual_oil_saturation_gas,
                 self.land_coefficient_gas,
             )
             imb_go_kwargs["residual_oil_saturation_gas"] = sor_dyn_gas
@@ -1475,6 +1490,7 @@ class KilloughLandRelPermModel(
             sg_imb,
             exponent=self.scanning_interpolation_exponent,
         )
+        kro_endpoint = self.get_oil_relperm_endpoint()
 
         # Three-phase oil mixing rule — chain rule
         mixing_rule = typing.cast(MixingRule, self.mixing_rule)
@@ -1482,6 +1498,9 @@ class KilloughLandRelPermModel(
             rule=mixing_rule,
             kro_w=kro_w,
             kro_g=kro_g,
+            krw=krw,
+            krg=krg,
+            kro_endpoint=kro_endpoint,
             water_saturation=sw,
             oil_saturation=so,
             gas_saturation=sg,

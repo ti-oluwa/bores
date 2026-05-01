@@ -726,8 +726,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         initial_step_size=bores.Time(days=1.0),
         maximum_step_size=bores.Time(days=30.0),
         minimum_step_size=bores.Time(minutes=10.0),
-        simulation_time=bores.Time(years=10.0),
-        maximum_cfl=0.5,
+        simulation_time=bores.Time(years=10),
         ramp_up_factor=1.3,
         maximum_rejections=20,
     )
@@ -738,7 +737,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="impes",
+        scheme="si",
         output_frequency=1,
         pressure_solver="direct",
         transport_solver="direct",
@@ -746,14 +745,13 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         pvt_tables=pvt_tables,
         wells=wells,
         disable_capillary_effects=True,
-        # freeze_saturation_pressure=True,
-        # maximum_gas_saturation_change=0.05,
-        # maximum_oil_saturation_change=0.05,
-        # maximum_water_saturation_change=0.05,
-        # maximum_saturation_change=0.5,
+        freeze_saturation_pressure=True,
+        maximum_gas_saturation_change=0.05,
+        maximum_oil_saturation_change=0.05,
+        maximum_water_saturation_change=0.05,
+        maximum_newton_saturation_change=0.05,
         maximum_pressure_change=300.0,
-        # use_pseudo_pressure=True,
-        cfl_threshold=0.4,
+        cfl_threshold=0.6,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
     return (wells,)
@@ -806,9 +804,9 @@ def setup_analysis(bores, states):
         interval=1, from_step=1, rate_type="injection"
     )
 
-    oil_saturation_history = []
-    water_saturation_history = []
-    gas_saturation_history = []
+    oil_hysteresis_state = []
+    water_hysteresis_state = []
+    gas_hysteresis_state = []
     avg_pressure_history = []
 
     volumetric_sweep_efficiency_history = []
@@ -830,9 +828,9 @@ def setup_analysis(bores, states):
         avg_gas_sat = fluid_properties.gas_saturation_grid[9, 9, 2]
         avg_pressure = s.rates.injection_bhps.gas[0, 0, 0]
 
-        oil_saturation_history.append((time_step, avg_oil_sat))
-        water_saturation_history.append((time_step, avg_water_sat))
-        gas_saturation_history.append((time_step, avg_gas_sat))
+        oil_hysteresis_state.append((time_step, avg_oil_sat))
+        water_hysteresis_state.append((time_step, avg_water_sat))
+        gas_hysteresis_state.append((time_step, avg_gas_sat))
         avg_pressure_history.append((time_step, avg_pressure))
 
     for time_step, result in sweep_efficiency_history:
@@ -859,7 +857,7 @@ def setup_analysis(bores, states):
         displacement_efficiency_history,
         gas_injection_rate_history,
         gas_rate_history,
-        gas_saturation_history,
+        gas_hysteresis_state,
         gor_history,
         oil_rate_history,
         recovery_efficiency_history,
@@ -886,13 +884,13 @@ def _(avg_pressure_history, bores, np):
 
 
 @app.cell
-def saturation_plots(bores, gas_saturation_history, np):
+def saturation_plots(bores, gas_hysteresis_state, np):
     # Saturation
     saturation_fig = bores.make_series_plot(
         data={
-            # "Avg. Water Saturation": np.array(water_saturation_history),
-            # "Avg. Oil Saturation": np.array(oil_saturation_history),
-            "Avg. Gas Saturation": np.array(gas_saturation_history),
+            # "Avg. Water Saturation": np.array(water_hysteresis_state),
+            # "Avg. Oil Saturation": np.array(oil_hysteresis_state),
+            "Avg. Gas Saturation": np.array(gas_hysteresis_state),
         },
         title="Saturation Analysis",
         x_label="Time Step",
@@ -1212,9 +1210,9 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "oil-sat"
+    property = "gas-sat"
     figures = []
-    timesteps = [354]
+    timesteps = [168]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

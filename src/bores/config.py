@@ -197,6 +197,10 @@ class Config(
     step is reduced or rejected.
     """
 
+    saturation_change_violation_tolerance: float = attrs.field(
+        default=5e-2, validator=attrs.validators.ge(0)
+    )
+
     maximum_pressure_change: float = attrs.field(
         default=1000.0, validator=attrs.validators.ge(0)
     )
@@ -297,7 +301,7 @@ class Config(
     )
     """Maximum line search bisections per Newton step."""
 
-    maximum_saturation_change: float = attrs.field(
+    maximum_newton_saturation_change: float = attrs.field(
         default=0.05,
         validator=attrs.validators.and_(
             attrs.validators.gt(0.0),
@@ -523,7 +527,7 @@ class Config(
     historical saturation reached in each cell.
 
     When False (default), residual saturations are treated as fixed rock
-    properties and the saturation history is not updated during the
+    properties and the hysteresis state is not updated during the
     simulation. This is appropriate for standard black-oil simulations
     without hysteresis models, and avoids the overhead of per-step
     history tracking.

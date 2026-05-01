@@ -23,7 +23,7 @@ __all__ = [
     "ReservoirModel",
     "RockPermeability",
     "RockProperties",
-    "SaturationHistory",
+    "HysteresisState",
 ]
 
 
@@ -219,9 +219,17 @@ class RockProperties(StoreSerializable, typing.Generic[NDimension]):
 
 @typing.final
 @attrs.frozen(slots=True)
-class SaturationHistory(StoreSerializable, typing.Generic[NDimension]):
+class HysteresisState(StoreSerializable, typing.Generic[NDimension]):
     """
-    Tracks historical maximum saturations and displacement regimes in the reservoir.
+    Tracks hysteresis state for drainage-imbibition effects in multi-phase flow.
+    
+    This class maintains the information required for Killough scanning curve hysteresis modeling:
+    - Historical maximum saturations (water and gas) to determine current displacement regime
+    - Imbibition flags indicating whether each fluid is currently displacing or being displaced
+    - Reversal saturation points for accurate scanning curve behavior
+    
+    The data is used to compute effective residual saturations that vary based on whether the system
+    is in drainage or imbibition, which is critical for accurate relative permeability and capillary pressure calculations.
     """
 
     max_water_saturation_grid: NDimensionalGrid[NDimension]
@@ -235,6 +243,12 @@ class SaturationHistory(StoreSerializable, typing.Generic[NDimension]):
     gas_imbibition_flag_grid: np.ndarray[NDimension, np.dtype[np.bool]]
     """Flag grid indicating if the current gas displacement is imbibition (True) or drainage (False)"""
 
+    # Grids to track reversal points for Killough scanning curves
+    water_reversal_saturation_grid: NDimensionalGrid[NDimension]
+    """Water saturation at the last reversal point (drainage to imbibition or vice versa) for Killough scanning curves"""
+    gas_reversal_saturation_grid: NDimensionalGrid[NDimension]
+    """Gas saturation at the last reversal point (drainage to imbibition or vice versa) for Killough scanning curves"""
+
     @classmethod
     def from_initial_saturations(
         cls,
@@ -242,11 +256,11 @@ class SaturationHistory(StoreSerializable, typing.Generic[NDimension]):
         gas_saturation_grid: NDimensionalGrid[NDimension],
     ) -> Self:
         """
-        Create a `SaturationHistory` instance from initial water and gas saturation grids.
+        Create a `HysteresisState` instance from initial water and gas saturation grids.
 
         :param water_saturation_grid: N-dimensional numpy array representing the initial water saturation distribution in the reservoir (fraction).
         :param gas_saturation_grid: N-dimensional numpy array representing the initial gas saturation distribution in the reservoir (fraction).
-        :return: `SaturationHistory` instance initialized with the provided saturation grids.
+        :return: `HysteresisState` instance initialized with the provided saturation grids.
         """
         water_imbibition_flag_grid = np.zeros_like(water_saturation_grid, dtype=bool)
         gas_imbibition_flag_grid = np.zeros_like(gas_saturation_grid, dtype=bool)
@@ -255,6 +269,8 @@ class SaturationHistory(StoreSerializable, typing.Generic[NDimension]):
             max_gas_saturation_grid=gas_saturation_grid,
             water_imbibition_flag_grid=water_imbibition_flag_grid,  # type: ignore[arg-type]
             gas_imbibition_flag_grid=gas_imbibition_flag_grid,  # type: ignore[arg-type]
+            water_reversal_saturation_grid=water_saturation_grid.copy(),
+            gas_reversal_saturation_grid=gas_saturation_grid.copy(),
         )
 
 
@@ -267,7 +283,7 @@ class ReservoirModel(
         "thickness_grid": np.ndarray,
         "fluid_properties": FluidProperties,
         "rock_properties": RockProperties,
-        "saturation_history": SaturationHistory,
+        "hysteresis_state": HysteresisState,
         "face_transmissibilities": typing.Optional[FaceTransmissibilities],
         "dip_angle": float,
         "dip_azimuth": float,
@@ -283,7 +299,7 @@ class ReservoirModel(
         thickness_grid: NDimensionalGrid[NDimension],
         fluid_properties: FluidProperties[NDimension],
         rock_properties: RockProperties[NDimension],
-        saturation_history: SaturationHistory[NDimension],
+        hysteresis_state: HysteresisState[NDimension],
         face_transmissibilities: typing.Optional[FaceTransmissibilities] = None,
         dip_angle: float = 0.0,
         dip_azimuth: float = 0.0,
@@ -297,8 +313,8 @@ class ReservoirModel(
         :param thickness_grid: N-dimensional numpy array representing the thickness of each cell in the reservoir (ft)
         :param fluid_properties: Fluid properties for fluid properties
         :param rock_fluid_properties: Rock-fluid properties
-        :param saturation_history: Saturation history
-        :param face_transmissibilities: Optional precomputed face transmissibilities. If not provided, 
+        :param hysteresis_state: `HysteresisState` instance tracking historical saturation extrema and displacement regimes for hysteresis effects
+        :param face_transmissibilities: Optional precomputed face transmissibilities. If not provided,
             they will be computed from the permeability and grid properties when accessed.
         :param dip_angle: Dip angle of the reservoir in degrees (0 = horizontal, 90 = vertical)
         :param dip_azimuth: Dip azimuth of the reservoir in degrees (0 = North, 90 = East, 180 = South, 270 = West)
@@ -321,7 +337,7 @@ class ReservoirModel(
         self.thickness_grid = thickness_grid
         self.fluid_properties = fluid_properties
         self.rock_properties = rock_properties
-        self.saturation_history = saturation_history
+        self.hysteresis_state = hysteresis_state
         self.face_transmissibilities = face_transmissibilities
         self.dip_angle = dip_angle
         self.dip_azimuth = dip_azimuth
@@ -354,7 +370,7 @@ class ReservoirModel(
             "thickness_grid": self.thickness_grid,
             "fluid_properties": self.fluid_properties,
             "rock_properties": self.rock_properties,
-            "saturation_history": self.saturation_history,
+            "hysteresis_state": self.hysteresis_state,
             "face_transmissibilities": self.face_transmissibilities,
             "dip_angle": self.dip_angle,
             "dip_azimuth": self.dip_azimuth,
