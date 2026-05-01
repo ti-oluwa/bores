@@ -575,6 +575,14 @@ def _run_impes_step(
         metadata=metadata
     )
 
+    # Copy before transport update
+    if hysteresis_state is not None:
+        old_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
+        old_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
+    else:
+        old_water_saturation_grid = None
+        old_gas_saturation_grid = None
+
     logger.debug("Solving transport explicitly...")
     transport_result = explicit.solve_transport(
         cell_dimension=cell_dimension,
@@ -718,6 +726,8 @@ def _run_impes_step(
             hysteresis_state=hysteresis_state,
             water_saturation_grid=fluid_properties.water_saturation_grid,
             gas_saturation_grid=fluid_properties.gas_saturation_grid,
+            old_water_saturation_grid=old_water_saturation_grid,  # type: ignore
+            old_gas_saturation_grid=old_gas_saturation_grid,  # type: ignore
             residual_oil_drainage_ratio_water_flood=config.residual_oil_drainage_ratio_water_flood,
             residual_oil_drainage_ratio_gas_flood=config.residual_oil_drainage_ratio_gas_flood,
             residual_gas_drainage_ratio=config.residual_gas_drainage_ratio,
@@ -1004,6 +1014,14 @@ def _run_sequential_implicit_step(
         metadata=metadata
     )
 
+    # Copy before transport update
+    if hysteresis_state is not None:
+        old_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
+        old_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
+    else:
+        old_water_saturation_grid = None
+        old_gas_saturation_grid = None
+
     logger.debug("Solving transport implicitly (Newton-Raphson)...")
     transport_result = implicit.solve_transport(
         cell_dimension=cell_dimension,
@@ -1148,6 +1166,8 @@ def _run_sequential_implicit_step(
             hysteresis_state=hysteresis_state,
             water_saturation_grid=fluid_properties.water_saturation_grid,
             gas_saturation_grid=fluid_properties.gas_saturation_grid,
+            old_water_saturation_grid=old_water_saturation_grid,  # type: ignore
+            old_gas_saturation_grid=old_gas_saturation_grid,  # type: ignore
             residual_oil_drainage_ratio_water_flood=config.residual_oil_drainage_ratio_water_flood,
             residual_oil_drainage_ratio_gas_flood=config.residual_oil_drainage_ratio_gas_flood,
             residual_gas_drainage_ratio=config.residual_gas_drainage_ratio,
@@ -1273,6 +1293,14 @@ def _run_full_sequential_implicit_step(
     previous_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
     previous_oil_saturation_grid = fluid_properties.oil_saturation_grid.copy()
     previous_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
+
+    # Copy before transport update
+    if hysteresis_state is not None:
+        old_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
+        old_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
+    else:
+        old_water_saturation_grid = None
+        old_gas_saturation_grid = None
 
     iter_fluid_properties = fluid_properties
     iter_relative_mobility_grids = relative_mobility_grids
@@ -1736,6 +1764,8 @@ def _run_full_sequential_implicit_step(
             hysteresis_state=hysteresis_state,
             water_saturation_grid=iter_fluid_properties.water_saturation_grid,
             gas_saturation_grid=iter_fluid_properties.gas_saturation_grid,
+            old_water_saturation_grid=old_water_saturation_grid,  # type: ignore
+            old_gas_saturation_grid=old_gas_saturation_grid,  # type: ignore
             residual_oil_drainage_ratio_water_flood=config.residual_oil_drainage_ratio_water_flood,
             residual_oil_drainage_ratio_gas_flood=config.residual_oil_drainage_ratio_gas_flood,
             residual_gas_drainage_ratio=config.residual_gas_drainage_ratio,

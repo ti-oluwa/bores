@@ -52,10 +52,10 @@ __all__ = ["KilloughCapillaryPressureModel", "KilloughLandRelPermModel"]
 
 
 @numba.njit(cache=True)
-def _land_residual_saturation_scalar(
+def _compute_land_residual_saturation_scalar(
     initial_non_wetting_saturation: float,
-    max_residual_saturation: float,
-    land_coefficient: float,
+    maximum_residual_saturation: float,
+    land_trapping_coefficient: float,
     saturation_epsilon: float = 1e-12,
 ) -> float:
     """
@@ -73,104 +73,102 @@ def _land_residual_saturation_scalar(
 
     :param initial_non_wetting_saturation: Non-wetting saturation at the
         drainage-imbibition reversal point.
-    :param max_residual_saturation: Maximum residual saturation from the
+    :param maximum_residual_saturation: Maximum residual saturation from the
         drainage endpoint (S_r_max).
-    :param land_coefficient: Land trapping coefficient *C* (≥ 0).
+    :param land_trapping_coefficient: Land trapping coefficient *C* (≥ 0).
     :param saturation_epsilon: Small value to guard against division by zero.
     :return: Dynamic residual saturation (scalar).
     """
-    s_r_max = max(max_residual_saturation, saturation_epsilon)
+    safe_maximum_residual = max(maximum_residual_saturation, saturation_epsilon)
 
-    if land_coefficient <= 0.0:
-        return s_r_max
+    if land_trapping_coefficient <= 0.0:
+        return safe_maximum_residual
 
-    s_i = max(initial_non_wetting_saturation, 0.0)
-    s_r = s_r_max / (1.0 + land_coefficient * s_i)
-    return min(s_r, s_i)
+    non_negative_initial = max(initial_non_wetting_saturation, 0.0)
+    dynamic_residual = safe_maximum_residual / (
+        1.0 + land_trapping_coefficient * non_negative_initial
+    )
+    return min(dynamic_residual, non_negative_initial)
 
 
 @numba.njit(cache=True, parallel=True)
-def _land_residual_saturation_array(
+def _compute_land_residual_saturation_array(
     initial_non_wetting_saturation: npt.NDArray,
-    max_residual_saturation: float,
-    land_coefficient: float,
+    maximum_residual_saturation: float,
+    land_trapping_coefficient: float,
     saturation_epsilon: float = 1e-12,
 ) -> npt.NDArray:
     """
     Compute the dynamic residual non-wetting saturation via Land's model (array).
 
-    Vectorised version of :func:`_land_residual_saturation_scalar`.  All
-    elements are processed in a single Numba-compiled loop so no Python
-    overhead is incurred per cell.
-
     :param initial_non_wetting_saturation: Non-wetting saturations at the
         drainage-imbibition reversal points (1-D or N-D array).
-    :param max_residual_saturation: Maximum residual saturation from the
+    :param maximum_residual_saturation: Maximum residual saturation from the
         drainage endpoint (scalar).
-    :param land_coefficient: Land trapping coefficient *C* (≥ 0).
+    :param land_trapping_coefficient: Land trapping coefficient *C* (≥ 0).
     :param saturation_epsilon: Small value to guard against division by zero.
     :return: Dynamic residual saturation array with the same shape as the input.
     """
-    s_i = atleast_1d(initial_non_wetting_saturation)
-    s_r_max = max(max_residual_saturation, saturation_epsilon)
+    initial_saturation_array = atleast_1d(initial_non_wetting_saturation)
+    safe_maximum_residual = max(maximum_residual_saturation, saturation_epsilon)
 
-    result = np.empty_like(s_i)
-    for idx in numba.prange(s_i.size):  # type: ignore
-        s_i_val = max(s_i.flat[idx], 0.0)
-        if land_coefficient <= 0.0:
-            result.flat[idx] = min(s_r_max, s_i_val)
+    result = np.empty_like(initial_saturation_array)
+    for flat_index in numba.prange(initial_saturation_array.size):  # type: ignore
+        non_negative_initial = max(initial_saturation_array.flat[flat_index], 0.0)
+        if land_trapping_coefficient <= 0.0:
+            result.flat[flat_index] = min(safe_maximum_residual, non_negative_initial)
         else:
-            s_r = s_r_max / (1.0 + land_coefficient * s_i_val)
-            result.flat[idx] = min(s_r, s_i_val)
+            dynamic_residual = safe_maximum_residual / (
+                1.0 + land_trapping_coefficient * non_negative_initial
+            )
+            result.flat[flat_index] = min(dynamic_residual, non_negative_initial)
     return result
 
 
-def _land_residual_saturation(
+def _compute_land_residual_saturation(
     initial_non_wetting_saturation: FloatOrArray,
-    max_residual_saturation: float,
-    land_coefficient: float,
+    maximum_residual_saturation: float,
+    land_trapping_coefficient: float,
     saturation_epsilon: float = 1e-12,
 ) -> FloatOrArray:
     """
-    Dispatch Land residual saturation computation to the scalar or array kernel.
-
-    Routes to :func:`_land_residual_saturation_scalar` when the input is a
-    Python scalar and to :func:`_land_residual_saturation_array` otherwise,
-    avoiding Numba union-return-type limitations.
+    Compute the dynamic residual non-wetting saturation via Land's model.
 
     :param initial_non_wetting_saturation: Non-wetting saturation at the
         drainage-imbibition reversal point (scalar or array).
-    :param max_residual_saturation: Maximum residual saturation from the
+    :param maximum_residual_saturation: Maximum residual saturation from the
         drainage endpoint (S_r_max).
-    :param land_coefficient: Land trapping coefficient *C* (≥ 0).
+    :param land_trapping_coefficient: Land trapping coefficient *C* (≥ 0).
     :param saturation_epsilon: Small value to guard against division by zero.
     :return: Dynamic residual saturation matching the shape of the input.
     """
     if np.isscalar(initial_non_wetting_saturation):
-        return _land_residual_saturation_scalar(
-            float(initial_non_wetting_saturation),  # type: ignore[arg-type]
-            max_residual_saturation,
-            land_coefficient,
-            saturation_epsilon,
+        return _compute_land_residual_saturation_scalar(
+            initial_non_wetting_saturation=float(initial_non_wetting_saturation),  # type: ignore[arg-type]
+            maximum_residual_saturation=maximum_residual_saturation,
+            land_trapping_coefficient=land_trapping_coefficient,
+            saturation_epsilon=saturation_epsilon,
         )
-    return _land_residual_saturation_array(
-        np.asarray(initial_non_wetting_saturation, dtype=np.float64),
-        max_residual_saturation,
-        land_coefficient,
-        saturation_epsilon,
+    return _compute_land_residual_saturation_array(
+        initial_non_wetting_saturation=np.asarray(
+            initial_non_wetting_saturation, dtype=np.float64
+        ),
+        maximum_residual_saturation=maximum_residual_saturation,
+        land_trapping_coefficient=land_trapping_coefficient,
+        saturation_epsilon=saturation_epsilon,
     )
 
 
 @numba.njit(cache=True)
-def _killough_interpolation_scalar(
+def _compute_killough_scanning_curve_scalar(
     saturation: float,
-    drainage_value: float,
-    imbibition_value: float,
+    drainage_curve_value: float,
+    imbibition_curve_value: float,
     reversal_saturation: float,
-    max_saturation: float,
+    maximum_historical_saturation: float,
     is_imbibition: float,
-    exponent: float = 1.0,
-    epsilon: float = 1e-12,
+    scanning_exponent: float = 1.0,
+    numerical_epsilon: float = 1e-12,
 ) -> float:
     """
     Killough scanning-curve interpolation between primary drainage and
@@ -186,619 +184,767 @@ def _killough_interpolation_scalar(
         f(S) = clamp( ((S - S_rev) / (S_max - S_rev))^n , 0, 1 )
 
     :param saturation: Current saturation.
-    :param drainage_value: Value from the primary drainage curve.
-    :param imbibition_value: Value from the primary imbibition curve.
+    :param drainage_curve_value: Value from the primary drainage curve.
+    :param imbibition_curve_value: Value from the primary imbibition curve.
     :param reversal_saturation: Saturation at the last reversal point (S_rev).
-    :param max_saturation: Maximum saturation reached before the reversal (S_max).
+    :param maximum_historical_saturation: Maximum saturation reached before the reversal (S_max).
     :param is_imbibition: 1.0 if currently on the imbibition path, 0.0 if drainage.
-    :param exponent: Killough interpolation exponent *n* (1 = linear).
-    :param epsilon: Numerical stability tolerance.
+    :param scanning_exponent: Killough interpolation exponent *n* (1 = linear).
+    :param numerical_epsilon: Numerical stability tolerance.
     :return: Interpolated scanning-curve value.
     """
-    delta = max_saturation - reversal_saturation
-    if abs(delta) > epsilon:
-        raw_f = (saturation - reversal_saturation) / delta
+    saturation_span = maximum_historical_saturation - reversal_saturation
+    if abs(saturation_span) > numerical_epsilon:
+        raw_interpolation_factor = (saturation - reversal_saturation) / saturation_span
     else:
-        raw_f = 0.0
+        raw_interpolation_factor = 0.0
 
-    f = min(max(raw_f**exponent, 0.0), 1.0)
-    val_scan = drainage_value + (imbibition_value - drainage_value) * f
-
-    on_primary_drain = (is_imbibition < 0.5) and (
-        abs(saturation - max_saturation) < epsilon
+    interpolation_factor = min(
+        max(raw_interpolation_factor**scanning_exponent, 0.0), 1.0
     )
-    on_primary_imb = (is_imbibition >= 0.5) and (
-        abs(saturation - reversal_saturation) < epsilon
+    scanning_curve_value = (
+        drainage_curve_value
+        + (imbibition_curve_value - drainage_curve_value) * interpolation_factor
     )
 
-    if on_primary_drain:
-        return drainage_value
-    if on_primary_imb:
-        return imbibition_value
-    return val_scan
+    on_primary_drainage = (is_imbibition < 0.5) and (
+        abs(saturation - maximum_historical_saturation) < numerical_epsilon
+    )
+    on_primary_imbibition = (is_imbibition >= 0.5) and (
+        abs(saturation - reversal_saturation) < numerical_epsilon
+    )
+
+    if on_primary_drainage:
+        return drainage_curve_value
+    if on_primary_imbibition:
+        return imbibition_curve_value
+    return scanning_curve_value
 
 
 @numba.njit(cache=True)
-def _killough_interpolation_array(
+def _compute_killough_scanning_curve_array(
     saturation: npt.NDArray,
-    drainage_value: npt.NDArray,
-    imbibition_value: npt.NDArray,
+    drainage_curve_value: npt.NDArray,
+    imbibition_curve_value: npt.NDArray,
     reversal_saturation: npt.NDArray,
-    max_saturation: npt.NDArray,
+    maximum_historical_saturation: npt.NDArray,
     is_imbibition: npt.NDArray,
-    exponent: float = 1.0,
-    epsilon: float = 1e-12,
+    scanning_exponent: float = 1.0,
+    numerical_epsilon: float = 1e-12,
 ) -> npt.NDArray:
     """
     Killough scanning-curve interpolation between primary drainage and
     imbibition curves (array).
 
-    Vectorised version of :func:`_killough_interpolation_scalar`.
-
     :param saturation: Current saturation array.
-    :param drainage_value: Drainage curve values at current saturations.
-    :param imbibition_value: Imbibition curve values at current saturations.
+    :param drainage_curve_value: Drainage curve values at current saturations.
+    :param imbibition_curve_value: Imbibition curve values at current saturations.
     :param reversal_saturation: Saturations at the last reversal points.
-    :param max_saturation: Maximum saturations reached before the reversals.
+    :param maximum_historical_saturation: Maximum saturations reached before the reversals.
     :param is_imbibition: Per-cell imbibition flag (1.0 = imbibition, 0.0 = drainage).
-    :param exponent: Killough interpolation exponent *n* (1 = linear).
-    :param epsilon: Numerical stability tolerance.
+    :param scanning_exponent: Killough interpolation exponent *n* (1 = linear).
+    :param numerical_epsilon: Numerical stability tolerance.
     :return: Interpolated scanning-curve values with the same shape as `saturation`.
     """
-    sat = atleast_1d(saturation)
-    val_d = atleast_1d(drainage_value)
-    val_i = atleast_1d(imbibition_value)
-    s_rev = atleast_1d(reversal_saturation)
-    s_max = atleast_1d(max_saturation)
-    imb = atleast_1d(is_imbibition)
+    saturation_array = atleast_1d(saturation)
+    drainage_value_array = atleast_1d(drainage_curve_value)
+    imbibition_value_array = atleast_1d(imbibition_curve_value)
+    reversal_saturation_array = atleast_1d(reversal_saturation)
+    maximum_saturation_array = atleast_1d(maximum_historical_saturation)
+    imbibition_flag_array = atleast_1d(is_imbibition)
 
     # broadcast to common shape
-    sat, val_d, val_i, s_rev, s_max, imb = np.broadcast_arrays(
-        sat, val_d, val_i, s_rev, s_max, imb
+    (
+        saturation_array,
+        drainage_value_array,
+        imbibition_value_array,
+        reversal_saturation_array,
+        maximum_saturation_array,
+        imbibition_flag_array,
+    ) = np.broadcast_arrays(
+        saturation_array,
+        drainage_value_array,
+        imbibition_value_array,
+        reversal_saturation_array,
+        maximum_saturation_array,
+        imbibition_flag_array,
     )
 
-    result = np.empty_like(sat)
-    for k in numba.prange(sat.size):  # type: ignore
-        delta = s_max.flat[k] - s_rev.flat[k]
-        if abs(delta) > epsilon:
-            raw_f = (sat.flat[k] - s_rev.flat[k]) / delta
-        else:
-            raw_f = 0.0
-        f = min(max(raw_f**exponent, 0.0), 1.0)
-        val_scan = val_d.flat[k] + (val_i.flat[k] - val_d.flat[k]) * f
-
-        on_primary_drain = (imb.flat[k] < 0.5) and (
-            abs(sat.flat[k] - s_max.flat[k]) < epsilon
+    result = np.empty_like(saturation_array)
+    for flat_index in numba.prange(saturation_array.size):  # type: ignore
+        saturation_span = (
+            maximum_saturation_array.flat[flat_index]
+            - reversal_saturation_array.flat[flat_index]
         )
-        on_primary_imb = (imb.flat[k] >= 0.5) and (
-            abs(sat.flat[k] - s_rev.flat[k]) < epsilon
+        if abs(saturation_span) > numerical_epsilon:
+            raw_interpolation_factor = (
+                saturation_array.flat[flat_index]
+                - reversal_saturation_array.flat[flat_index]
+            ) / saturation_span
+        else:
+            raw_interpolation_factor = 0.0
+        interpolation_factor = min(
+            max(raw_interpolation_factor**scanning_exponent, 0.0), 1.0
+        )
+        scanning_curve_value = (
+            drainage_value_array.flat[flat_index]
+            + (
+                imbibition_value_array.flat[flat_index]
+                - drainage_value_array.flat[flat_index]
+            )
+            * interpolation_factor
         )
 
-        if on_primary_drain:
-            result.flat[k] = val_d.flat[k]
-        elif on_primary_imb:
-            result.flat[k] = val_i.flat[k]
+        on_primary_drainage = (imbibition_flag_array.flat[flat_index] < 0.5) and (
+            abs(
+                saturation_array.flat[flat_index]
+                - maximum_saturation_array.flat[flat_index]
+            )
+            < numerical_epsilon
+        )
+        on_primary_imbibition = (imbibition_flag_array.flat[flat_index] >= 0.5) and (
+            abs(
+                saturation_array.flat[flat_index]
+                - reversal_saturation_array.flat[flat_index]
+            )
+            < numerical_epsilon
+        )
+
+        if on_primary_drainage:
+            result.flat[flat_index] = drainage_value_array.flat[flat_index]
+        elif on_primary_imbibition:
+            result.flat[flat_index] = imbibition_value_array.flat[flat_index]
         else:
-            result.flat[k] = val_scan
+            result.flat[flat_index] = scanning_curve_value
     return result
 
 
-def _killough_interpolation(
+def _compute_killough_scanning_curve(
     saturation: FloatOrArray,
-    drainage_value: FloatOrArray,
-    imbibition_value: FloatOrArray,
+    drainage_curve_value: FloatOrArray,
+    imbibition_curve_value: FloatOrArray,
     reversal_saturation: FloatOrArray,
-    max_saturation: FloatOrArray,
+    maximum_historical_saturation: FloatOrArray,
     is_imbibition: FloatOrArray,
-    exponent: float = 1.0,
-    epsilon: float = 1e-12,
+    scanning_exponent: float = 1.0,
+    numerical_epsilon: float = 1e-12,
 ) -> FloatOrArray:
     """
-    Dispatch Killough scanning-curve interpolation to the scalar or array kernel.
+    Killough scanning-curve interpolation between primary drainage and
+    imbibition curves.
 
     :param saturation: Current saturation (scalar or array).
-    :param drainage_value: Value from the primary drainage curve.
-    :param imbibition_value: Value from the primary imbibition curve.
+    :param drainage_curve_value: Value from the primary drainage curve.
+    :param imbibition_curve_value: Value from the primary imbibition curve.
     :param reversal_saturation: Saturation at the last reversal (scalar or array).
-    :param max_saturation: Maximum saturation before the reversal (scalar or array).
-    :param is_imbibition: Imbibition flag — 1.0 for imbibition, 0.0 for drainage
-        (scalar or array).
-    :param exponent: Killough interpolation exponent *n* (1 = linear).
-    :param epsilon: Numerical stability tolerance.
+    :param maximum_historical_saturation: Maximum saturation before the reversal (scalar or array).
+    :param is_imbibition: Imbibition flag - 1.0 for imbibition, 0.0 for drainage (scalar or array).
+    :param scanning_exponent: Killough interpolation exponent *n* (1 = linear).
+    :param numerical_epsilon: Numerical stability tolerance.
     :return: Interpolated scanning-curve value matching the shape of the input.
     """
     is_scalar = (
         np.isscalar(saturation)
-        and np.isscalar(drainage_value)
-        and np.isscalar(imbibition_value)
+        and np.isscalar(drainage_curve_value)
+        and np.isscalar(imbibition_curve_value)
         and np.isscalar(reversal_saturation)
-        and np.isscalar(max_saturation)
+        and np.isscalar(maximum_historical_saturation)
         and np.isscalar(is_imbibition)
     )
     if is_scalar:
-        return _killough_interpolation_scalar(
-            float(saturation),  # type: ignore[arg-type]
-            float(drainage_value),  # type: ignore[arg-type]
-            float(imbibition_value),  # type: ignore[arg-type]
-            float(reversal_saturation),  # type: ignore[arg-type]
-            float(max_saturation),  # type: ignore[arg-type]
-            float(is_imbibition),  # type: ignore[arg-type]
-            exponent,
-            epsilon,
+        return _compute_killough_scanning_curve_scalar(
+            saturation=float(saturation),  # type: ignore[arg-type]
+            drainage_curve_value=float(drainage_curve_value),  # type: ignore[arg-type]
+            imbibition_curve_value=float(imbibition_curve_value),  # type: ignore[arg-type]
+            reversal_saturation=float(reversal_saturation),  # type: ignore[arg-type]
+            maximum_historical_saturation=float(maximum_historical_saturation),  # type: ignore[arg-type]
+            is_imbibition=float(is_imbibition),  # type: ignore[arg-type]
+            scanning_exponent=scanning_exponent,
+            numerical_epsilon=numerical_epsilon,
         )
-    return _killough_interpolation_array(
-        saturation,  # type: ignore[arg-type]
-        drainage_value,  # type: ignore[arg-type]
-        imbibition_value,  # type: ignore[arg-type]
-        reversal_saturation,  # type: ignore[arg-type]
-        max_saturation,  # type: ignore[arg-type]
-        is_imbibition,  # type: ignore[arg-type]
-        exponent,
-        epsilon,
+    return _compute_killough_scanning_curve_array(
+        saturation=saturation,  # type: ignore[arg-type]
+        drainage_curve_value=drainage_curve_value,  # type: ignore[arg-type]
+        imbibition_curve_value=imbibition_curve_value,  # type: ignore[arg-type]
+        reversal_saturation=reversal_saturation,  # type: ignore[arg-type]
+        maximum_historical_saturation=maximum_historical_saturation,  # type: ignore[arg-type]
+        is_imbibition=is_imbibition,  # type: ignore[arg-type]
+        scanning_exponent=scanning_exponent,
+        numerical_epsilon=numerical_epsilon,
     )
 
 
 @numba.njit(cache=True, inline="always")
-def _killough_derivative_scalar(
+def _compute_killough_scanning_curve_derivative_scalar(
     saturation: float,
-    drainage_value: float,
-    imbibition_value: float,
-    d_drainage_d_sat: float,
-    d_imbibition_d_sat: float,
+    drainage_curve_value: float,
+    imbibition_curve_value: float,
+    drainage_curve_derivative: float,
+    imbibition_curve_derivative: float,
     reversal_saturation: float,
-    max_saturation: float,
+    maximum_historical_saturation: float,
     is_imbibition: float,
-    exponent: float = 1.0,
-    epsilon: float = 1e-12,
+    scanning_exponent: float = 1.0,
+    numerical_epsilon: float = 1e-12,
 ) -> float:
     """
     Analytical derivative of the Killough scanning-curve value with respect
     to the scanning saturation (scalar).
 
-    The scanning curve is::
+    The scanning curve is:
 
         V(S) = V_d(S) + [V_i(S) - V_d(S)] * f(S)
 
-    By the product / chain rule::
+    By the product / chain rule:
 
         dV/dS = dV_d/dS + [dV_i/dS - dV_d/dS] * f
                         + [V_i - V_d] * df/dS
 
     :param saturation: Current saturation.
-    :param drainage_value: Drainage curve value at current saturation.
-    :param imbibition_value: Imbibition curve value at current saturation.
-    :param d_drainage_d_sat: Derivative of drainage value w.r.t. saturation.
-    :param d_imbibition_d_sat: Derivative of imbibition value w.r.t. saturation.
+    :param drainage_curve_value: Drainage curve value at current saturation.
+    :param imbibition_curve_value: Imbibition curve value at current saturation.
+    :param drainage_curve_derivative: Derivative of drainage value w.r.t. saturation.
+    :param imbibition_curve_derivative: Derivative of imbibition value w.r.t. saturation.
     :param reversal_saturation: Saturation at the last reversal (S_rev).
-    :param max_saturation: Maximum saturation before the reversal (S_max).
+    :param maximum_historical_saturation: Maximum saturation before the reversal (S_max).
     :param is_imbibition: 1.0 if imbibition, 0.0 if drainage.
-    :param exponent: Killough exponent *n*.
-    :param epsilon: Numerical tolerance.
+    :param scanning_exponent: Killough exponent *n*.
+    :param numerical_epsilon: Numerical tolerance.
     :return: Derivative of scanning-curve value w.r.t. saturation.
     """
-    delta = max_saturation - reversal_saturation
+    saturation_span = maximum_historical_saturation - reversal_saturation
 
-    on_primary_drain = (is_imbibition < 0.5) and (
-        abs(saturation - max_saturation) < epsilon
+    on_primary_drainage = (is_imbibition < 0.5) and (
+        abs(saturation - maximum_historical_saturation) < numerical_epsilon
     )
-    on_primary_imb = (is_imbibition >= 0.5) and (
-        abs(saturation - reversal_saturation) < epsilon
+    on_primary_imbibition = (is_imbibition >= 0.5) and (
+        abs(saturation - reversal_saturation) < numerical_epsilon
     )
-    if on_primary_drain:
-        return d_drainage_d_sat
-    if on_primary_imb:
-        return d_imbibition_d_sat
+    if on_primary_drainage:
+        return drainage_curve_derivative
+    if on_primary_imbibition:
+        return imbibition_curve_derivative
 
-    if abs(delta) > epsilon:
-        raw_ratio = (saturation - reversal_saturation) / delta
+    if abs(saturation_span) > numerical_epsilon:
+        raw_ratio = (saturation - reversal_saturation) / saturation_span
     else:
         raw_ratio = 0.0
 
-    ratio_clamped = min(max(raw_ratio, 0.0), 1.0)
-    f = ratio_clamped**exponent
+    clamped_ratio = min(max(raw_ratio, 0.0), 1.0)
+    interpolation_factor = clamped_ratio**scanning_exponent
 
-    in_range = (raw_ratio > 0.0) and (raw_ratio < 1.0) and (abs(delta) > epsilon)
-    if in_range:
-        if abs(exponent - 1.0) < 1e-10:
-            df_dS = 1.0 / delta
+    in_active_range = (
+        (raw_ratio > 0.0)
+        and (raw_ratio < 1.0)
+        and (abs(saturation_span) > numerical_epsilon)
+    )
+    if in_active_range:
+        if abs(scanning_exponent - 1.0) < 1e-10:
+            interpolation_factor_derivative = 1.0 / saturation_span
         else:
-            safe_ratio = ratio_clamped if ratio_clamped > 0.0 else 1e-30
-            df_dS = exponent * (safe_ratio ** (exponent - 1.0)) / delta
+            safe_ratio = clamped_ratio if clamped_ratio > 0.0 else 1e-30
+            interpolation_factor_derivative = (
+                scanning_exponent
+                * (safe_ratio ** (scanning_exponent - 1.0))
+                / saturation_span
+            )
     else:
-        df_dS = 0.0
+        interpolation_factor_derivative = 0.0
 
     return (
-        d_drainage_d_sat
-        + (d_imbibition_d_sat - d_drainage_d_sat) * f
-        + (imbibition_value - drainage_value) * df_dS
+        drainage_curve_derivative
+        + (imbibition_curve_derivative - drainage_curve_derivative)
+        * interpolation_factor
+        + (imbibition_curve_value - drainage_curve_value)
+        * interpolation_factor_derivative
     )
 
 
 @numba.njit(cache=True)
-def _killough_derivative_array(
+def _compute_killough_scanning_curve_derivative_array(
     saturation: npt.NDArray,
-    drainage_value: npt.NDArray,
-    imbibition_value: npt.NDArray,
-    d_drainage_d_sat: npt.NDArray,
-    d_imbibition_d_sat: npt.NDArray,
+    drainage_curve_value: npt.NDArray,
+    imbibition_curve_value: npt.NDArray,
+    drainage_curve_derivative: npt.NDArray,
+    imbibition_curve_derivative: npt.NDArray,
     reversal_saturation: npt.NDArray,
-    max_saturation: npt.NDArray,
+    maximum_historical_saturation: npt.NDArray,
     is_imbibition: npt.NDArray,
-    exponent: float = 1.0,
-    epsilon: float = 1e-12,
+    scanning_exponent: float = 1.0,
+    numerical_epsilon: float = 1e-12,
 ) -> npt.NDArray:
     """
     Analytical derivative of the Killough scanning-curve value with respect
     to the scanning saturation (array).
 
-    Vectorised version of :func:`_killough_derivative_scalar`.
-
     :param saturation: Current saturation array.
-    :param drainage_value: Drainage curve values at current saturations.
-    :param imbibition_value: Imbibition curve values at current saturations.
-    :param d_drainage_d_sat: Derivatives of drainage values w.r.t. saturation.
-    :param d_imbibition_d_sat: Derivatives of imbibition values w.r.t. saturation.
+    :param drainage_curve_value: Drainage curve values at current saturations.
+    :param imbibition_curve_value: Imbibition curve values at current saturations.
+    :param drainage_curve_derivative: Derivatives of drainage values w.r.t. saturation.
+    :param imbibition_curve_derivative: Derivatives of imbibition values w.r.t. saturation.
     :param reversal_saturation: Saturations at the last reversal points.
-    :param max_saturation: Maximum saturations before the reversals.
+    :param maximum_historical_saturation: Maximum saturations before the reversals.
     :param is_imbibition: Per-cell imbibition flags (1.0 / 0.0).
-    :param exponent: Killough exponent *n*.
-    :param epsilon: Numerical tolerance.
+    :param scanning_exponent: Killough exponent *n*.
+    :param numerical_epsilon: Numerical tolerance.
     :return: Derivative array with the same shape as `saturation`.
     """
-    sat = atleast_1d(saturation)
-    val_d = atleast_1d(drainage_value)
-    val_i = atleast_1d(imbibition_value)
-    dv_d = atleast_1d(d_drainage_d_sat)
-    dv_i = atleast_1d(d_imbibition_d_sat)
-    s_rev = atleast_1d(reversal_saturation)
-    s_max = atleast_1d(max_saturation)
-    imb = atleast_1d(is_imbibition)
+    saturation_array = atleast_1d(saturation)
+    drainage_value_array = atleast_1d(drainage_curve_value)
+    imbibition_value_array = atleast_1d(imbibition_curve_value)
+    drainage_derivative_array = atleast_1d(drainage_curve_derivative)
+    imbibition_derivative_array = atleast_1d(imbibition_curve_derivative)
+    reversal_saturation_array = atleast_1d(reversal_saturation)
+    maximum_saturation_array = atleast_1d(maximum_historical_saturation)
+    imbibition_flag_array = atleast_1d(is_imbibition)
 
-    sat, val_d, val_i, dv_d, dv_i, s_rev, s_max, imb = np.broadcast_arrays(
-        sat, val_d, val_i, dv_d, dv_i, s_rev, s_max, imb
+    (
+        saturation_array,
+        drainage_value_array,
+        imbibition_value_array,
+        drainage_derivative_array,
+        imbibition_derivative_array,
+        reversal_saturation_array,
+        maximum_saturation_array,
+        imbibition_flag_array,
+    ) = np.broadcast_arrays(
+        saturation_array,
+        drainage_value_array,
+        imbibition_value_array,
+        drainage_derivative_array,
+        imbibition_derivative_array,
+        reversal_saturation_array,
+        maximum_saturation_array,
+        imbibition_flag_array,
     )
 
-    result = np.empty_like(sat)
-    for k in numba.prange(sat.size):  # type: ignore
-        result.flat[k] = _killough_derivative_scalar(
-            sat.flat[k],
-            val_d.flat[k],
-            val_i.flat[k],
-            dv_d.flat[k],
-            dv_i.flat[k],
-            s_rev.flat[k],
-            s_max.flat[k],
-            imb.flat[k],
-            exponent,
-            epsilon,
+    result = np.empty_like(saturation_array)
+    for flat_index in numba.prange(saturation_array.size):  # type: ignore
+        result.flat[flat_index] = _compute_killough_scanning_curve_derivative_scalar(
+            saturation=saturation_array.flat[flat_index],
+            drainage_curve_value=drainage_value_array.flat[flat_index],
+            imbibition_curve_value=imbibition_value_array.flat[flat_index],
+            drainage_curve_derivative=drainage_derivative_array.flat[flat_index],
+            imbibition_curve_derivative=imbibition_derivative_array.flat[flat_index],
+            reversal_saturation=reversal_saturation_array.flat[flat_index],
+            maximum_historical_saturation=maximum_saturation_array.flat[flat_index],
+            is_imbibition=imbibition_flag_array.flat[flat_index],
+            scanning_exponent=scanning_exponent,
+            numerical_epsilon=numerical_epsilon,
         )
     return result
 
 
-def _killough_interpolation_derivative(
+def _compute_killough_scanning_curve_derivative(
     saturation: FloatOrArray,
-    drainage_value: FloatOrArray,
-    imbibition_value: FloatOrArray,
-    d_drainage_d_sat: FloatOrArray,
-    d_imbibition_d_sat: FloatOrArray,
+    drainage_curve_value: FloatOrArray,
+    imbibition_curve_value: FloatOrArray,
+    drainage_curve_derivative: FloatOrArray,
+    imbibition_curve_derivative: FloatOrArray,
     reversal_saturation: FloatOrArray,
-    max_saturation: FloatOrArray,
+    maximum_historical_saturation: FloatOrArray,
     is_imbibition: FloatOrArray,
-    exponent: float = 1.0,
-    epsilon: float = 1e-12,
+    scanning_exponent: float = 1.0,
+    numerical_epsilon: float = 1e-12,
 ) -> FloatOrArray:
     """
-    Dispatch Killough scanning-curve derivative to the scalar or array kernel.
+    Analytical derivative of the Killough scanning-curve value with respect
+    to the scanning saturation.
 
     :param saturation: Current saturation (scalar or array).
-    :param drainage_value: Drainage curve value at current saturation.
-    :param imbibition_value: Imbibition curve value at current saturation.
-    :param d_drainage_d_sat: Derivative of drainage value w.r.t. saturation.
-    :param d_imbibition_d_sat: Derivative of imbibition value w.r.t. saturation.
+    :param drainage_curve_value: Drainage curve value at current saturation.
+    :param imbibition_curve_value: Imbibition curve value at current saturation.
+    :param drainage_curve_derivative: Derivative of drainage value w.r.t. saturation.
+    :param imbibition_curve_derivative: Derivative of imbibition value w.r.t. saturation.
     :param reversal_saturation: Saturation at the last reversal (scalar or array).
-    :param max_saturation: Maximum saturation before the reversal (scalar or array).
+    :param maximum_historical_saturation: Maximum saturation before the reversal (scalar or array).
     :param is_imbibition: Imbibition flag (scalar or array).
-    :param exponent: Killough exponent *n*.
-    :param epsilon: Numerical tolerance.
-    :return: Derivative of scanning-curve value w.r.t. saturation, matching
-        the shape of the input.
+    :param scanning_exponent: Killough exponent *n*.
+    :param numerical_epsilon: Numerical tolerance.
+    :return: Derivative of scanning-curve value w.r.t. saturation, matching the shape of the input.
     """
     is_scalar = (
         np.isscalar(saturation)
-        and np.isscalar(drainage_value)
-        and np.isscalar(imbibition_value)
-        and np.isscalar(d_drainage_d_sat)
-        and np.isscalar(d_imbibition_d_sat)
+        and np.isscalar(drainage_curve_value)
+        and np.isscalar(imbibition_curve_value)
+        and np.isscalar(drainage_curve_derivative)
+        and np.isscalar(imbibition_curve_derivative)
         and np.isscalar(reversal_saturation)
-        and np.isscalar(max_saturation)
+        and np.isscalar(maximum_historical_saturation)
         and np.isscalar(is_imbibition)
     )
     if is_scalar:
-        return _killough_derivative_scalar(
-            float(saturation),  # type: ignore[arg-type]
-            float(drainage_value),  # type: ignore[arg-type]
-            float(imbibition_value),  # type: ignore[arg-type]
-            float(d_drainage_d_sat),  # type: ignore[arg-type]
-            float(d_imbibition_d_sat),  # type: ignore[arg-type]
-            float(reversal_saturation),  # type: ignore[arg-type]
-            float(max_saturation),  # type: ignore[arg-type]
-            float(is_imbibition),  # type: ignore[arg-type]
-            exponent,
-            epsilon,
+        return _compute_killough_scanning_curve_derivative_scalar(
+            saturation=float(saturation),  # type: ignore[arg-type]
+            drainage_curve_value=float(drainage_curve_value),  # type: ignore[arg-type]
+            imbibition_curve_value=float(imbibition_curve_value),  # type: ignore[arg-type]
+            drainage_curve_derivative=float(drainage_curve_derivative),  # type: ignore[arg-type]
+            imbibition_curve_derivative=float(imbibition_curve_derivative),  # type: ignore[arg-type]
+            reversal_saturation=float(reversal_saturation),  # type: ignore[arg-type]
+            maximum_historical_saturation=float(maximum_historical_saturation),  # type: ignore[arg-type]
+            is_imbibition=float(is_imbibition),  # type: ignore[arg-type]
+            scanning_exponent=scanning_exponent,
+            numerical_epsilon=numerical_epsilon,
         )
-    return _killough_derivative_array(
-        saturation,  # type: ignore[arg-type]
-        drainage_value,  # type: ignore[arg-type]
-        imbibition_value,  # type: ignore[arg-type]
-        d_drainage_d_sat,  # type: ignore[arg-type]
-        d_imbibition_d_sat,  # type: ignore[arg-type]
-        reversal_saturation,  # type: ignore[arg-type]
-        max_saturation,  # type: ignore[arg-type]
-        is_imbibition,  # type: ignore[arg-type]
-        exponent,
-        epsilon,
+    return _compute_killough_scanning_curve_derivative_array(
+        saturation=saturation,  # type: ignore[arg-type]
+        drainage_curve_value=drainage_curve_value,  # type: ignore[arg-type]
+        imbibition_curve_value=imbibition_curve_value,  # type: ignore[arg-type]
+        drainage_curve_derivative=drainage_curve_derivative,  # type: ignore[arg-type]
+        imbibition_curve_derivative=imbibition_curve_derivative,  # type: ignore[arg-type]
+        reversal_saturation=reversal_saturation,  # type: ignore[arg-type]
+        maximum_historical_saturation=maximum_historical_saturation,  # type: ignore[arg-type]
+        is_imbibition=is_imbibition,  # type: ignore[arg-type]
+        scanning_exponent=scanning_exponent,
+        numerical_epsilon=numerical_epsilon,
     )
 
 
-def _ow_kr(
-    table: typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable],
-    sw: FloatOrArray,
-    so: FloatOrArray,
-    sg: FloatOrArray,
-    **extra: typing.Any,
+def _get_oil_water_relative_permeabilities(
+    oil_water_table: typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable],
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    **extra_kwargs: typing.Any,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray]:
     """
     Return `(krw, kro_w)` from an oil-water relative permeability table.
 
     Dispatches saturations correctly for both `TwoPhaseRelPermTable` and
     full `RelativePermeabilityTable` instances by calling
-    `table.get_oil_water_wetting_phase()` rather than inspecting any
-    internal attribute.
+    `table.get_oil_water_wetting_phase()` rather than inspecting any internal attribute.
 
-    :param table: Oil-water relative permeability table (two-phase or three-phase).
-    :param sw: Water saturation (scalar or array).
-    :param so: Oil saturation (scalar or array).
-    :param sg: Gas saturation (scalar or array).
-    :param extra: Additional keyword arguments forwarded to parametric tables.
-    :return: Tuple of `(krw, kro_w)` — water and oil relative permeabilities
+    :param oil_water_table: Oil-water relative permeability table (two-phase or three-phase).
+    :param water_saturation: Water saturation (scalar or array).
+    :param oil_saturation: Oil saturation (scalar or array).
+    :param gas_saturation: Gas saturation (scalar or array).
+    :param extra_kwargs: Additional keyword arguments forwarded to parametric tables.
+    :return: Tuple of `(krw, kro_w)` - water and oil relative permeabilities
         from the oil-water sub-system.
     """
-    ow_wetting = table.get_oil_water_wetting_phase()
+    oil_water_wetting_phase = oil_water_table.get_oil_water_wetting_phase()
 
-    if isinstance(table, TwoPhaseRelPermTable):
-        wetting_sat = sw if ow_wetting == FluidPhase.WATER else so
-        non_wetting_sat = so if ow_wetting == FluidPhase.WATER else sw
-        kr_wet = table.get_wetting_phase_relative_permeability(
-            wetting_sat, non_wetting_sat
+    if isinstance(oil_water_table, TwoPhaseRelPermTable):
+        if oil_water_wetting_phase == FluidPhase.WATER:
+            wetting_saturation = water_saturation
+            non_wetting_saturation = oil_saturation
+        else:
+            wetting_saturation = oil_saturation
+            non_wetting_saturation = water_saturation
+
+        water_relative_permeability = (
+            oil_water_table.get_wetting_phase_relative_permeability(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+            if oil_water_wetting_phase == FluidPhase.WATER
+            else oil_water_table.get_non_wetting_phase_relative_permeability(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
         )
-        kr_nwet = table.get_non_wetting_phase_relative_permeability(
-            wetting_sat, non_wetting_sat
+        oil_relative_permeability = (
+            oil_water_table.get_non_wetting_phase_relative_permeability(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+            if oil_water_wetting_phase == FluidPhase.WATER
+            else oil_water_table.get_wetting_phase_relative_permeability(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
         )
-        if ow_wetting == FluidPhase.WATER:
-            return kr_wet, kr_nwet  # krw, kro_w
-        return kr_nwet, kr_wet  # krw, kro_w
+        return water_relative_permeability, oil_relative_permeability
 
     # Full three-phase table
-    result = table.get_relative_permeabilities(
-        water_saturation=sw,
-        oil_saturation=so,
-        gas_saturation=sg,
-        **extra,
+    result = oil_water_table.get_relative_permeabilities(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        **extra_kwargs,
     )
     return result["water"], result["oil"]
 
 
-def _go_kr(
-    table: typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable],
-    sw: FloatOrArray,
-    so: FloatOrArray,
-    sg: FloatOrArray,
-    **extra: typing.Any,
+def _get_gas_oil_relative_permeabilities(
+    gas_oil_table: typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable],
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    **extra_kwargs: typing.Any,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray]:
     """
     Return `(kro_g, krg)` from a gas-oil relative permeability table.
 
     Dispatches saturations correctly for both `TwoPhaseRelPermTable` and
     full `RelativePermeabilityTable` instances by calling
-    `table.get_gas_oil_wetting_phase()` rather than inspecting any internal
-    attribute.
+    `table.get_gas_oil_wetting_phase()` rather than inspecting any internal attribute.
 
-    :param table: Gas-oil relative permeability table (two-phase or three-phase).
-    :param sw: Water saturation (scalar or array).
-    :param so: Oil saturation (scalar or array).
-    :param sg: Gas saturation (scalar or array).
-    :param extra: Additional keyword arguments forwarded to parametric tables.
-    :return: Tuple of `(kro_g, krg)` — oil and gas relative permeabilities
+    :param gas_oil_table: Gas-oil relative permeability table (two-phase or three-phase).
+    :param water_saturation: Water saturation (scalar or array).
+    :param oil_saturation: Oil saturation (scalar or array).
+    :param gas_saturation: Gas saturation (scalar or array).
+    :param extra_kwargs: Additional keyword arguments forwarded to parametric tables.
+    :return: Tuple of `(kro_g, krg)` - oil and gas relative permeabilities
         from the gas-oil sub-system.
     """
-    go_wetting = table.get_gas_oil_wetting_phase()
+    gas_oil_wetting_phase = gas_oil_table.get_gas_oil_wetting_phase()
 
-    if isinstance(table, TwoPhaseRelPermTable):
-        wetting_sat = so if go_wetting == FluidPhase.OIL else sg
-        non_wetting_sat = sg if go_wetting == FluidPhase.OIL else so
-        kr_wet = table.get_wetting_phase_relative_permeability(
-            wetting_sat, non_wetting_sat
-        )
-        kr_nwet = table.get_non_wetting_phase_relative_permeability(
-            wetting_sat, non_wetting_sat
-        )
-        if go_wetting == FluidPhase.OIL:
-            return kr_wet, kr_nwet  # kro_g, krg
-        return kr_nwet, kr_wet  # kro_g, krg
+    if isinstance(gas_oil_table, TwoPhaseRelPermTable):
+        if gas_oil_wetting_phase == FluidPhase.OIL:
+            wetting_saturation = oil_saturation
+            non_wetting_saturation = gas_saturation
+        else:
+            wetting_saturation = gas_saturation
+            non_wetting_saturation = oil_saturation
 
-    result = table.get_relative_permeabilities(
-        water_saturation=sw,
-        oil_saturation=so,
-        gas_saturation=sg,
-        **extra,
+        oil_relative_permeability = (
+            gas_oil_table.get_wetting_phase_relative_permeability(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+            if gas_oil_wetting_phase == FluidPhase.OIL
+            else gas_oil_table.get_non_wetting_phase_relative_permeability(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+        )
+        gas_relative_permeability = (
+            gas_oil_table.get_non_wetting_phase_relative_permeability(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+            if gas_oil_wetting_phase == FluidPhase.OIL
+            else gas_oil_table.get_wetting_phase_relative_permeability(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+        )
+        return oil_relative_permeability, gas_relative_permeability
+
+    result = gas_oil_table.get_relative_permeabilities(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        **extra_kwargs,
     )
     return result["oil"], result["gas"]
 
 
-def _ow_kr_deriv(
-    table: typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable],
-    sw: FloatOrArray,
-    so: FloatOrArray,
-    sg: FloatOrArray,
-    **extra: typing.Any,
+def _get_oil_water_relative_permeability_derivatives(
+    oil_water_table: typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable],
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    **extra_kwargs: typing.Any,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray]:
     """
     Return `(d_krw/d_ref, d_kro_w/d_ref)` for the oil-water table, where
     *ref* is the table's natural reference saturation (Sw in water-wet, So in
     oil-wet).
 
-    :param table: Oil-water relative permeability table (two-phase or three-phase).
-    :param sw: Water saturation (scalar or array).
-    :param so: Oil saturation (scalar or array).
-    :param sg: Gas saturation (scalar or array).
-    :param extra: Additional keyword arguments forwarded to parametric tables.
+    :param oil_water_table: Oil-water relative permeability table (two-phase or three-phase).
+    :param water_saturation: Water saturation (scalar or array).
+    :param oil_saturation: Oil saturation (scalar or array).
+    :param gas_saturation: Gas saturation (scalar or array).
+    :param extra_kwargs: Additional keyword arguments forwarded to parametric tables.
     :return: Tuple of `(d_krw/d_ref, d_kro_w/d_ref)` where *ref* is the
         reference saturation axis of the oil-water sub-system.
     """
-    ow_wetting = table.get_oil_water_wetting_phase()
+    oil_water_wetting_phase = oil_water_table.get_oil_water_wetting_phase()
 
-    if isinstance(table, TwoPhaseRelPermTable):
-        wetting_sat = sw if ow_wetting == FluidPhase.WATER else so
-        non_wetting_sat = so if ow_wetting == FluidPhase.WATER else sw
-        d_wet = table.get_wetting_phase_relative_permeability_derivative(
-            wetting_sat, non_wetting_sat
-        )
-        d_nwet = table.get_non_wetting_phase_relative_permeability_derivative(
-            wetting_sat, non_wetting_sat
-        )
-        if ow_wetting == FluidPhase.WATER:
-            return d_wet, d_nwet  # d_krw/d_Sw, d_kro_w/d_Sw
-        return d_nwet, d_wet  # d_krw/d_So, d_kro_w/d_So
+    if isinstance(oil_water_table, TwoPhaseRelPermTable):
+        if oil_water_wetting_phase == FluidPhase.WATER:
+            wetting_saturation = water_saturation
+            non_wetting_saturation = oil_saturation
+        else:
+            wetting_saturation = oil_saturation
+            non_wetting_saturation = water_saturation
 
-    derivs = table.get_relative_permeability_derivatives(
-        water_saturation=sw,
-        oil_saturation=so,
-        gas_saturation=sg,
-        **extra,
+        wetting_derivative = (
+            oil_water_table.get_wetting_phase_relative_permeability_derivative(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+        )
+        non_wetting_derivative = (
+            oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+        )
+        if oil_water_wetting_phase == FluidPhase.WATER:
+            return (
+                wetting_derivative,
+                non_wetting_derivative,
+            )  # d_krw/d_Sw, d_kro_w/d_Sw
+        return non_wetting_derivative, wetting_derivative  # d_krw/d_So, d_kro_w/d_So
+
+    derivatives = oil_water_table.get_relative_permeability_derivatives(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        **extra_kwargs,
     )
     # The oil-water hysteresis scanning variable is always Sw
-    return derivs["dKrw_dSw"], derivs["dKro_dSw"]
+    return derivatives["dKrw_dSw"], derivatives["dKro_dSw"]
 
 
-def _go_kr_deriv(
-    table: typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable],
-    sw: FloatOrArray,
-    so: FloatOrArray,
-    sg: FloatOrArray,
-    **extra: typing.Any,
+def _get_gas_oil_relative_permeability_derivatives(
+    gas_oil_table: typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable],
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    **extra_kwargs: typing.Any,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray]:
     """
     Return `(d_kro_g/d_ref, d_krg/d_ref)` for the gas-oil table, where
     *ref* is the table's natural reference saturation (So in oil-wet, Sg in
     gas-wet).
 
-    :param table: Gas-oil relative permeability table (two-phase or three-phase).
-    :param sw: Water saturation (scalar or array).
-    :param so: Oil saturation (scalar or array).
-    :param sg: Gas saturation (scalar or array).
-    :param extra: Additional keyword arguments forwarded to parametric tables.
+    :param gas_oil_table: Gas-oil relative permeability table (two-phase or three-phase).
+    :param water_saturation: Water saturation (scalar or array).
+    :param oil_saturation: Oil saturation (scalar or array).
+    :param gas_saturation: Gas saturation (scalar or array).
+    :param extra_kwargs: Additional keyword arguments forwarded to parametric tables.
     :return: Tuple of `(d_kro_g/d_ref, d_krg/d_ref)` where *ref* is the
         reference saturation axis of the gas-oil sub-system.
     """
-    go_wetting = table.get_gas_oil_wetting_phase()
+    gas_oil_wetting_phase = gas_oil_table.get_gas_oil_wetting_phase()
 
-    if isinstance(table, TwoPhaseRelPermTable):
-        wetting_sat = so if go_wetting == FluidPhase.OIL else sg
-        non_wetting_sat = sg if go_wetting == FluidPhase.OIL else so
-        d_wet = table.get_wetting_phase_relative_permeability_derivative(
-            wetting_sat, non_wetting_sat
-        )
-        d_nwet = table.get_non_wetting_phase_relative_permeability_derivative(
-            wetting_sat, non_wetting_sat
-        )
-        if go_wetting == FluidPhase.OIL:
-            return d_wet, d_nwet  # d_kro_g/d_So, d_krg/d_So
-        return d_nwet, d_wet  # d_kro_g/d_Sg, d_krg/d_Sg
+    if isinstance(gas_oil_table, TwoPhaseRelPermTable):
+        if gas_oil_wetting_phase == FluidPhase.OIL:
+            wetting_saturation = oil_saturation
+            non_wetting_saturation = gas_saturation
+        else:
+            wetting_saturation = gas_saturation
+            non_wetting_saturation = oil_saturation
 
-    derivs = table.get_relative_permeability_derivatives(
-        water_saturation=sw,
-        oil_saturation=so,
-        gas_saturation=sg,
-        **extra,
+        wetting_derivative = (
+            gas_oil_table.get_wetting_phase_relative_permeability_derivative(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+        )
+        non_wetting_derivative = (
+            gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
+                wetting_saturation=wetting_saturation,
+                non_wetting_saturation=non_wetting_saturation,
+            )
+        )
+        if gas_oil_wetting_phase == FluidPhase.OIL:
+            return (
+                wetting_derivative,
+                non_wetting_derivative,
+            )  # d_kro_g/d_So, d_krg/d_So
+        return non_wetting_derivative, wetting_derivative  # d_kro_g/d_Sg, d_krg/d_Sg
+
+    derivatives = gas_oil_table.get_relative_permeability_derivatives(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        **extra_kwargs,
     )
     # The gas-oil hysteresis scanning variable is always Sg
-    return derivs["dKro_dSg"], derivs["dKrg_dSg"]
+    return derivatives["dKro_dSg"], derivatives["dKrg_dSg"]
 
 
-def _ow_pc(
-    table: typing.Union[TwoPhaseCapillaryPressureTable, CapillaryPressureTable],
-    sw: FloatOrArray,
-    so: FloatOrArray,
-    sg: FloatOrArray,
-    **extra: typing.Any,
+def _get_oil_water_capillary_pressure(
+    oil_water_capillary_pressure_table: typing.Union[
+        TwoPhaseCapillaryPressureTable, CapillaryPressureTable
+    ],
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    **extra_kwargs: typing.Any,
 ) -> FloatOrArray:
     """
     Extract Pcow from an oil-water capillary pressure table, dispatching
     saturations correctly via the canonical wetting-phase API.
 
-    :param table: Oil-water capillary pressure table (two-phase or three-phase).
-    :param sw: Water saturation (scalar or array).
-    :param so: Oil saturation (scalar or array).
-    :param sg: Gas saturation (scalar or array).
-    :param extra: Additional keyword arguments forwarded to parametric tables.
+    :param oil_water_capillary_pressure_table: Oil-water capillary pressure table (two-phase or three-phase).
+    :param water_saturation: Water saturation (scalar or array).
+    :param oil_saturation: Oil saturation (scalar or array).
+    :param gas_saturation: Gas saturation (scalar or array).
+    :param extra_kwargs: Additional keyword arguments forwarded to parametric tables.
     :return: Oil-water capillary pressure Pcow = Po - Pw (scalar or array).
     """
-    ow_wetting = table.get_oil_water_wetting_phase()
+    oil_water_wetting_phase = (
+        oil_water_capillary_pressure_table.get_oil_water_wetting_phase()
+    )
 
-    if isinstance(table, TwoPhaseCapillaryPressureTable):
-        wetting_sat = sw if ow_wetting == FluidPhase.WATER else so
-        non_wetting_sat = so if ow_wetting == FluidPhase.WATER else sw
-        return table.get_capillary_pressure(wetting_sat, non_wetting_sat)
+    if isinstance(oil_water_capillary_pressure_table, TwoPhaseCapillaryPressureTable):
+        if oil_water_wetting_phase == FluidPhase.WATER:
+            wetting_saturation = water_saturation
+            non_wetting_saturation = oil_saturation
+        else:
+            wetting_saturation = oil_saturation
+            non_wetting_saturation = water_saturation
+        return oil_water_capillary_pressure_table.get_capillary_pressure(
+            wetting_saturation=wetting_saturation,
+            non_wetting_saturation=non_wetting_saturation,
+        )
 
-    result = table.get_capillary_pressures(
-        water_saturation=sw,
-        oil_saturation=so,
-        gas_saturation=sg,
-        **extra,
+    result = oil_water_capillary_pressure_table.get_capillary_pressures(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        **extra_kwargs,
     )
     return result["oil_water"]
 
 
-def _go_pc(
-    table: typing.Union[TwoPhaseCapillaryPressureTable, CapillaryPressureTable],
-    sw: FloatOrArray,
-    so: FloatOrArray,
-    sg: FloatOrArray,
-    **extra: typing.Any,
+def _get_gas_oil_capillary_pressure(
+    gas_oil_capillary_pressure_table: typing.Union[
+        TwoPhaseCapillaryPressureTable, CapillaryPressureTable
+    ],
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    **extra_kwargs: typing.Any,
 ) -> FloatOrArray:
     """
     Extract Pcgo from a gas-oil capillary pressure table, dispatching
     saturations correctly via the canonical wetting-phase API.
 
-    :param table: Gas-oil capillary pressure table (two-phase or three-phase).
-    :param sw: Water saturation (scalar or array).
-    :param so: Oil saturation (scalar or array).
-    :param sg: Gas saturation (scalar or array).
-    :param extra: Additional keyword arguments forwarded to parametric tables.
+    :param gas_oil_capillary_pressure_table: Gas-oil capillary pressure table (two-phase or three-phase).
+    :param water_saturation: Water saturation (scalar or array).
+    :param oil_saturation: Oil saturation (scalar or array).
+    :param gas_saturation: Gas saturation (scalar or array).
+    :param extra_kwargs: Additional keyword arguments forwarded to parametric tables.
     :return: Gas-oil capillary pressure Pcgo = Pg - Po (scalar or array).
     """
-    go_wetting = table.get_gas_oil_wetting_phase()
+    gas_oil_wetting_phase = gas_oil_capillary_pressure_table.get_gas_oil_wetting_phase()
 
-    if isinstance(table, TwoPhaseCapillaryPressureTable):
-        wetting_sat = so if go_wetting == FluidPhase.OIL else sg
-        non_wetting_sat = sg if go_wetting == FluidPhase.OIL else so
-        return table.get_capillary_pressure(wetting_sat, non_wetting_sat)
+    if isinstance(gas_oil_capillary_pressure_table, TwoPhaseCapillaryPressureTable):
+        if gas_oil_wetting_phase == FluidPhase.OIL:
+            wetting_saturation = oil_saturation
+            non_wetting_saturation = gas_saturation
+        else:
+            wetting_saturation = gas_saturation
+            non_wetting_saturation = oil_saturation
+        return gas_oil_capillary_pressure_table.get_capillary_pressure(
+            wetting_saturation=wetting_saturation,
+            non_wetting_saturation=non_wetting_saturation,
+        )
 
-    result = table.get_capillary_pressures(
-        water_saturation=sw,
-        oil_saturation=so,
-        gas_saturation=sg,
-        **extra,
+    result = gas_oil_capillary_pressure_table.get_capillary_pressures(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        **extra_kwargs,
     )
     return result["gas_oil"]
 
 
-def _ow_pc_deriv(
-    table: typing.Union[TwoPhaseCapillaryPressureTable, CapillaryPressureTable],
-    sw: FloatOrArray,
-    so: FloatOrArray,
-    sg: FloatOrArray,
-    **extra: typing.Any,
+def _get_oil_water_capillary_pressure_derivative(
+    oil_water_capillary_pressure_table: typing.Union[
+        TwoPhaseCapillaryPressureTable, CapillaryPressureTable
+    ],
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    **extra_kwargs: typing.Any,
 ) -> FloatOrArray:
     """
     Return dPcow/d(reference_sat) for the oil-water capillary pressure table.
@@ -808,36 +954,46 @@ def _ow_pc_deriv(
     three-phase tables `dPcow/dSw` is returned to match the scanning variable
     used by the hysteresis layer.
 
-    :param table: Oil-water capillary pressure table (two-phase or three-phase).
-    :param sw: Water saturation (scalar or array).
-    :param so: Oil saturation (scalar or array).
-    :param sg: Gas saturation (scalar or array).
-    :param extra: Additional keyword arguments forwarded to parametric tables.
-    :return: Derivative of Pcow w.r.t. the reference saturation axis
-        (scalar or array).
+    :param oil_water_capillary_pressure_table: Oil-water capillary pressure table (two-phase or three-phase).
+    :param water_saturation: Water saturation (scalar or array).
+    :param oil_saturation: Oil saturation (scalar or array).
+    :param gas_saturation: Gas saturation (scalar or array).
+    :param extra_kwargs: Additional keyword arguments forwarded to parametric tables.
+    :return: Derivative of Pcow w.r.t. the reference saturation axis (scalar or array).
     """
-    ow_wetting = table.get_oil_water_wetting_phase()
-
-    if isinstance(table, TwoPhaseCapillaryPressureTable):
-        wetting_sat = sw if ow_wetting == FluidPhase.WATER else so
-        non_wetting_sat = so if ow_wetting == FluidPhase.WATER else sw
-        return table.get_capillary_pressure_derivative(wetting_sat, non_wetting_sat)
-
-    derivs = table.get_capillary_pressure_derivatives(
-        water_saturation=sw,
-        oil_saturation=so,
-        gas_saturation=sg,
-        **extra,
+    oil_water_wetting_phase = (
+        oil_water_capillary_pressure_table.get_oil_water_wetting_phase()
     )
-    return derivs["dPcow_dSw"]
+
+    if isinstance(oil_water_capillary_pressure_table, TwoPhaseCapillaryPressureTable):
+        if oil_water_wetting_phase == FluidPhase.WATER:
+            wetting_saturation = water_saturation
+            non_wetting_saturation = oil_saturation
+        else:
+            wetting_saturation = oil_saturation
+            non_wetting_saturation = water_saturation
+        return oil_water_capillary_pressure_table.get_capillary_pressure_derivative(
+            wetting_saturation=wetting_saturation,
+            non_wetting_saturation=non_wetting_saturation,
+        )
+
+    derivatives = oil_water_capillary_pressure_table.get_capillary_pressure_derivatives(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        **extra_kwargs,
+    )
+    return derivatives["dPcow_dSw"]
 
 
-def _go_pc_deriv(
-    table: typing.Union[TwoPhaseCapillaryPressureTable, CapillaryPressureTable],
-    sw: FloatOrArray,
-    so: FloatOrArray,
-    sg: FloatOrArray,
-    **extra: typing.Any,
+def _get_gas_oil_capillary_pressure_derivative(
+    gas_oil_capillary_pressure_table: typing.Union[
+        TwoPhaseCapillaryPressureTable, CapillaryPressureTable
+    ],
+    water_saturation: FloatOrArray,
+    oil_saturation: FloatOrArray,
+    gas_saturation: FloatOrArray,
+    **extra_kwargs: typing.Any,
 ) -> FloatOrArray:
     """
     Return dPcgo/d(reference_sat) for the gas-oil capillary pressure table.
@@ -847,28 +1003,35 @@ def _go_pc_deriv(
     `dPcgo/dSg` is returned to match the scanning variable used by the
     hysteresis layer.
 
-    :param table: Gas-oil capillary pressure table (two-phase or three-phase).
-    :param sw: Water saturation (scalar or array).
-    :param so: Oil saturation (scalar or array).
-    :param sg: Gas saturation (scalar or array).
-    :param extra: Additional keyword arguments forwarded to parametric tables.
+    :param gas_oil_capillary_pressure_table: Gas-oil capillary pressure table (two-phase or three-phase).
+    :param water_saturation: Water saturation (scalar or array).
+    :param oil_saturation: Oil saturation (scalar or array).
+    :param gas_saturation: Gas saturation (scalar or array).
+    :param extra_kwargs: Additional keyword arguments forwarded to parametric tables.
     :return: Derivative of Pcgo w.r.t. the reference saturation axis
         (scalar or array).
     """
-    go_wetting = table.get_gas_oil_wetting_phase()
+    gas_oil_wetting_phase = gas_oil_capillary_pressure_table.get_gas_oil_wetting_phase()
 
-    if isinstance(table, TwoPhaseCapillaryPressureTable):
-        wetting_sat = so if go_wetting == FluidPhase.OIL else sg
-        non_wetting_sat = sg if go_wetting == FluidPhase.OIL else so
-        return table.get_capillary_pressure_derivative(wetting_sat, non_wetting_sat)
+    if isinstance(gas_oil_capillary_pressure_table, TwoPhaseCapillaryPressureTable):
+        if gas_oil_wetting_phase == FluidPhase.OIL:
+            wetting_saturation = oil_saturation
+            non_wetting_saturation = gas_saturation
+        else:
+            wetting_saturation = gas_saturation
+            non_wetting_saturation = oil_saturation
+        return gas_oil_capillary_pressure_table.get_capillary_pressure_derivative(
+            wetting_saturation=wetting_saturation,
+            non_wetting_saturation=non_wetting_saturation,
+        )
 
-    derivs = table.get_capillary_pressure_derivatives(
-        water_saturation=sw,
-        oil_saturation=so,
-        gas_saturation=sg,
-        **extra,
+    derivatives = gas_oil_capillary_pressure_table.get_capillary_pressure_derivatives(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        **extra_kwargs,
     )
-    return derivs["dPcgo_dSg"]
+    return derivatives["dPcgo_dSg"]
 
 
 @relperm_table
@@ -890,7 +1053,7 @@ class KilloughLandRelPermModel(
 
     **Land trapping**: a portion of the non-wetting phase becomes
     disconnected. The dynamic residual saturation depends on the saturation
-    at the reversal point via Land's formula::
+    at the reversal point via Land's formula:
 
         S_r(S_i) = S_r_max / (1 + C * S_i)
 
@@ -899,7 +1062,7 @@ class KilloughLandRelPermModel(
     interpolates between the primary drainage and imbibition bounds.
 
     Both two-phase (`TwoPhaseRelPermTable`) and full three-phase
-    (`RelativePermeabilityTable`) backing tables are supported.  Wetting
+    (`RelativePermeabilityTable`) backing tables are supported. Wetting
     and non-wetting phase roles are resolved through the canonical API
     (`get_oil_water_wetting_phase` / `get_gas_oil_wetting_phase`) so the
     model is wettability-agnostic.
@@ -907,8 +1070,8 @@ class KilloughLandRelPermModel(
     The hysteresis history is passed as additional keyword arguments to
     `get_relative_permeabilities` and `get_relative_permeability_derivatives`. When these arguments are
     absent the model degenerates to the primary drainage curves, which is the
-    physically correct behaviour for the first drainage cycle (see
-    `simulate.py` — the `enable_hysteresis` flag in `Config` controls
+    physically correct behaviour for the first drainage cycle
+    (see `simulate.py`, the `enable_hysteresis` flag in `Config` controls
     whether history is tracked and passed through).
     """
 
@@ -934,10 +1097,10 @@ class KilloughLandRelPermModel(
     ] = None
     """Primary imbibition table for the gas-oil system. Defaults to the drainage table."""
 
-    land_coefficient_water: float = 1.0
+    land_trapping_coefficient_water: float = 1.0
     """Land trapping coefficient *C* for the oil-water system (≥ 0)."""
 
-    land_coefficient_gas: float = 1.0
+    land_trapping_coefficient_gas: float = 1.0
     """Land trapping coefficient *C* for the gas-oil system (≥ 0)."""
 
     maximum_residual_oil_saturation_water: typing.Optional[float] = None
@@ -1032,18 +1195,20 @@ class KilloughLandRelPermModel(
 
     def get_oil_relperm_endpoint(self) -> float:
         """Resolve kro at connate water from the drainage table."""
-        drain = self.oil_water_drainage_table
-        if isinstance(drain, TwoPhaseRelPermTable):
-            if drain.wetting_phase == FluidPhase.WATER:
-                return float(np.max(drain.non_wetting_phase_relative_permeability))
-            return float(np.max(drain.wetting_phase_relative_permeability))
+        drainage_table = self.oil_water_drainage_table
+        if isinstance(drainage_table, TwoPhaseRelPermTable):
+            if drainage_table.wetting_phase == FluidPhase.WATER:
+                return float(
+                    np.max(drainage_table.non_wetting_phase_relative_permeability)
+                )
+            return float(np.max(drainage_table.wetting_phase_relative_permeability))
         # For full three-phase tables
-        return drain.get_oil_relperm_endpoint()
+        return drainage_table.get_oil_relperm_endpoint()
 
     def _parse_hysteresis_kwargs(
         self,
-        sw: npt.NDArray,
-        sg: npt.NDArray,
+        water_saturation_array: npt.NDArray,
+        gas_saturation_array: npt.NDArray,
         max_water_saturation: typing.Optional[FloatOrArray],
         max_gas_saturation: typing.Optional[FloatOrArray],
         water_imbibition_flag: typing.Optional[typing.Union[bool, npt.NDArray]],
@@ -1059,8 +1224,8 @@ class KilloughLandRelPermModel(
         When all history arguments are `None` the method returns arrays that
         replicate the primary-drainage state (no-hysteresis fallback).
 
-        :param sw: Broadcast-ready water saturation array.
-        :param sg: Broadcast-ready gas saturation array.
+        :param water_saturation_array: Broadcast-ready water saturation array.
+        :param gas_saturation_array: Broadcast-ready gas saturation array.
         :param max_water_saturation: Historical maximum water saturation grid or `None`.
         :param max_gas_saturation: Historical maximum gas saturation grid or `None`.
         :param water_imbibition_flag: Per-cell flag: 1 = water imbibition, 0 = drainage,
@@ -1081,32 +1246,59 @@ class KilloughLandRelPermModel(
             and gas_imbibition_flag is not None
         )
         if use_hysteresis:
-            sw_max = np.atleast_1d(np.asarray(max_water_saturation, dtype=np.float64))
-            sg_max = np.atleast_1d(np.asarray(max_gas_saturation, dtype=np.float64))
-            sw_imb = np.atleast_1d(np.asarray(water_imbibition_flag, dtype=np.float64))
-            sg_imb = np.atleast_1d(np.asarray(gas_imbibition_flag, dtype=np.float64))
-            sw_rev = (
+            maximum_water_saturation_array = np.atleast_1d(
+                np.asarray(max_water_saturation, dtype=np.float64)
+            )
+            maximum_gas_saturation_array = np.atleast_1d(
+                np.asarray(max_gas_saturation, dtype=np.float64)
+            )
+            water_imbibition_flag_array = np.atleast_1d(
+                np.asarray(water_imbibition_flag, dtype=np.float64)
+            )
+            gas_imbibition_flag_array = np.atleast_1d(
+                np.asarray(gas_imbibition_flag, dtype=np.float64)
+            )
+            water_reversal_saturation_array = (
                 np.atleast_1d(np.asarray(water_reversal_saturation, dtype=np.float64))
                 if water_reversal_saturation is not None
-                else sw_max.copy()
+                else maximum_water_saturation_array.copy()
             )
-            sg_rev = (
+            gas_reversal_saturation_array = (
                 np.atleast_1d(np.asarray(gas_reversal_saturation, dtype=np.float64))
                 if gas_reversal_saturation is not None
-                else sg_max.copy()
+                else maximum_gas_saturation_array.copy()
             )
         else:
-            sw_max = sw.copy()
-            sg_max = sg.copy()
-            sw_imb = np.zeros_like(sw)
-            sg_imb = np.zeros_like(sg)
-            sw_rev = sw.copy()
-            sg_rev = sg.copy()
+            maximum_water_saturation_array = water_saturation_array.copy()
+            maximum_gas_saturation_array = gas_saturation_array.copy()
+            water_imbibition_flag_array = np.zeros_like(water_saturation_array)
+            gas_imbibition_flag_array = np.zeros_like(gas_saturation_array)
+            water_reversal_saturation_array = water_saturation_array.copy()
+            gas_reversal_saturation_array = gas_saturation_array.copy()
 
-        sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev = np.broadcast_arrays(
-            sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev
+        (
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
+        ) = np.broadcast_arrays(
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
         )
-        return sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev
+        return (
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
+        )
 
     def get_relative_permeabilities(
         self,
@@ -1131,16 +1323,16 @@ class KilloughLandRelPermModel(
         When the saturation-history keyword arguments are absent the method
         returns primary drainage kr values (no hysteresis).
 
-        :param water_saturation: Water saturation (fraction, 0-1) — scalar or array.
-        :param oil_saturation: Oil saturation (fraction, 0-1) — scalar or array.
-        :param gas_saturation: Gas saturation (fraction, 0-1) — scalar or array.
+        :param water_saturation: Water saturation (fraction, 0-1) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction, 0-1) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction, 0-1) - scalar or array.
         :param max_water_saturation: Historical maximum water saturation per cell.
             Enables hysteresis when provided together with the other history args.
         :param max_gas_saturation: Historical maximum gas saturation per cell.
-        :param water_imbibition_flag: Boolean / float flag per cell — 1 if water
+        :param water_imbibition_flag: Boolean / float flag per cell - 1 if water
             saturation is currently increasing (imbibition in the oil-water
             system), 0 if decreasing (drainage).
-        :param gas_imbibition_flag: Boolean / float flag per cell — 1 if gas
+        :param gas_imbibition_flag: Boolean / float flag per cell - 1 if gas
             saturation is currently increasing, 0 if decreasing.
         :param water_reversal_saturation: Water saturation at the last oil-water
             reversal.  Defaults to `max_water_saturation` when not supplied.
@@ -1149,140 +1341,227 @@ class KilloughLandRelPermModel(
         :param kwargs: Additional keyword arguments forwarded to the underlying
             backing tables (e.g. residual saturation overrides for parametric
             models).
-        :return: `RelativePermeabilities` dictionary with keys `"water"`,
-            `"oil"`, and `"gas"`.
+        :return: `RelativePermeabilities` dictionary with keys `"water"`, `"oil"`, and `"gas"`.
         """
         is_scalar = (
             np.isscalar(water_saturation)
             and np.isscalar(oil_saturation)
             and np.isscalar(gas_saturation)
         )
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
-        sw, so, sg = np.broadcast_arrays(sw, so, sg)
-
-        # Normalise saturations
-        total = sw + so + sg
-        mask = (np.abs(total - 1.0) > c.SATURATION_EPSILON) & (total > 0.0)
-        if np.any(mask):
-            sw = np.where(mask, sw / total, sw)
-            so = np.where(mask, so / total, so)
-            sg = np.where(mask, sg / total, sg)
-
-        sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev = self._parse_hysteresis_kwargs(
-            sw,
-            sg,
-            max_water_saturation,
-            max_gas_saturation,
-            water_imbibition_flag,
-            gas_imbibition_flag,
-            water_reversal_saturation,
-            gas_reversal_saturation,
+        water_saturation_array = np.atleast_1d(
+            np.asarray(water_saturation, dtype=np.float64)
+        )
+        oil_saturation_array = np.atleast_1d(
+            np.asarray(oil_saturation, dtype=np.float64)
+        )
+        gas_saturation_array = np.atleast_1d(
+            np.asarray(gas_saturation, dtype=np.float64)
+        )
+        water_saturation_array, oil_saturation_array, gas_saturation_array = (
+            np.broadcast_arrays(
+                water_saturation_array, oil_saturation_array, gas_saturation_array
+            )
         )
 
-        ow_drain = self.oil_water_drainage_table
-        ow_imb = self.oil_water_imbibition_table or ow_drain
-        go_drain = self.gas_oil_drainage_table
-        go_imb = self.gas_oil_imbibition_table or go_drain
+        # Normalise saturations
+        total_saturation = (
+            water_saturation_array + oil_saturation_array + gas_saturation_array
+        )
+        normalisation_mask = (np.abs(total_saturation - 1.0) > c.SATURATION_EPSILON) & (
+            total_saturation > 0.0
+        )
+        if np.any(normalisation_mask):
+            water_saturation_array = np.where(
+                normalisation_mask,
+                water_saturation_array / total_saturation,
+                water_saturation_array,
+            )
+            oil_saturation_array = np.where(
+                normalisation_mask,
+                oil_saturation_array / total_saturation,
+                oil_saturation_array,
+            )
+            gas_saturation_array = np.where(
+                normalisation_mask,
+                gas_saturation_array / total_saturation,
+                gas_saturation_array,
+            )
+
+        (
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
+        ) = self._parse_hysteresis_kwargs(
+            water_saturation_array=water_saturation_array,
+            gas_saturation_array=gas_saturation_array,
+            max_water_saturation=max_water_saturation,
+            max_gas_saturation=max_gas_saturation,
+            water_imbibition_flag=water_imbibition_flag,
+            gas_imbibition_flag=gas_imbibition_flag,
+            water_reversal_saturation=water_reversal_saturation,
+            gas_reversal_saturation=gas_reversal_saturation,
+        )
+
+        oil_water_drainage_table = self.oil_water_drainage_table
+        oil_water_imbibition_table = (
+            self.oil_water_imbibition_table or oil_water_drainage_table
+        )
+        gas_oil_drainage_table = self.gas_oil_drainage_table
+        gas_oil_imbibition_table = (
+            self.gas_oil_imbibition_table or gas_oil_drainage_table
+        )
         use_hysteresis = (
             max_water_saturation is not None and max_gas_saturation is not None
         )
 
-        # Oil-water system — Land trapping on oil
-        so_at_ow_reversal = np.maximum(1.0 - sw_rev - sg, 0.0)
-        imb_ow_kwargs = dict(kwargs)
+        # Oil-water system - Land trapping on oil
+        oil_saturation_at_oil_water_reversal = np.maximum(
+            0.0,
+            1.0 - water_reversal_saturation_array - gas_saturation_array,
+        )
+        imbibition_oil_water_kwargs = dict(kwargs)
         if use_hysteresis and self.maximum_residual_oil_saturation_water is not None:
-            sor_dyn_water = _land_residual_saturation(
-                so_at_ow_reversal,
-                self.maximum_residual_oil_saturation_water,
-                self.land_coefficient_water,
+            dynamic_residual_oil_saturation_water = _compute_land_residual_saturation(
+                initial_non_wetting_saturation=oil_saturation_at_oil_water_reversal,
+                maximum_residual_saturation=self.maximum_residual_oil_saturation_water,
+                land_trapping_coefficient=self.land_trapping_coefficient_water,
             )
-            imb_ow_kwargs["residual_oil_saturation_water"] = sor_dyn_water
+            imbibition_oil_water_kwargs["residual_oil_saturation_water"] = (
+                dynamic_residual_oil_saturation_water
+            )
 
-        krw_drain, kro_w_drain = _ow_kr(ow_drain, sw, so, sg, **kwargs)
-        krw_imb, kro_w_imb = _ow_kr(ow_imb, sw, so, sg, **imb_ow_kwargs)
-
-        krw = _killough_interpolation(
-            sw,
-            krw_drain,
-            krw_imb,
-            sw_rev,
-            sw_max,
-            sw_imb,
-            exponent=self.scanning_interpolation_exponent,
+        (
+            water_relative_permeability_drainage,
+            oil_relative_permeability_water_drainage,
+        ) = _get_oil_water_relative_permeabilities(
+            oil_water_table=oil_water_drainage_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
         )
-        kro_w = _killough_interpolation(
-            sw,
-            kro_w_drain,
-            kro_w_imb,
-            sw_rev,
-            sw_max,
-            sw_imb,
-            exponent=self.scanning_interpolation_exponent,
+        (
+            water_relative_permeability_imbibition,
+            oil_relative_permeability_water_imbibition,
+        ) = _get_oil_water_relative_permeabilities(
+            oil_water_table=oil_water_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **imbibition_oil_water_kwargs,
         )
 
-        # Gas-oil system — Land trapping on gas and oil
-        so_at_go_reversal = np.maximum(1.0 - sg_rev - sw, 0.0)
-        imb_go_kwargs = dict(kwargs)
+        water_relative_permeability = _compute_killough_scanning_curve(
+            saturation=water_saturation_array,
+            drainage_curve_value=water_relative_permeability_drainage,
+            imbibition_curve_value=water_relative_permeability_imbibition,
+            reversal_saturation=water_reversal_saturation_array,
+            maximum_historical_saturation=maximum_water_saturation_array,
+            is_imbibition=water_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
+        )
+        oil_relative_permeability_water = _compute_killough_scanning_curve(
+            saturation=water_saturation_array,
+            drainage_curve_value=oil_relative_permeability_water_drainage,
+            imbibition_curve_value=oil_relative_permeability_water_imbibition,
+            reversal_saturation=water_reversal_saturation_array,
+            maximum_historical_saturation=maximum_water_saturation_array,
+            is_imbibition=water_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
+        )
+
+        # Gas-oil system - Land trapping on gas and oil
+        oil_saturation_at_gas_oil_reversal = np.maximum(
+            0.0,
+            1.0 - gas_reversal_saturation_array - water_saturation_array,
+        )
+        imbibition_gas_oil_kwargs = dict(kwargs)
         if use_hysteresis and self.maximum_residual_gas_saturation is not None:
-            sgr_dyn = _land_residual_saturation(
-                sg_rev,
-                self.maximum_residual_gas_saturation,
-                self.land_coefficient_gas,
+            dynamic_residual_gas_saturation = _compute_land_residual_saturation(
+                initial_non_wetting_saturation=gas_reversal_saturation_array,
+                maximum_residual_saturation=self.maximum_residual_gas_saturation,
+                land_trapping_coefficient=self.land_trapping_coefficient_gas,
             )
-            imb_go_kwargs["residual_gas_saturation"] = sgr_dyn
+            imbibition_gas_oil_kwargs["residual_gas_saturation"] = (
+                dynamic_residual_gas_saturation
+            )
         if use_hysteresis and self.maximum_residual_oil_saturation_gas is not None:
-            sor_dyn_gas = _land_residual_saturation(
-                so_at_go_reversal,
-                self.maximum_residual_oil_saturation_gas,
-                self.land_coefficient_gas,
+            dynamic_residual_oil_saturation_gas = _compute_land_residual_saturation(
+                initial_non_wetting_saturation=oil_saturation_at_gas_oil_reversal,
+                maximum_residual_saturation=self.maximum_residual_oil_saturation_gas,
+                land_trapping_coefficient=self.land_trapping_coefficient_gas,
             )
-            imb_go_kwargs["residual_oil_saturation_gas"] = sor_dyn_gas
+            imbibition_gas_oil_kwargs["residual_oil_saturation_gas"] = (
+                dynamic_residual_oil_saturation_gas
+            )
 
-        kro_g_drain, krg_drain = _go_kr(go_drain, sw, so, sg, **kwargs)
-        kro_g_imb, krg_imb = _go_kr(go_imb, sw, so, sg, **imb_go_kwargs)
+        oil_relative_permeability_gas_drainage, gas_relative_permeability_drainage = (
+            _get_gas_oil_relative_permeabilities(
+                gas_oil_table=gas_oil_drainage_table,
+                water_saturation=water_saturation_array,
+                oil_saturation=oil_saturation_array,
+                gas_saturation=gas_saturation_array,
+                **kwargs,
+            )
+        )
+        (
+            oil_relative_permeability_gas_imbibition,
+            gas_relative_permeability_imbibition,
+        ) = _get_gas_oil_relative_permeabilities(
+            gas_oil_table=gas_oil_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **imbibition_gas_oil_kwargs,
+        )
 
-        krg = _killough_interpolation(
-            sg,
-            krg_drain,
-            krg_imb,
-            sg_rev,
-            sg_max,
-            sg_imb,
-            exponent=self.scanning_interpolation_exponent,
+        gas_relative_permeability = _compute_killough_scanning_curve(
+            saturation=gas_saturation_array,
+            drainage_curve_value=gas_relative_permeability_drainage,
+            imbibition_curve_value=gas_relative_permeability_imbibition,
+            reversal_saturation=gas_reversal_saturation_array,
+            maximum_historical_saturation=maximum_gas_saturation_array,
+            is_imbibition=gas_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
-        kro_g = _killough_interpolation(
-            sg,
-            kro_g_drain,
-            kro_g_imb,
-            sg_rev,
-            sg_max,
-            sg_imb,
-            exponent=self.scanning_interpolation_exponent,
+        oil_relative_permeability_gas = _compute_killough_scanning_curve(
+            saturation=gas_saturation_array,
+            drainage_curve_value=oil_relative_permeability_gas_drainage,
+            imbibition_curve_value=oil_relative_permeability_gas_imbibition,
+            reversal_saturation=gas_reversal_saturation_array,
+            maximum_historical_saturation=maximum_gas_saturation_array,
+            is_imbibition=gas_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
-        kro_endpoint = self.get_oil_relperm_endpoint()
-        
+        oil_relperm_endpoint = self.get_oil_relperm_endpoint()
+
         # Three-phase oil via mixing rule
-        mixing_rule = typing.cast(MixingRule, self.mixing_rule)
-        kro = mixing_rule(
-            kro_w=kro_w,
-            kro_g=kro_g,
-            krw=krw,
-            krg=krg,
-            kro_endpoint=kro_endpoint,
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+        three_phase_mixing_rule = typing.cast(MixingRule, self.mixing_rule)
+        oil_relative_permeability = three_phase_mixing_rule(
+            kro_w=oil_relative_permeability_water,
+            kro_g=oil_relative_permeability_gas,
+            krw=water_relative_permeability,
+            krg=gas_relative_permeability,
+            kro_endpoint=oil_relperm_endpoint,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
         )
 
         if is_scalar:
             return RelativePermeabilities(
-                water=float(np.atleast_1d(krw).flat[0]),
-                oil=float(np.atleast_1d(kro).flat[0]),
-                gas=float(np.atleast_1d(krg).flat[0]),
+                water=float(np.atleast_1d(water_relative_permeability).flat[0]),
+                oil=float(np.atleast_1d(oil_relative_permeability).flat[0]),
+                gas=float(np.atleast_1d(gas_relative_permeability).flat[0]),
             )
-        return RelativePermeabilities(water=krw, oil=kro, gas=krg)
+        return RelativePermeabilities(
+            water=water_relative_permeability,
+            oil=oil_relative_permeability,
+            gas=gas_relative_permeability,
+        )
 
     def get_relative_permeability_derivatives(
         self,
@@ -1305,16 +1584,16 @@ class KilloughLandRelPermModel(
         Compute partial derivatives of three-phase relative permeabilities
         with Killough/Land hysteresis.
 
-        Returns all nine ∂kr_α/∂S_β entries.  Derivatives with respect to
+        Returns all nine ∂kr_α/∂S_β entries. Derivatives with respect to
         the scanning variable (Sw for oil-water, Sg for gas-oil) are computed
         analytically via the chain rule through the Killough scanning-curve
         formula; all other cross-derivatives are zero (consistent with the
         assumption that each two-phase sub-system depends only on its own
         reference saturation).
 
-        :param water_saturation: Water saturation (fraction, 0-1) — scalar or array.
-        :param oil_saturation: Oil saturation (fraction, 0-1) — scalar or array.
-        :param gas_saturation: Gas saturation (fraction, 0-1) — scalar or array.
+        :param water_saturation: Water saturation (fraction, 0-1) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction, 0-1) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction, 0-1) - scalar or array.
         :param max_water_saturation: Historical maximum water saturation per cell,
             or `None` to disable hysteresis.
         :param max_gas_saturation: Historical maximum gas saturation per cell,
@@ -1332,216 +1611,318 @@ class KilloughLandRelPermModel(
             nine ∂kr/∂S entries.
         """
         is_scalar = np.isscalar(water_saturation)
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
-        sw, so, sg = np.broadcast_arrays(sw, so, sg)
-        zeros = np.zeros_like(sw)
+        water_saturation_array = np.atleast_1d(
+            np.asarray(water_saturation, dtype=np.float64)
+        )
+        oil_saturation_array = np.atleast_1d(
+            np.asarray(oil_saturation, dtype=np.float64)
+        )
+        gas_saturation_array = np.atleast_1d(
+            np.asarray(gas_saturation, dtype=np.float64)
+        )
+        water_saturation_array, oil_saturation_array, gas_saturation_array = (
+            np.broadcast_arrays(
+                water_saturation_array, oil_saturation_array, gas_saturation_array
+            )
+        )
+        zeros = np.zeros_like(water_saturation_array)
 
-        sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev = self._parse_hysteresis_kwargs(
-            sw,
-            sg,
-            max_water_saturation,
-            max_gas_saturation,
-            water_imbibition_flag,
-            gas_imbibition_flag,
-            water_reversal_saturation,
-            gas_reversal_saturation,
+        (
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
+        ) = self._parse_hysteresis_kwargs(
+            water_saturation_array=water_saturation_array,
+            gas_saturation_array=gas_saturation_array,
+            max_water_saturation=max_water_saturation,
+            max_gas_saturation=max_gas_saturation,
+            water_imbibition_flag=water_imbibition_flag,
+            gas_imbibition_flag=gas_imbibition_flag,
+            water_reversal_saturation=water_reversal_saturation,
+            gas_reversal_saturation=gas_reversal_saturation,
         )
 
-        ow_drain = self.oil_water_drainage_table
-        ow_imb = self.oil_water_imbibition_table or ow_drain
-        go_drain = self.gas_oil_drainage_table
-        go_imb = self.gas_oil_imbibition_table or go_drain
+        oil_water_drainage_table = self.oil_water_drainage_table
+        oil_water_imbibition_table = (
+            self.oil_water_imbibition_table or oil_water_drainage_table
+        )
+        gas_oil_drainage_table = self.gas_oil_drainage_table
+        gas_oil_imbibition_table = (
+            self.gas_oil_imbibition_table or gas_oil_drainage_table
+        )
         use_hysteresis = (
             max_water_saturation is not None and max_gas_saturation is not None
         )
 
-        # Build kwargs for imbibition tables (Land trapping)
-        so_at_ow_reversal = np.maximum(1.0 - sw_rev - sg, 0.0)
-        imb_ow_kwargs = dict(kwargs)
+        # Build imbibition kwargs with Land trapping
+        oil_saturation_at_oil_water_reversal = np.maximum(
+            0.0,
+            1.0 - water_reversal_saturation_array - gas_saturation_array,
+        )
+        imbibition_oil_water_kwargs = dict(kwargs)
         if use_hysteresis and self.maximum_residual_oil_saturation_water is not None:
-            sor_dyn_water = _land_residual_saturation(
-                so_at_ow_reversal,
-                self.maximum_residual_oil_saturation_water,
-                self.land_coefficient_water,
+            dynamic_residual_oil_saturation_water = _compute_land_residual_saturation(
+                initial_non_wetting_saturation=oil_saturation_at_oil_water_reversal,
+                maximum_residual_saturation=self.maximum_residual_oil_saturation_water,
+                land_trapping_coefficient=self.land_trapping_coefficient_water,
             )
-            imb_ow_kwargs["residual_oil_saturation_water"] = sor_dyn_water
+            imbibition_oil_water_kwargs["residual_oil_saturation_water"] = (
+                dynamic_residual_oil_saturation_water
+            )
 
-        so_at_go_reversal = np.maximum(1.0 - sg_rev - sw, 0.0)
-        imb_go_kwargs = dict(kwargs)
+        oil_saturation_at_gas_oil_reversal = np.maximum(
+            0.0,
+            1.0 - gas_reversal_saturation_array - water_saturation_array,
+        )
+        imbibition_gas_oil_kwargs = dict(kwargs)
         if use_hysteresis and self.maximum_residual_gas_saturation is not None:
-            sgr_dyn = _land_residual_saturation(
-                sg_rev,
-                self.maximum_residual_gas_saturation,
-                self.land_coefficient_gas,
+            dynamic_residual_gas_saturation = _compute_land_residual_saturation(
+                initial_non_wetting_saturation=gas_reversal_saturation_array,
+                maximum_residual_saturation=self.maximum_residual_gas_saturation,
+                land_trapping_coefficient=self.land_trapping_coefficient_gas,
             )
-            imb_go_kwargs["residual_gas_saturation"] = sgr_dyn
+            imbibition_gas_oil_kwargs["residual_gas_saturation"] = (
+                dynamic_residual_gas_saturation
+            )
         if use_hysteresis and self.maximum_residual_oil_saturation_gas is not None:
-            sor_dyn_gas = _land_residual_saturation(
-                so_at_go_reversal,
-                self.maximum_residual_oil_saturation_gas,
-                self.land_coefficient_gas,
+            dynamic_residual_oil_saturation_gas = _compute_land_residual_saturation(
+                initial_non_wetting_saturation=oil_saturation_at_gas_oil_reversal,
+                maximum_residual_saturation=self.maximum_residual_oil_saturation_gas,
+                land_trapping_coefficient=self.land_trapping_coefficient_gas,
             )
-            imb_go_kwargs["residual_oil_saturation_gas"] = sor_dyn_gas
+            imbibition_gas_oil_kwargs["residual_oil_saturation_gas"] = (
+                dynamic_residual_oil_saturation_gas
+            )
 
-        # Oil-water — values and derivatives
-        krw_drain, kro_w_drain = _ow_kr(ow_drain, sw, so, sg, **kwargs)
-        krw_imb, kro_w_imb = _ow_kr(ow_imb, sw, so, sg, **imb_ow_kwargs)
-
-        d_krw_drain_d_sw, d_kro_w_drain_d_sw = _ow_kr_deriv(
-            ow_drain, sw, so, sg, **kwargs
+        # Oil-water - values and derivatives
+        (
+            water_relative_permeability_drainage,
+            oil_relative_permeability_water_drainage,
+        ) = _get_oil_water_relative_permeabilities(
+            oil_water_table=oil_water_drainage_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
         )
-        d_krw_imb_d_sw, d_kro_w_imb_d_sw = _ow_kr_deriv(
-            ow_imb, sw, so, sg, **imb_ow_kwargs
-        )
-
-        d_krw_d_sw = _killough_interpolation_derivative(
-            sw,
-            krw_drain,
-            krw_imb,
-            d_krw_drain_d_sw,
-            d_krw_imb_d_sw,
-            sw_rev,
-            sw_max,
-            sw_imb,
-            exponent=self.scanning_interpolation_exponent,
-        )
-        d_kro_w_d_sw = _killough_interpolation_derivative(
-            sw,
-            kro_w_drain,
-            kro_w_imb,
-            d_kro_w_drain_d_sw,
-            d_kro_w_imb_d_sw,
-            sw_rev,
-            sw_max,
-            sw_imb,
-            exponent=self.scanning_interpolation_exponent,
+        (
+            water_relative_permeability_imbibition,
+            oil_relative_permeability_water_imbibition,
+        ) = _get_oil_water_relative_permeabilities(
+            oil_water_table=oil_water_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **imbibition_oil_water_kwargs,
         )
 
-        krw = _killough_interpolation(
-            sw,
-            krw_drain,
-            krw_imb,
-            sw_rev,
-            sw_max,
-            sw_imb,
-            exponent=self.scanning_interpolation_exponent,
+        (
+            water_relative_permeability_drainage_derivative,
+            oil_relative_permeability_water_drainage_derivative,
+        ) = _get_oil_water_relative_permeability_derivatives(
+            oil_water_table=oil_water_drainage_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
         )
-        kro_w = _killough_interpolation(
-            sw,
-            kro_w_drain,
-            kro_w_imb,
-            sw_rev,
-            sw_max,
-            sw_imb,
-            exponent=self.scanning_interpolation_exponent,
-        )
-
-        # Gas-oil — values and derivatives
-        kro_g_drain, krg_drain = _go_kr(go_drain, sw, so, sg, **kwargs)
-        kro_g_imb, krg_imb = _go_kr(go_imb, sw, so, sg, **imb_go_kwargs)
-
-        d_kro_g_drain_d_sg, d_krg_drain_d_sg = _go_kr_deriv(
-            go_drain, sw, so, sg, **kwargs
-        )
-        d_kro_g_imb_d_sg, d_krg_imb_d_sg = _go_kr_deriv(
-            go_imb, sw, so, sg, **imb_go_kwargs
+        (
+            water_relative_permeability_imbibition_derivative,
+            oil_relative_permeability_water_imbibition_derivative,
+        ) = _get_oil_water_relative_permeability_derivatives(
+            oil_water_table=oil_water_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **imbibition_oil_water_kwargs,
         )
 
-        d_krg_d_sg = _killough_interpolation_derivative(
-            sg,
-            krg_drain,
-            krg_imb,
-            d_krg_drain_d_sg,
-            d_krg_imb_d_sg,
-            sg_rev,
-            sg_max,
-            sg_imb,
-            exponent=self.scanning_interpolation_exponent,
+        water_relative_permeability_derivative = _compute_killough_scanning_curve_derivative(
+            saturation=water_saturation_array,
+            drainage_curve_value=water_relative_permeability_drainage,
+            imbibition_curve_value=water_relative_permeability_imbibition,
+            drainage_curve_derivative=water_relative_permeability_drainage_derivative,
+            imbibition_curve_derivative=water_relative_permeability_imbibition_derivative,
+            reversal_saturation=water_reversal_saturation_array,
+            maximum_historical_saturation=maximum_water_saturation_array,
+            is_imbibition=water_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
-        d_kro_g_d_sg = _killough_interpolation_derivative(
-            sg,
-            kro_g_drain,
-            kro_g_imb,
-            d_kro_g_drain_d_sg,
-            d_kro_g_imb_d_sg,
-            sg_rev,
-            sg_max,
-            sg_imb,
-            exponent=self.scanning_interpolation_exponent,
+        oil_relative_permeability_water_derivative = _compute_killough_scanning_curve_derivative(
+            saturation=water_saturation_array,
+            drainage_curve_value=oil_relative_permeability_water_drainage,
+            imbibition_curve_value=oil_relative_permeability_water_imbibition,
+            drainage_curve_derivative=oil_relative_permeability_water_drainage_derivative,
+            imbibition_curve_derivative=oil_relative_permeability_water_imbibition_derivative,
+            reversal_saturation=water_reversal_saturation_array,
+            maximum_historical_saturation=maximum_water_saturation_array,
+            is_imbibition=water_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
 
-        krg = _killough_interpolation(
-            sg,
-            krg_drain,
-            krg_imb,
-            sg_rev,
-            sg_max,
-            sg_imb,
-            exponent=self.scanning_interpolation_exponent,
+        water_relative_permeability = _compute_killough_scanning_curve(
+            saturation=water_saturation_array,
+            drainage_curve_value=water_relative_permeability_drainage,
+            imbibition_curve_value=water_relative_permeability_imbibition,
+            reversal_saturation=water_reversal_saturation_array,
+            maximum_historical_saturation=maximum_water_saturation_array,
+            is_imbibition=water_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
-        kro_g = _killough_interpolation(
-            sg,
-            kro_g_drain,
-            kro_g_imb,
-            sg_rev,
-            sg_max,
-            sg_imb,
-            exponent=self.scanning_interpolation_exponent,
+        oil_relative_permeability_water = _compute_killough_scanning_curve(
+            saturation=water_saturation_array,
+            drainage_curve_value=oil_relative_permeability_water_drainage,
+            imbibition_curve_value=oil_relative_permeability_water_imbibition,
+            reversal_saturation=water_reversal_saturation_array,
+            maximum_historical_saturation=maximum_water_saturation_array,
+            is_imbibition=water_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
-        kro_endpoint = self.get_oil_relperm_endpoint()
 
-        # Three-phase oil mixing rule — chain rule
-        mixing_rule = typing.cast(MixingRule, self.mixing_rule)
-        derivs = get_mixing_rule_partial_derivatives(
-            rule=mixing_rule,
-            kro_w=kro_w,
-            kro_g=kro_g,
-            krw=krw,
-            krg=krg,
-            kro_endpoint=kro_endpoint,
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+        # Gas-oil - values and derivatives
+        oil_relative_permeability_gas_drainage, gas_relative_permeability_drainage = (
+            _get_gas_oil_relative_permeabilities(
+                gas_oil_table=gas_oil_drainage_table,
+                water_saturation=water_saturation_array,
+                oil_saturation=oil_saturation_array,
+                gas_saturation=gas_saturation_array,
+                **kwargs,
+            )
+        )
+        (
+            oil_relative_permeability_gas_imbibition,
+            gas_relative_permeability_imbibition,
+        ) = _get_gas_oil_relative_permeabilities(
+            gas_oil_table=gas_oil_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **imbibition_gas_oil_kwargs,
+        )
+
+        (
+            oil_relative_permeability_gas_drainage_derivative,
+            gas_relative_permeability_drainage_derivative,
+        ) = _get_gas_oil_relative_permeability_derivatives(
+            gas_oil_table=gas_oil_drainage_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
+        )
+        (
+            oil_relative_permeability_gas_imbibition_derivative,
+            gas_relative_permeability_imbibition_derivative,
+        ) = _get_gas_oil_relative_permeability_derivatives(
+            gas_oil_table=gas_oil_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **imbibition_gas_oil_kwargs,
+        )
+
+        gas_relative_permeability_derivative = _compute_killough_scanning_curve_derivative(
+            saturation=gas_saturation_array,
+            drainage_curve_value=gas_relative_permeability_drainage,
+            imbibition_curve_value=gas_relative_permeability_imbibition,
+            drainage_curve_derivative=gas_relative_permeability_drainage_derivative,
+            imbibition_curve_derivative=gas_relative_permeability_imbibition_derivative,
+            reversal_saturation=gas_reversal_saturation_array,
+            maximum_historical_saturation=maximum_gas_saturation_array,
+            is_imbibition=gas_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
+        )
+        oil_relative_permeability_gas_derivative = _compute_killough_scanning_curve_derivative(
+            saturation=gas_saturation_array,
+            drainage_curve_value=oil_relative_permeability_gas_drainage,
+            imbibition_curve_value=oil_relative_permeability_gas_imbibition,
+            drainage_curve_derivative=oil_relative_permeability_gas_drainage_derivative,
+            imbibition_curve_derivative=oil_relative_permeability_gas_imbibition_derivative,
+            reversal_saturation=gas_reversal_saturation_array,
+            maximum_historical_saturation=maximum_gas_saturation_array,
+            is_imbibition=gas_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
+        )
+
+        gas_relative_permeability = _compute_killough_scanning_curve(
+            saturation=gas_saturation_array,
+            drainage_curve_value=gas_relative_permeability_drainage,
+            imbibition_curve_value=gas_relative_permeability_imbibition,
+            reversal_saturation=gas_reversal_saturation_array,
+            maximum_historical_saturation=maximum_gas_saturation_array,
+            is_imbibition=gas_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
+        )
+        oil_relative_permeability_gas = _compute_killough_scanning_curve(
+            saturation=gas_saturation_array,
+            drainage_curve_value=oil_relative_permeability_gas_drainage,
+            imbibition_curve_value=oil_relative_permeability_gas_imbibition,
+            reversal_saturation=gas_reversal_saturation_array,
+            maximum_historical_saturation=maximum_gas_saturation_array,
+            is_imbibition=gas_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
+        )
+        oil_relperm_endpoint = self.get_oil_relperm_endpoint()
+
+        # Three-phase oil mixing rule - chain rule
+        three_phase_mixing_rule = typing.cast(MixingRule, self.mixing_rule)
+        mixing_rule_partial_derivatives = get_mixing_rule_partial_derivatives(
+            rule=three_phase_mixing_rule,
+            kro_w=oil_relative_permeability_water,
+            kro_g=oil_relative_permeability_gas,
+            krw=water_relative_permeability,
+            krg=gas_relative_permeability,
+            kro_endpoint=oil_relperm_endpoint,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
             epsilon=c.FINITE_DIFFERENCE_EPSILON,
         )
 
-        d_kro_d_sw = (
-            derivs["d_kro_d_kro_w"] * d_kro_w_d_sw + derivs["d_kro_d_sw_explicit"]
+        oil_relative_permeability_derivative_water = (
+            mixing_rule_partial_derivatives["d_kro_d_kro_w"]
+            * oil_relative_permeability_water_derivative
+            + mixing_rule_partial_derivatives["d_kro_d_sw_explicit"]
         )
-        d_kro_d_so = derivs["d_kro_d_so_explicit"]
-        d_kro_d_sg = (
-            derivs["d_kro_d_kro_g"] * d_kro_g_d_sg + derivs["d_kro_d_sg_explicit"]
+        oil_relative_permeability_derivative_oil = mixing_rule_partial_derivatives[
+            "d_kro_d_so_explicit"
+        ]
+        oil_relative_permeability_derivative_gas = (
+            mixing_rule_partial_derivatives["d_kro_d_kro_g"]
+            * oil_relative_permeability_gas_derivative
+            + mixing_rule_partial_derivatives["d_kro_d_sg_explicit"]
         )
 
         if is_scalar:
 
-            def _s(x: FloatOrArray) -> float:
-                return float(np.atleast_1d(x).flat[0])
+            def _extract_scalar(value: FloatOrArray) -> float:
+                return float(np.atleast_1d(value).flat[0])
 
             return RelativePermeabilityDerivatives(
-                dKrw_dSw=_s(d_krw_d_sw),
-                dKro_dSw=_s(d_kro_d_sw),
+                dKrw_dSw=_extract_scalar(water_relative_permeability_derivative),
+                dKro_dSw=_extract_scalar(oil_relative_permeability_derivative_water),
                 dKrg_dSw=0.0,
                 dKrw_dSo=0.0,
-                dKro_dSo=_s(d_kro_d_so),
+                dKro_dSo=_extract_scalar(oil_relative_permeability_derivative_oil),
                 dKrg_dSo=0.0,
                 dKrw_dSg=0.0,
-                dKro_dSg=_s(d_kro_d_sg),
-                dKrg_dSg=_s(d_krg_d_sg),
+                dKro_dSg=_extract_scalar(oil_relative_permeability_derivative_gas),
+                dKrg_dSg=_extract_scalar(gas_relative_permeability_derivative),
             )
 
         return RelativePermeabilityDerivatives(
-            dKrw_dSw=d_krw_d_sw,
-            dKro_dSw=d_kro_d_sw,
+            dKrw_dSw=water_relative_permeability_derivative,
+            dKro_dSw=oil_relative_permeability_derivative_water,
             dKrg_dSw=zeros.copy(),
             dKrw_dSo=zeros.copy(),
-            dKro_dSo=d_kro_d_so,
+            dKro_dSo=oil_relative_permeability_derivative_oil,
             dKrg_dSo=zeros.copy(),
             dKrw_dSg=zeros.copy(),
-            dKro_dSg=d_kro_d_sg,
-            dKrg_dSg=d_krg_d_sg,
+            dKro_dSg=oil_relative_permeability_derivative_gas,
+            dKrg_dSg=gas_relative_permeability_derivative,
         )
 
 
@@ -1670,8 +2051,8 @@ class KilloughCapillaryPressureModel(
 
     def _parse_hysteresis_kwargs(
         self,
-        sw: npt.NDArray,
-        sg: npt.NDArray,
+        water_saturation_array: npt.NDArray,
+        gas_saturation_array: npt.NDArray,
         max_water_saturation: typing.Optional[FloatOrArray],
         max_gas_saturation: typing.Optional[FloatOrArray],
         water_imbibition_flag: typing.Optional[typing.Union[bool, npt.NDArray]],
@@ -1687,8 +2068,8 @@ class KilloughCapillaryPressureModel(
         When all history arguments are `None` the method returns arrays that
         replicate the primary-drainage state (no-hysteresis fallback).
 
-        :param sw: Broadcast-ready water saturation array.
-        :param sg: Broadcast-ready gas saturation array.
+        :param water_saturation_array: Broadcast-ready water saturation array.
+        :param gas_saturation_array: Broadcast-ready gas saturation array.
         :param max_water_saturation: Historical maximum water saturation or `None`.
         :param max_gas_saturation: Historical maximum gas saturation or `None`.
         :param water_imbibition_flag: Per-cell oil-water imbibition flag or `None`.
@@ -1707,32 +2088,59 @@ class KilloughCapillaryPressureModel(
             and gas_imbibition_flag is not None
         )
         if use_hysteresis:
-            sw_max = np.atleast_1d(np.asarray(max_water_saturation, dtype=np.float64))
-            sg_max = np.atleast_1d(np.asarray(max_gas_saturation, dtype=np.float64))
-            sw_imb = np.atleast_1d(np.asarray(water_imbibition_flag, dtype=np.float64))
-            sg_imb = np.atleast_1d(np.asarray(gas_imbibition_flag, dtype=np.float64))
-            sw_rev = (
+            maximum_water_saturation_array = np.atleast_1d(
+                np.asarray(max_water_saturation, dtype=np.float64)
+            )
+            maximum_gas_saturation_array = np.atleast_1d(
+                np.asarray(max_gas_saturation, dtype=np.float64)
+            )
+            water_imbibition_flag_array = np.atleast_1d(
+                np.asarray(water_imbibition_flag, dtype=np.float64)
+            )
+            gas_imbibition_flag_array = np.atleast_1d(
+                np.asarray(gas_imbibition_flag, dtype=np.float64)
+            )
+            water_reversal_saturation_array = (
                 np.atleast_1d(np.asarray(water_reversal_saturation, dtype=np.float64))
                 if water_reversal_saturation is not None
-                else sw_max.copy()
+                else maximum_water_saturation_array.copy()
             )
-            sg_rev = (
+            gas_reversal_saturation_array = (
                 np.atleast_1d(np.asarray(gas_reversal_saturation, dtype=np.float64))
                 if gas_reversal_saturation is not None
-                else sg_max.copy()
+                else maximum_gas_saturation_array.copy()
             )
         else:
-            sw_max = sw.copy()
-            sg_max = sg.copy()
-            sw_imb = np.zeros_like(sw)
-            sg_imb = np.zeros_like(sg)
-            sw_rev = sw.copy()
-            sg_rev = sg.copy()
+            maximum_water_saturation_array = water_saturation_array.copy()
+            maximum_gas_saturation_array = gas_saturation_array.copy()
+            water_imbibition_flag_array = np.zeros_like(water_saturation_array)
+            gas_imbibition_flag_array = np.zeros_like(gas_saturation_array)
+            water_reversal_saturation_array = water_saturation_array.copy()
+            gas_reversal_saturation_array = gas_saturation_array.copy()
 
-        sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev = np.broadcast_arrays(
-            sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev
+        (
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
+        ) = np.broadcast_arrays(
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
         )
-        return sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev
+        return (
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
+        )
 
     def get_capillary_pressures(
         self,
@@ -1757,9 +2165,9 @@ class KilloughCapillaryPressureModel(
         When the saturation-history keyword arguments are absent the method
         returns primary drainage Pc values.
 
-        :param water_saturation: Water saturation (fraction, 0-1) — scalar or array.
-        :param oil_saturation: Oil saturation (fraction, 0-1) — scalar or array.
-        :param gas_saturation: Gas saturation (fraction, 0-1) — scalar or array.
+        :param water_saturation: Water saturation (fraction, 0-1) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction, 0-1) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction, 0-1) - scalar or array.
         :param max_water_saturation: Historical maximum water saturation per cell.
         :param max_gas_saturation: Historical maximum gas saturation per cell.
         :param water_imbibition_flag: Per-cell oil-water imbibition flag (1 / 0),
@@ -1775,61 +2183,106 @@ class KilloughCapillaryPressureModel(
             `"gas_oil"`.
         """
         is_scalar = np.isscalar(water_saturation)
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
-        sw, so, sg = np.broadcast_arrays(sw, so, sg)
-
-        sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev = self._parse_hysteresis_kwargs(
-            sw,
-            sg,
-            max_water_saturation,
-            max_gas_saturation,
-            water_imbibition_flag,
-            gas_imbibition_flag,
-            water_reversal_saturation,
-            gas_reversal_saturation,
+        water_saturation_array = np.atleast_1d(
+            np.asarray(water_saturation, dtype=np.float64)
+        )
+        oil_saturation_array = np.atleast_1d(
+            np.asarray(oil_saturation, dtype=np.float64)
+        )
+        gas_saturation_array = np.atleast_1d(
+            np.asarray(gas_saturation, dtype=np.float64)
+        )
+        water_saturation_array, oil_saturation_array, gas_saturation_array = (
+            np.broadcast_arrays(
+                water_saturation_array, oil_saturation_array, gas_saturation_array
+            )
         )
 
-        ow_drain = self.oil_water_drainage_table
-        ow_imb = self.oil_water_imbibition_table or ow_drain
-        go_drain = self.gas_oil_drainage_table
-        go_imb = self.gas_oil_imbibition_table or go_drain
+        (
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
+        ) = self._parse_hysteresis_kwargs(
+            water_saturation_array=water_saturation_array,
+            gas_saturation_array=gas_saturation_array,
+            max_water_saturation=max_water_saturation,
+            max_gas_saturation=max_gas_saturation,
+            water_imbibition_flag=water_imbibition_flag,
+            gas_imbibition_flag=gas_imbibition_flag,
+            water_reversal_saturation=water_reversal_saturation,
+            gas_reversal_saturation=gas_reversal_saturation,
+        )
+
+        oil_water_drainage_table = self.oil_water_drainage_table
+        oil_water_imbibition_table = (
+            self.oil_water_imbibition_table or oil_water_drainage_table
+        )
+        gas_oil_drainage_table = self.gas_oil_drainage_table
+        gas_oil_imbibition_table = (
+            self.gas_oil_imbibition_table or gas_oil_drainage_table
+        )
 
         # Oil-water Pc: scan over water saturation
-        pcow_drain = _ow_pc(ow_drain, sw, so, sg, **kwargs)
-        pcow_imb = _ow_pc(ow_imb, sw, so, sg, **kwargs)
-        pcow = _killough_interpolation(
-            sw,
-            pcow_drain,
-            pcow_imb,
-            sw_rev,
-            sw_max,
-            sw_imb,
-            exponent=self.scanning_interpolation_exponent,
+        oil_water_capillary_pressure_drainage = _get_oil_water_capillary_pressure(
+            oil_water_capillary_pressure_table=oil_water_drainage_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
+        )
+        oil_water_capillary_pressure_imbibition = _get_oil_water_capillary_pressure(
+            oil_water_capillary_pressure_table=oil_water_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
+        )
+        oil_water_capillary_pressure = _compute_killough_scanning_curve(
+            saturation=water_saturation_array,
+            drainage_curve_value=oil_water_capillary_pressure_drainage,
+            imbibition_curve_value=oil_water_capillary_pressure_imbibition,
+            reversal_saturation=water_reversal_saturation_array,
+            maximum_historical_saturation=maximum_water_saturation_array,
+            is_imbibition=water_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
 
         # Gas-oil Pc: scan over gas saturation
-        pcgo_drain = _go_pc(go_drain, sw, so, sg, **kwargs)
-        pcgo_imb = _go_pc(go_imb, sw, so, sg, **kwargs)
-        pcgo = _killough_interpolation(
-            sg,
-            pcgo_drain,
-            pcgo_imb,
-            sg_rev,
-            sg_max,
-            sg_imb,
-            exponent=self.scanning_interpolation_exponent,
+        gas_oil_capillary_pressure_drainage = _get_gas_oil_capillary_pressure(
+            gas_oil_capillary_pressure_table=gas_oil_drainage_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
+        )
+        gas_oil_capillary_pressure_imbibition = _get_gas_oil_capillary_pressure(
+            gas_oil_capillary_pressure_table=gas_oil_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
+        )
+        gas_oil_capillary_pressure = _compute_killough_scanning_curve(
+            saturation=gas_saturation_array,
+            drainage_curve_value=gas_oil_capillary_pressure_drainage,
+            imbibition_curve_value=gas_oil_capillary_pressure_imbibition,
+            reversal_saturation=gas_reversal_saturation_array,
+            maximum_historical_saturation=maximum_gas_saturation_array,
+            is_imbibition=gas_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
 
         if is_scalar:
             return CapillaryPressures(
-                oil_water=float(np.atleast_1d(pcow).flat[0]),
-                gas_oil=float(np.atleast_1d(pcgo).flat[0]),
+                oil_water=float(np.atleast_1d(oil_water_capillary_pressure).flat[0]),
+                gas_oil=float(np.atleast_1d(gas_oil_capillary_pressure).flat[0]),
             )
         return CapillaryPressures(
-            oil_water=pcow,  # type: ignore[typeddict-item]
-            gas_oil=pcgo,  # type: ignore[typeddict-item]
+            oil_water=oil_water_capillary_pressure,  # type: ignore[typeddict-item]
+            gas_oil=gas_oil_capillary_pressure,  # type: ignore[typeddict-item]
         )
 
     def get_capillary_pressure_derivatives(
@@ -1854,14 +2307,14 @@ class KilloughCapillaryPressureModel(
 
         Returns the following non-zero entries.
 
-        - `dPcow_dSw`: dPcow/dSw — oil-water Pc scanned over Sw.
-        - `dPcow_dSo`: zero — Pcow does not depend directly on So in this model.
-        - `dPcgo_dSg`: dPcgo/dSg — gas-oil Pc scanned over Sg.
-        - `dPcgo_dSo`: zero — Pcgo does not depend directly on So.
+        - `dPcow_dSw`: dPcow/dSw - oil-water Pc scanned over Sw.
+        - `dPcow_dSo`: zero - Pcow does not depend directly on So in this model.
+        - `dPcgo_dSg`: dPcgo/dSg - gas-oil Pc scanned over Sg.
+        - `dPcgo_dSo`: zero - Pcgo does not depend directly on So.
 
-        :param water_saturation: Water saturation (fraction, 0-1) — scalar or array.
-        :param oil_saturation: Oil saturation (fraction, 0-1) — scalar or array.
-        :param gas_saturation: Gas saturation (fraction, 0-1) — scalar or array.
+        :param water_saturation: Water saturation (fraction, 0-1) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction, 0-1) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction, 0-1) - scalar or array.
         :param max_water_saturation: Historical maximum water saturation per cell,
             or `None` to disable hysteresis.
         :param max_gas_saturation: Historical maximum gas saturation per cell,
@@ -1877,75 +2330,156 @@ class KilloughCapillaryPressureModel(
             `dPcow_dSw`, `dPcow_dSo`, `dPcgo_dSg`, and `dPcgo_dSo`.
         """
         is_scalar = np.isscalar(water_saturation)
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
-        sw, so, sg = np.broadcast_arrays(sw, so, sg)
-        zeros = np.zeros_like(sw)
+        water_saturation_array = np.atleast_1d(
+            np.asarray(water_saturation, dtype=np.float64)
+        )
+        oil_saturation_array = np.atleast_1d(
+            np.asarray(oil_saturation, dtype=np.float64)
+        )
+        gas_saturation_array = np.atleast_1d(
+            np.asarray(gas_saturation, dtype=np.float64)
+        )
+        water_saturation_array, oil_saturation_array, gas_saturation_array = (
+            np.broadcast_arrays(
+                water_saturation_array, oil_saturation_array, gas_saturation_array
+            )
+        )
+        zeros = np.zeros_like(water_saturation_array)
 
-        sw_max, sg_max, sw_imb, sg_imb, sw_rev, sg_rev = self._parse_hysteresis_kwargs(
-            sw,
-            sg,
-            max_water_saturation,
-            max_gas_saturation,
-            water_imbibition_flag,
-            gas_imbibition_flag,
-            water_reversal_saturation,
-            gas_reversal_saturation,
+        (
+            maximum_water_saturation_array,
+            maximum_gas_saturation_array,
+            water_imbibition_flag_array,
+            gas_imbibition_flag_array,
+            water_reversal_saturation_array,
+            gas_reversal_saturation_array,
+        ) = self._parse_hysteresis_kwargs(
+            water_saturation_array=water_saturation_array,
+            gas_saturation_array=gas_saturation_array,
+            max_water_saturation=max_water_saturation,
+            max_gas_saturation=max_gas_saturation,
+            water_imbibition_flag=water_imbibition_flag,
+            gas_imbibition_flag=gas_imbibition_flag,
+            water_reversal_saturation=water_reversal_saturation,
+            gas_reversal_saturation=gas_reversal_saturation,
         )
 
-        ow_drain = self.oil_water_drainage_table
-        ow_imb = self.oil_water_imbibition_table or ow_drain
-        go_drain = self.gas_oil_drainage_table
-        go_imb = self.gas_oil_imbibition_table or go_drain
+        oil_water_drainage_table = self.oil_water_drainage_table
+        oil_water_imbibition_table = (
+            self.oil_water_imbibition_table or oil_water_drainage_table
+        )
+        gas_oil_drainage_table = self.gas_oil_drainage_table
+        gas_oil_imbibition_table = (
+            self.gas_oil_imbibition_table or gas_oil_drainage_table
+        )
 
         # Oil-water
-        pcow_drain = _ow_pc(ow_drain, sw, so, sg, **kwargs)
-        pcow_imb = _ow_pc(ow_imb, sw, so, sg, **kwargs)
-        d_pcow_drain_d_sw = _ow_pc_deriv(ow_drain, sw, so, sg, **kwargs)
-        d_pcow_imb_d_sw = _ow_pc_deriv(ow_imb, sw, so, sg, **kwargs)
+        oil_water_capillary_pressure_drainage = _get_oil_water_capillary_pressure(
+            oil_water_capillary_pressure_table=oil_water_drainage_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
+        )
+        oil_water_capillary_pressure_imbibition = _get_oil_water_capillary_pressure(
+            oil_water_capillary_pressure_table=oil_water_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
+        )
+        oil_water_capillary_pressure_drainage_derivative = (
+            _get_oil_water_capillary_pressure_derivative(
+                oil_water_capillary_pressure_table=oil_water_drainage_table,
+                water_saturation=water_saturation_array,
+                oil_saturation=oil_saturation_array,
+                gas_saturation=gas_saturation_array,
+                **kwargs,
+            )
+        )
+        oil_water_capillary_pressure_imbibition_derivative = (
+            _get_oil_water_capillary_pressure_derivative(
+                oil_water_capillary_pressure_table=oil_water_imbibition_table,
+                water_saturation=water_saturation_array,
+                oil_saturation=oil_saturation_array,
+                gas_saturation=gas_saturation_array,
+                **kwargs,
+            )
+        )
 
-        d_pcow_d_sw = _killough_interpolation_derivative(
-            sw,
-            pcow_drain,
-            pcow_imb,
-            d_pcow_drain_d_sw,
-            d_pcow_imb_d_sw,
-            sw_rev,
-            sw_max,
-            sw_imb,
-            exponent=self.scanning_interpolation_exponent,
+        oil_water_capillary_pressure_derivative = _compute_killough_scanning_curve_derivative(
+            saturation=water_saturation_array,
+            drainage_curve_value=oil_water_capillary_pressure_drainage,
+            imbibition_curve_value=oil_water_capillary_pressure_imbibition,
+            drainage_curve_derivative=oil_water_capillary_pressure_drainage_derivative,
+            imbibition_curve_derivative=oil_water_capillary_pressure_imbibition_derivative,
+            reversal_saturation=water_reversal_saturation_array,
+            maximum_historical_saturation=maximum_water_saturation_array,
+            is_imbibition=water_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
 
         # Gas-oil
-        pcgo_drain = _go_pc(go_drain, sw, so, sg, **kwargs)
-        pcgo_imb = _go_pc(go_imb, sw, so, sg, **kwargs)
-        d_pcgo_drain_d_sg = _go_pc_deriv(go_drain, sw, so, sg, **kwargs)
-        d_pcgo_imb_d_sg = _go_pc_deriv(go_imb, sw, so, sg, **kwargs)
+        gas_oil_capillary_pressure_drainage = _get_gas_oil_capillary_pressure(
+            gas_oil_capillary_pressure_table=gas_oil_drainage_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
+        )
+        gas_oil_capillary_pressure_imbibition = _get_gas_oil_capillary_pressure(
+            gas_oil_capillary_pressure_table=gas_oil_imbibition_table,
+            water_saturation=water_saturation_array,
+            oil_saturation=oil_saturation_array,
+            gas_saturation=gas_saturation_array,
+            **kwargs,
+        )
+        gas_oil_capillary_pressure_drainage_derivative = (
+            _get_gas_oil_capillary_pressure_derivative(
+                gas_oil_capillary_pressure_table=gas_oil_drainage_table,
+                water_saturation=water_saturation_array,
+                oil_saturation=oil_saturation_array,
+                gas_saturation=gas_saturation_array,
+                **kwargs,
+            )
+        )
+        gas_oil_capillary_pressure_imbibition_derivative = (
+            _get_gas_oil_capillary_pressure_derivative(
+                gas_oil_capillary_pressure_table=gas_oil_imbibition_table,
+                water_saturation=water_saturation_array,
+                oil_saturation=oil_saturation_array,
+                gas_saturation=gas_saturation_array,
+                **kwargs,
+            )
+        )
 
-        d_pcgo_d_sg = _killough_interpolation_derivative(
-            sg,
-            pcgo_drain,
-            pcgo_imb,
-            d_pcgo_drain_d_sg,
-            d_pcgo_imb_d_sg,
-            sg_rev,
-            sg_max,
-            sg_imb,
-            exponent=self.scanning_interpolation_exponent,
+        gas_oil_capillary_pressure_derivative = _compute_killough_scanning_curve_derivative(
+            saturation=gas_saturation_array,
+            drainage_curve_value=gas_oil_capillary_pressure_drainage,
+            imbibition_curve_value=gas_oil_capillary_pressure_imbibition,
+            drainage_curve_derivative=gas_oil_capillary_pressure_drainage_derivative,
+            imbibition_curve_derivative=gas_oil_capillary_pressure_imbibition_derivative,
+            reversal_saturation=gas_reversal_saturation_array,
+            maximum_historical_saturation=maximum_gas_saturation_array,
+            is_imbibition=gas_imbibition_flag_array,
+            scanning_exponent=self.scanning_interpolation_exponent,
         )
 
         if is_scalar:
             return CapillaryPressureDerivatives(
-                dPcow_dSw=float(np.atleast_1d(d_pcow_d_sw).flat[0]),
+                dPcow_dSw=float(
+                    np.atleast_1d(oil_water_capillary_pressure_derivative).flat[0]
+                ),
                 dPcow_dSo=0.0,
-                dPcgo_dSg=float(np.atleast_1d(d_pcgo_d_sg).flat[0]),
+                dPcgo_dSg=float(
+                    np.atleast_1d(gas_oil_capillary_pressure_derivative).flat[0]
+                ),
                 dPcgo_dSo=0.0,
             )
 
         return CapillaryPressureDerivatives(
-            dPcow_dSw=d_pcow_d_sw,
+            dPcow_dSw=oil_water_capillary_pressure_derivative,
             dPcow_dSo=zeros.copy(),
-            dPcgo_dSg=d_pcgo_d_sg,
+            dPcgo_dSg=gas_oil_capillary_pressure_derivative,
             dPcgo_dSo=zeros.copy(),
         )
