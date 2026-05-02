@@ -413,7 +413,7 @@ def apply_structural_dip(
          ↑ (+y)
          |
          |
-    West ←─────┼─────→ East (90°)
+    West ←─────┼─────-> East (90°)
     (270°)  |    (+x)
          |
          ↓ (-y)

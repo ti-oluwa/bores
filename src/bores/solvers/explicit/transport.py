@@ -1623,7 +1623,7 @@ def apply_updates(
 
                 dt_over_pv = time_step_in_days / cell_pore_volume
 
-                # Water mass update → Sw_new
+                # Water mass update -> Sw_new
                 old_water_mass = old_water_density * old_water_saturation
                 new_water_mass = old_water_mass + dt_over_pv * (
                     net_water_mass_flux_grid[i, j, k]

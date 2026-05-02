@@ -1206,7 +1206,7 @@ def serialize_ndarray(
     """
     Smart serializer for numpy arrays.
 
-    Tries encodings in order: `scalar` → `layered` → `sparse` → `dense`.
+    Tries encodings in order: `scalar` -> `layered` -> `sparse` -> `dense`.
     Falls back to `dense` (base64 raw bytes) when no compression applies.
     Ensure that all encodings are exact and there are no approximation.
 
@@ -1224,7 +1224,7 @@ def serialize_ndarray(
 
     if _sniff_scalar(a):
         # Store the fill value as a Python scalar so JSON/orjson can encode it.
-        # Use item() to convert numpy scalar → Python native.
+        # Use item() to convert numpy scalar -> Python native.
         return {**base, "encoding": "scalar", "value": a.flat[0].item()}
 
     layered = _sniff_layered(a)

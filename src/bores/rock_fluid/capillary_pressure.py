@@ -589,7 +589,7 @@ class ThreePhaseCapillaryPressureTable(
         # Oil-water derivatives
         if oil_water_table.wetting_phase == FluidPhase.WATER:
             if oil_water_table.reference_phase == "wetting":
-                # Table indexed by Sw (wetting phase) → derivative is dPcow/dSw
+                # Table indexed by Sw (wetting phase) -> derivative is dPcow/dSw
                 d_pcow_d_sw = oil_water_table.get_capillary_pressure_derivative(
                     wetting_saturation=water_saturation,  # type: ignore[arg-type]
                     non_wetting_saturation=oil_saturation,  # type: ignore[arg-type]
@@ -597,7 +597,7 @@ class ThreePhaseCapillaryPressureTable(
                 d_pcow_d_so = zero
             else:
                 # reference_phase="non_wetting" and wetting_phase=WATER means
-                # table is indexed by So (non-wetting phase) → derivative is dPcow/dSo
+                # table is indexed by So (non-wetting phase) -> derivative is dPcow/dSo
                 d_pcow_d_sw = zero
                 d_pcow_d_so = oil_water_table.get_capillary_pressure_derivative(
                     wetting_saturation=water_saturation,  # type: ignore[arg-type]
@@ -609,7 +609,7 @@ class ThreePhaseCapillaryPressureTable(
             # ("non_wetting").  Either way the derivative is with respect to
             # whichever saturation is the reference axis.
             if oil_water_table.reference_phase == "wetting":
-                # Table indexed by So → derivative is dPcow/dSo
+                # Table indexed by So -> derivative is dPcow/dSo
                 d_pcow_d_sw = zero
                 d_pcow_d_so = oil_water_table.get_capillary_pressure_derivative(
                     wetting_saturation=oil_saturation,  # type: ignore[arg-type]
@@ -618,7 +618,7 @@ class ThreePhaseCapillaryPressureTable(
             else:
                 # reference_phase="non_wetting" and wetting_phase=OIL means the
                 # table is indexed by water saturation (the non-wetting phase here
-                # is water) → derivative is dPcow/dSw
+                # is water) -> derivative is dPcow/dSw
                 d_pcow_d_sw = oil_water_table.get_capillary_pressure_derivative(
                     wetting_saturation=oil_saturation,  # type: ignore[arg-type]
                     non_wetting_saturation=water_saturation,  # type: ignore[arg-type]
@@ -628,14 +628,14 @@ class ThreePhaseCapillaryPressureTable(
         # Gas-oil derivatives
         if gas_oil_table.wetting_phase == FluidPhase.OIL:
             if gas_oil_table.reference_phase == "wetting":
-                # Table indexed by So → derivative is dPcgo/dSo
+                # Table indexed by So -> derivative is dPcgo/dSo
                 d_pcgo_d_so = gas_oil_table.get_capillary_pressure_derivative(
                     wetting_saturation=oil_saturation,  # type: ignore[arg-type]
                     non_wetting_saturation=gas_saturation,  # type: ignore[arg-type]
                 )
                 d_pcgo_d_sg = zero
             else:
-                # reference_phase="non_wetting" → table indexed by Sg
+                # reference_phase="non_wetting" -> table indexed by Sg
                 d_pcgo_d_so = zero
                 d_pcgo_d_sg = gas_oil_table.get_capillary_pressure_derivative(
                     wetting_saturation=oil_saturation,  # type: ignore[arg-type]

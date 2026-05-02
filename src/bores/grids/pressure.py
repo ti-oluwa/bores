@@ -31,7 +31,7 @@ def _gradient_from_specific_gravity(specific_gravity: float) -> float:
 def _gradient_from_api(api_gravity: float) -> float:
     """
     Convert oil API gravity to pressure gradient (psi/ft).
-    API gravity → specific gravity: SG = 141.5 / (API + 131.5)
+    API gravity -> specific gravity: SG = 141.5 / (API + 131.5)
     """
     sg = 141.5 / (api_gravity + 131.5)
     return _gradient_from_specific_gravity(sg)

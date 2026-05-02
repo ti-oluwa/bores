@@ -156,8 +156,8 @@ class PVTData(StoreSerializable):
     ] = None
     """
     Bubble point pressures (psi). Oil phase only.
-    - 1D shape `(n_t,)`    → Pb(T)
-    - 2D shape `(n_rs, n_t)` → Pb(Rs, T); requires `solution_gas_to_oil_ratios`
+    - 1D shape `(n_t,)`    -> Pb(T)
+    - 2D shape `(n_rs, n_t)` -> Pb(Rs, T); requires `solution_gas_to_oil_ratios`
     """
 
     solution_gas_to_oil_ratios: typing.Optional[OneDimensionalGrid] = None

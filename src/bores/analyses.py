@@ -3988,7 +3988,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             f"step_size={step_size_seconds:.2f}s"
         )
 
-        # Upper bound for decline rate: 2.0 per year → 2.0/timesteps_per_year per timestep
+        # Upper bound for decline rate: 2.0 per year -> 2.0/timesteps_per_year per timestep
         max_decline_per_timestep = max_decline_per_year / timesteps_per_year
 
         # Perform non-linear curve fitting

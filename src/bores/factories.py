@@ -470,10 +470,10 @@ def reservoir_model(
     oil_api_gravity_grid = build_oil_api_gravity_grid(oil_specific_gravity_grid)
 
     # Computing Solution GOR and bubble point pressure, we have four cases:
-    #  (a) Both provided            → use as-is
-    #  (b) Pb provided, Rs missing  → derive Rs from Pb using correlations
-    #  (c) Rs provided, Pb missing  → derive Pb from Rs (oil_pvt_table first)
-    #  (d) Neither provided         → estimate using iterative coupled solver
+    #  (a) Both provided            -> use as-is
+    #  (b) Pb provided, Rs missing  -> derive Rs from Pb using correlations
+    #  (c) Rs provided, Pb missing  -> derive Pb from Rs (oil_pvt_table first)
+    #  (d) Neither provided         -> estimate using iterative coupled solver
     #      (estimate_solution_gor handles T variation; Standing alone does not)
     if (
         solution_gas_to_oil_ratio_grid is None

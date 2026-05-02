@@ -62,23 +62,19 @@ def line_search(
     saturation constraints.
 
     :param saturation_vector: Current packed [Sw, Sg, ...] iterate.
-    :param saturation_change: Full Newton step δS (already damped by
-        maximum_saturation_change).
-    :param residual_norm_0: ||R(S_k)|| at the current iterate — used as the
-        reference for the Armijo condition.
+    :param saturation_change: Full Newton step δS (already damped by maximum_saturation_change).
+    :param residual_norm_0: ||R(S_k)|| at the current iterate.
+        Used as the reference for the Armijo condition.
     :param compute_residual_norm_fn: Callable that accepts a trial saturation
         vector and returns ||R||. Must handle projection internally or caller
         must project before passing.
-    :param project_fn: Projects a trial vector onto the feasible simplex
-        (Sw>=0, Sg>=0, Sw+Sg<=1).
+    :param project_fn: Projects a trial vector onto the feasible simplex (Sw>=0, Sg>=0, Sw+Sg<=1).
     :param maximum_cuts: Maximum number of step-size reductions.
     :param sufficient_decrease: Armijo constant c₁. Condition:
         ||R(S+α·δS)|| < (1 - c₁·α)·||R(S)||. Use a small value (1e-4) so the
         condition is easy to satisfy initially.
-    :param min_step: Minimum step size before giving up and accepting the best
-        found.
-    :return: Tuple of (projected trial saturation vector, accepted step size α,
-        ||R|| at the accepted step).
+    :param min_step: Minimum step size before giving up and accepting the best found.
+    :return: Tuple of (projected trial saturation vector, accepted step size α, ||R|| at the accepted step).
     """
     alpha_prev = 0.0
     norm_prev = residual_norm_0

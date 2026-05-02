@@ -14,7 +14,12 @@ from bores.errors import PreconditionerError, SolverError
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
-from bores.solvers.base import Solution, solve_linear_system, to_1D_index
+from bores.solvers.base import (
+    Solution,
+    scale_linear_system,
+    solve_linear_system,
+    to_1D_index,
+)
 from bores.solvers.rates import WellRates
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
@@ -189,16 +194,15 @@ def solve_pressure(
         dtype=dtype,  # type: ignore
     )
 
-    # Scale Jacobian and residual by inverse diagonal to improve conditioning for iterative solver
-    D = np.abs(jacobian.diagonal())
-    D = np.where(D > 0, D, 1.0)
-    jacobian = jacobian / D[:, None]
-    residual_vector = residual_vector / D
-
     # Solve the linear system A·pⁿ⁺¹ = b
     try:
+        J_csr, residual_vector, column_scaling_vector = scale_linear_system(
+            jacobian_csr=jacobian.tocsr(),
+            residual_vector=residual_vector,
+            methods="diagonal",
+        )
         pressure_vector, _ = solve_linear_system(
-            A_csr=jacobian.tocsr(),
+            A_csr=J_csr,
             b=residual_vector,
             rtol=config.pressure_convergence_tolerance,
             maximum_iterations=config.maximum_solver_iterations,
@@ -206,6 +210,9 @@ def solve_pressure(
             preconditioner=config.pressure_preconditioner,
             fallback_to_direct=True,
         )
+        if column_scaling_vector is not None:
+            pressure_vector = pressure_vector * column_scaling_vector
+
     except (SolverError, PreconditionerError) as exc:
         logger.error("Pressure solve failed at time step %d: %s", time_step, exc)
         return Solution(
@@ -427,10 +434,10 @@ def assemble_flux_contributions(
     :param cell_count_x: Number of cells in x-direction (real grid, no ghost cells)
     :param cell_count_y: Number of cells in y-direction (real grid, no ghost cells)
     :param cell_count_z: Number of cells in z-direction (real grid, no ghost cells)
-    :param pressure_boundaries: Dict mapping ghost-cell padded-1D-index → boundary pressure (psi).
+    :param pressure_boundaries: Dict mapping ghost-cell padded-1D-index -> boundary pressure (psi).
         Keyed on 1D indices in the (cell_count_x+2, cell_count_y+2, cell_count_z+2) padded space.
         Represents Dirichlet (fixed pressure) boundary conditions.
-    :param flux_boundaries: Dict mapping ghost-cell padded-1D-index → boundary flux (ft³/day).
+    :param flux_boundaries: Dict mapping ghost-cell padded-1D-index -> boundary flux (ft³/day).
         Keyed on 1D indices in the (cell_count_x+2, cell_count_y+2, cell_count_z+2) padded space.
         Represents Neumann (fixed flux) boundary conditions.
     :param current_pressure_grid: Current oil pressure grid (psi), shape (nx, ny, nz)
@@ -490,9 +497,9 @@ def assemble_flux_contributions(
     thread_rhs_term = np.zeros((cell_count_x, max_entries_per_i_slice), dtype=dtype)
 
     # Boundary classification flags and data for singleton faces.
-    # is_dirichlet: True  → Dirichlet BC (diagonal += T, rhs += T*p_bc + rhs_term)
-    # is_neumann:   True  → Neumann BC  (rhs += flux_bc only)
-    # (Both False → interior-interior pair)
+    # is_dirichlet: True  -> Dirichlet BC (diagonal += T, rhs += T*p_bc + rhs_term)
+    # is_neumann:   True  -> Neumann BC  (rhs += flux_bc only)
+    # (Both False -> interior-interior pair)
     thread_is_dirichlet = np.zeros(
         (cell_count_x, max_entries_per_i_slice), dtype=np.bool_
     )

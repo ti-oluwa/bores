@@ -25,7 +25,7 @@ Grid Coordinate System:
             |  k (z) increases downward (into the page/screen)
             |  /
             | /
-            |/________→ i (x) increases
+            |/________-> i (x) increases
           (0,0,0)
 ```
 

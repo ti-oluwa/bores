@@ -586,12 +586,12 @@ def _get_index_from_group_name(name: str) -> typing.Optional[int]:
 DataStore with flattened entry layout.
 
 **Encoding contract**
-Path segments are percent-encoded so that the separator character (``→``,
+Path segments are percent-encoded so that the separator character (``->``,
 U+2192) and the escape character (``%``) can never appear unescaped in a
 segment.  This makes path encoding injective: two distinct nested paths can
 never produce the same flat key.
 
-    encode: "%" → "%25",  "→" → "%E2%86%92"
+    encode: "%" -> "%25",  "->" -> "%E2%86%92"
     decode: reverse of above
 
 **Special value types**
@@ -615,7 +615,7 @@ collide after encoding.
 """
 
 
-_SEP = "\u2192"  # → U+2192  RIGHTWARDS ARROW — path segment separator
+_SEP = "\u2192"  # -> U+2192  RIGHTWARDS ARROW — path segment separator
 _ESC = "%"  # percent   — escape character
 
 _SEP_ENCODED = "%E2%86%92"
@@ -623,7 +623,7 @@ _ESC_ENCODED = "%25"
 
 
 def _encode_segment(s: str) -> str:
-    """Percent-encode `%` and `→` so neither can appear raw in a segment."""
+    """Percent-encode `%` and `->` so neither can appear raw in a segment."""
     return s.replace(_ESC, _ESC_ENCODED).replace(_SEP, _SEP_ENCODED)
 
 
@@ -640,7 +640,7 @@ def _split_path(flat_key: str) -> typing.List[str]:
     return [_decode_segment(s) for s in flat_key.split(_SEP)]
 
 
-_VTYPE_JSON = "json"  # list-of-mappings or arbitrary list/dict → orjson
+_VTYPE_JSON = "json"  # list-of-mappings or arbitrary list/dict -> orjson
 _VTYPE_NONE = "none"  # Python None
 _VTYPE_BOOL = "bool"  # Python bool
 
@@ -707,12 +707,12 @@ def _flatten(
 
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             if not value:
-                # Empty sequence → zero-length dataset
+                # Empty sequence -> zero-length dataset
                 out_arrays[flat_key] = np.empty((0,), dtype=np.int8)
                 continue
 
             if isinstance(value[0], Mapping):
-                # List of mappings → serialise as JSON scalar; not worth
+                # List of mappings -> serialise as JSON scalar; not worth
                 # the complexity of flattening further since these are always
                 # small (well perforations, schedule entries, etc.)
                 out_scalars[flat_key] = orjson.dumps(
@@ -721,7 +721,7 @@ def _flatten(
                 out_vtypes[flat_key] = _VTYPE_JSON
                 continue
 
-            # Homogeneous sequence of scalars/arrays → convert to ndarray
+            # Homogeneous sequence of scalars/arrays -> convert to ndarray
             arr = _sequence_to_ndarray(value, path=flat_key)
             out_arrays[flat_key] = arr
             continue
@@ -803,10 +803,10 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
     ```mermaid
     <root.zarr>/
         entry_0000000000/          ← one group per item
-            <encoded→path>         ← zarr dataset  (numpy arrays)
+            <encoded->path>         ← zarr dataset  (numpy arrays)
             attrs:
-                <encoded→path>     ← scalar values
-                _scalars_encoded→path: value
+                <encoded->path>     ← scalar values
+                _scalars_encoded->path: value
                 _vtypes:           ← type tags for non-trivial scalars
                 _meta:             ← user metadata
                 _index:            ← insertion index
@@ -818,7 +818,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
     ```
 
     All nesting from the original `Serializable.dump(recurse=True)` dict is
-    encoded into flat dataset/attr names using `→`-separated percent-encoded
+    encoded into flat dataset/attr names using `->`-separated percent-encoded
     path segments. No sub-groups are created inside entry groups, so every
     `append` performs exactly `(number of arrays)` `create_dataset` calls
     plus two `group.attrs.update` calls, one for scalars and one for metadata.
@@ -1076,7 +1076,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
 
         root.attrs["count"] = count
         logger.debug(
-            f"{self.__class__.__name__}: dump complete, {count} entries → {self.store!s}"
+            f"{self.__class__.__name__}: dump complete, {count} entries -> {self.store!s}"
         )
         if had_open_handle:
             # Re-open so subsequent operations still work
@@ -1466,7 +1466,7 @@ class HDF5Store(DataStore[SerializableT, h5py.File]):
                 count += 1
             f.attrs["count"] = count
         logger.debug(
-            f"{self.__class__.__name__}: dump complete, {count} entries → {self.filepath}"
+            f"{self.__class__.__name__}: dump complete, {count} entries -> {self.filepath}"
         )
 
         if had_open_handle:

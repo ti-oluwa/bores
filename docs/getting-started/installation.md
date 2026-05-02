@@ -210,7 +210,7 @@ Numba supports three threading layers in order of preference:
 2. **OMP (OpenMP)** - Good performance, widely available
 3. **Workqueue** - Fallback, available on all platforms
 
-**Important**: BORES does not require TBB and will work correctly with any available threading layer. By default, Numba automatically selects the best available option: `tbb → omp → workqueue`.
+**Important**: BORES does not require TBB and will work correctly with any available threading layer. By default, Numba automatically selects the best available option: `tbb -> omp -> workqueue`.
 
 ### Check Your Current Threading Layer
 
@@ -328,7 +328,7 @@ BORES is designed to work reliably with any threading layer. If you want to expl
     import os
     import numba
 
-    # Ensure safe fallback: tbb → omp → workqueue
+    # Ensure safe fallback: tbb -> omp -> workqueue
     os.environ.setdefault("NUMBA_THREADING_LAYER", "default")
 
     # Print what's available

@@ -2741,17 +2741,13 @@ class ThreePhaseRelPermTable(
         """
         Resolve the oil relative permeability at connate water saturation.
 
-        For a normalized table this equals 1.0.  We approximate it as the
+        For a normalized table this equals 1.0. We approximate it as the
         maximum value of the non-wetting (oil) phase kr in the oil-water
         table, which equals kro(Sw=Swc, Sg=0).
 
         :return: kro endpoint scalar.
         """
-        if self.oil_water_table.wetting_phase == FluidPhase.WATER:
-            return float(
-                np.max(self.oil_water_table.non_wetting_phase_relative_permeability)
-            )
-        return float(np.max(self.oil_water_table.wetting_phase_relative_permeability))
+        return self.oil_water_table.get_oil_relperm_endpoint()
 
     def get_relative_permeabilities(
         self,

@@ -1366,7 +1366,7 @@ def _setup_interactive_widgets(
         - `a`       - toggle axes
         - `g`       - toggle grid/cell edges
         - `k`       - toggle colorbar
-        - `1/2/3`   - add/remove X/Y/Z slice plane → drag the orange handle
+        - `1/2/3`   - add/remove X/Y/Z slice plane -> drag the orange handle
         - `b`       - toggle box-crop widget
         - `v`       - cycle view presets (iso / top / front / right)
         - `h`       - toggle help overlay
@@ -1686,9 +1686,9 @@ def _setup_interactive_widgets(
     _HELP_LINES = (
         "  ── Keyboard shortcuts ──────────────────\n"
         "  '1' '2' '3' - Add X / Y / Z slice plane\n"
-        "               → click the orange handle\n"
+        "               -> click the orange handle\n"
         "                 and drag to move it\n"
-        "               → press same key to remove\n"
+        "               -> press same key to remove\n"
         "  'b'         - Box crop (drag grey handles)\n"
         "  'v'         - Cycle views (iso/top/front/side)\n"
         "  '0'         - Reset camera\n"

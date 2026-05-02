@@ -3316,9 +3316,9 @@ def compute_miscibility_transition_factor(
     effective omega for viscosity calculations.
 
     Physical Behavior:
-        - P << MMP: factor → 0 (immiscible, no miscible mixing)
+        - P << MMP: factor -> 0 (immiscible, no miscible mixing)
         - P ≈ MMP: factor ≈ 0.5 (transition zone, partial miscibility)
-        - P >> MMP: factor → 1 (fully miscible, maximum mixing)
+        - P >> MMP: factor -> 1 (fully miscible, maximum mixing)
 
     The transition uses hyperbolic tangent for smooth, physically realistic behavior:
         f(P) = 0.5 * (1 + tanh((P - MMP) / ΔP))
@@ -3392,8 +3392,8 @@ def compute_effective_todd_longstaff_omega(
     Combines the base mixing parameter (omega) with pressure-dependent
     miscibility to get the effective omega for viscosity calculations.
 
-    Below MMP: omega_eff → 0 (immiscible behavior, segregated flow)
-    Above MMP: omega_eff → base_omega (miscible behavior, mixed flow)
+    Below MMP: omega_eff -> 0 (immiscible behavior, segregated flow)
+    Above MMP: omega_eff -> base_omega (miscible behavior, mixed flow)
 
     :param pressure: Current reservoir pressure (psi)
     :param base_omega: Base Todd-Longstaff mixing parameter (0 to 1).

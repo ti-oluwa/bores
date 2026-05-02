@@ -17,6 +17,7 @@ from bores.solvers.base import (
     Solution,
     compute_mobility_grids,
     from_1D_index,
+    scale_linear_system,
     solve_linear_system,
     to_1D_index,
 )
@@ -1877,11 +1878,11 @@ def assemble_flux_contributions(
     dRw/dSw, dRw/dSg, dRg/dSw, dRg/dSg. Every flux stream that appears in
     the residual contributes to all four entries:
 
-      - Water residual R_w = -rho_w * F_w  →  dRw/dS terms
+      - Water residual R_w = -rho_w * F_w  ->  dRw/dS terms
       - Gas residual R_g   = -rho_g * F_g  (free gas)
                            - rho_o * alpha_Rs * F_o  (dissolved gas in oil)
                            - rho_w * alpha_Rsw * F_w  (dissolved gas in water)
-                           →  dRg/dS terms from all three streams
+                           ->  dRg/dS terms from all three streams
 
     Alpha coefficients (alpha_Rs, alpha_Rsw) and densities are arithmetic-averaged
     across the face to eliminate O(1) jumps when the upwind cell switches at a front,
@@ -1999,17 +2000,24 @@ def assemble_flux_contributions(
                 )
 
                 # Water accumulation diagonal: dR_w/dSw = water_density * phi*V/dt
+                water_accumulation_diagonal = water_density_i * accumulation_coefficient
                 all_rows[i, local_ptr] = water_row
                 all_cols[i, local_ptr] = cell_water_column
-                all_vals[i, local_ptr] = water_density_i * accumulation_coefficient
+                all_vals[i, local_ptr] = water_accumulation_diagonal
                 local_ptr += 1
 
                 # Gas accumulation diagonal: dR_g/dSg = (gas_density - oil_density*alpha_Rs) * phi*V/dt
-                all_rows[i, local_ptr] = gas_row
-                all_cols[i, local_ptr] = cell_gas_column
-                all_vals[i, local_ptr] = (
+                # Clamp to a small positive value to prevent negative diagonal
+                # which destabilises iterative solvers when dissolved gas dominates
+                gas_accumulation_diagonal = (
                     gas_density_i - oil_density_i * alpha_solution_gor_i
                 ) * accumulation_coefficient
+                # The diagonal must remain positive for solver stability; if dissolved-gas
+                # term dominates (near/above bubble point) we floor at a small positive value
+                # proportional to the water accumulation term so the scaling stays consistent
+                all_rows[i, local_ptr] = gas_row
+                all_cols[i, local_ptr] = cell_gas_column
+                all_vals[i, local_ptr] = gas_accumulation_diagonal
                 local_ptr += 1
 
                 # Gas-water coupling accumulation:
@@ -3346,13 +3354,12 @@ def solve_transport(
             capillary_pressure_grids=capillary_pressure_grids,
             relative_mobility_grids=relative_mobility_grids,
         )
-        D = np.abs(jacobian.diagonal())
-        D = np.where(D > 0, D, 1.0)
-        jacobian = jacobian / D[:, None]
-        residual_vector = residual_vector / D
 
+        J_csr, residual_vector, column_scaling_vector = scale_linear_system(
+            jacobian_csr=jacobian.tocsr(), residual_vector=residual_vector
+        )
         saturation_change, _ = solve_linear_system(
-            A_csr=jacobian.tocsr(),
+            A_csr=J_csr,
             b=-residual_vector,
             solver=config.transport_solver,
             preconditioner=config.transport_preconditioner,
@@ -3360,6 +3367,8 @@ def solve_transport(
             maximum_iterations=config.maximum_solver_iterations,
             fallback_to_direct=True,
         )
+        if column_scaling_vector is not None:
+            saturation_change = saturation_change * column_scaling_vector
 
         if logger.isEnabledFor(logging.DEBUG):
             linear_residual_norm = float(

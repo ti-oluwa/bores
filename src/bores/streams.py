@@ -386,9 +386,9 @@ class StateStream(typing.Generic[NDimension]):
         When batch is full, flush to store and clear buffer.
 
         Memory pattern:
-            1. Yield state to user → User processes it
+            1. Yield state to user -> User processes it
             2. Add to batch buffer (small memory cost)
-            3. When batch full → Flush to disk, clear buffer
+            3. When batch full -> Flush to disk, clear buffer
             4. Net effect: Only `batch_size` states stay in memory at once
 
         Note: If the underlying iterable is a generator, it can only be consumed once.

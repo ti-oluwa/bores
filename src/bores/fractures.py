@@ -165,9 +165,9 @@ def _mask_orientation_z(
 # For a fault whose cells are marked in the cell-space mask, we scale the
 # forward face on the *low* side of the fault plane:
 #
-#   x-fault at cell i  → Tx[i+1, j+1, k+1]  (face leaving cell i eastward)
-#   y-fault at cell j  → Ty[i+1, j+1, k+1]  (face leaving cell j southward)
-#   z-fault at cell k  → Tz[i+1, j+1, k+1]  (face leaving cell k downward)
+#   x-fault at cell i  -> Tx[i+1, j+1, k+1]  (face leaving cell i eastward)
+#   y-fault at cell j  -> Ty[i+1, j+1, k+1]  (face leaving cell j southward)
+#   z-fault at cell k  -> Tz[i+1, j+1, k+1]  (face leaving cell k downward)
 #
 # For damage zones (where `cell_range` spans multiple cells) every forward face of
 # every marked cell is scaled, which correctly restricts flow into and out of

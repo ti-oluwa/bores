@@ -164,9 +164,9 @@ class RateClamp(Serializable):
     Both `clamp_rate` and `clamp_bhp` return a `(is_clamped, value)` tuple
     so callers always know whether clamping actually fired:
 
-    - `is_clamped=True`  → clamping condition was met; `value` is the
+    - `is_clamped=True`  -> clamping condition was met; `value` is the
       clamped replacement.
-    - `is_clamped=False` → clamping condition was not met; `value` is the
+    - `is_clamped=False` -> clamping condition was not met; `value` is the
       original input, unchanged.
 
     When the clamped replacement value is not explicitly provided by the

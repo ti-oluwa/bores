@@ -1315,3 +1315,107 @@ def solve_linear_system(
         ) from exc
 
     return np.ascontiguousarray(x), None  # type: ignore[return-value]
+
+
+SystemScalingMethod = typing.Literal["row", "diagonal"]
+
+
+def scale_linear_system(
+    jacobian_csr: csr_matrix,
+    residual_vector: npt.NDArray[np.floating],
+    methods: typing.Optional[
+        typing.Union[SystemScalingMethod, typing.List[SystemScalingMethod]]
+    ] = None,
+    epsilon: float = 1e-12,
+) -> typing.Tuple[
+    csr_matrix,
+    npt.NDArray[np.floating],
+    typing.Optional[npt.NDArray[np.floating]],
+]:
+    """
+    Scale a linear system to improve numerical conditioning.
+
+    This function applies row scaling and/or column (diagonal) scaling to the
+    Jacobian matrix and residual vector. It is designed for use in Newton-based
+    solvers for nonlinear systems (e.g., multiphase flow transport equations).
+
+    Scaling improves solver stability by normalizing equation magnitudes
+    (row scaling) and/or variable sensitivities (column scaling).
+
+    Supported scaling methods:
+        - "row": Row-infinity norm scaling (max absolute value per row)
+        - "diagonal": Diagonal (column) scaling using Jacobian diagonal entries
+
+    If no methods are provided, an automatic heuristic is used:
+        - If the Jacobian diagonal is sufficiently strong -> use ("row", "diagonal")
+        - Otherwise -> use ("row",) only
+
+    Notes:
+        - Row scaling modifies both J and R
+        - Column scaling modifies only J
+        - Column scaling requires post-solve unscaling of the solution vector
+
+    :param jacobian_csr:
+        Sparse Jacobian matrix in CSR format of shape (n, n)
+
+    :param residual_vector:
+        Residual vector of shape (n,)
+
+    :param methods:
+        Scaling methods to apply. Can be:
+            - None (auto-select)
+            - "row"
+            - "diagonal"
+            - Iterable like ("row", "diagonal")
+        Order matters (applied sequentially)
+
+    :param epsilon:
+        Small threshold to prevent division by zero or near-zero values
+
+    :return:
+        Tuple of:
+            - scaled jacobian (CSR matrix)
+            - scaled residual (ndarray)
+            - column scaling vector (ndarray or None)
+
+        The column_scaling_vector must be used to unscale the solution:
+            dx = dx_scaled * column_scaling_vector
+    """
+    J = jacobian_csr
+    R = residual_vector
+
+    # Auto method selection
+    abs_diagonal = None
+    if methods is None:
+        abs_diagonal = np.abs(J.diagonal())
+        if np.median(abs_diagonal) > epsilon:
+            methods = ("row", "diagonal")  # type: ignore
+        else:
+            methods = ("row",)  # type: ignore
+
+    if isinstance(methods, str):
+        methods = (methods,)  # type: ignore
+
+    column_scaling_vector = None
+
+    # Row scaling (D_r * J, D_r * R)
+    if "row" in methods:  # type: ignore
+        row_max = np.abs(J).sum(axis=1).A.ravel()  # type: ignore
+        row_max[row_max < epsilon] = 1.0
+        inv_row = 1.0 / row_max
+
+        J = diags(inv_row) @ J
+        R = R * inv_row
+
+    # Column (diagonal) scaling (J * D_c)
+    if "diagonal" in methods:  # type: ignore
+        abs_diagonal = (
+            abs_diagonal if abs_diagonal is not None else np.abs(J.diagonal())
+        )
+        abs_diagonal[abs_diagonal < epsilon] = 1.0
+        inverse_diag_scale = 1.0 / abs_diagonal
+
+        J = J @ diags(inverse_diag_scale)
+        column_scaling_vector = inverse_diag_scale
+
+    return J, R, column_scaling_vector  # type: ignore[return-value]

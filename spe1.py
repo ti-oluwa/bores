@@ -63,7 +63,7 @@ temperature_grid = bores.uniform_grid(grid_shape=grid_shape, value=200.0)
 # -------------------------------------------------------------------------
 # Bubble-point pressure
 # From Table 2: Pb = 4014.7 psia (highest saturated Rs table pressure)
-# Pi = 4800 psia > Pb → reservoir initially UNDERSATURATED
+# Pi = 4800 psia > Pb -> reservoir initially UNDERSATURATED
 # -------------------------------------------------------------------------
 oil_bubble_point_pressure_grid = bores.uniform_grid(grid_shape=grid_shape, value=4014.7)
 
@@ -173,7 +173,7 @@ oil_specific_gravity_grid = bores.uniform_grid(
 # PVT TABLES — Complete data from Table 2 (Odeh 1981)
 # =========================================================================
 
-# 9 pressure points: atmospheric → undersaturated
+# 9 pressure points: atmospheric -> undersaturated
 pvt_pressures = bores.array(
     [
         14.7,  # Atmospheric
@@ -208,7 +208,7 @@ solution_gor_values = bores.array(
 )
 
 # Bo (RB/STB): Table 2, saturated + undersaturated column
-# At Pb = 4014.7 → 1.6950; at 9014.7 → 1.5790 (Bo decreases above Pb)
+# At Pb = 4014.7 -> 1.6950; at 9014.7 -> 1.5790 (Bo decreases above Pb)
 oil_fvf_values = bores.array(
     [
         1.0620,  # 14.7
@@ -268,7 +268,7 @@ gas_fvf_values_bbl_per_mscf = bores.array(
         0.386,  # 9014.7
     ]
 )
-# Convert RB/MSCF → ft³/SCF
+# Convert RB/MSCF -> ft³/SCF
 gas_fvf_values = gas_fvf_values_bbl_per_mscf * (bores.c.BARRELS_TO_CUBIC_FEET / 1000.0)
 
 # μg (cP): Table 2
@@ -358,7 +358,7 @@ gas_density_table = typing.cast(bores.TwoDimensionalGrid, make_2d(gas_density_va
 
 
 # Water tables are 3-D: (n_pressures, n_temperatures, n_salinities)
-# SPE1 uses fresh water → salinity = 0 ppm → n_salinities = 1
+# SPE1 uses fresh water -> salinity = 0 ppm -> n_salinities = 1
 def make_3d(arr):
     return np.stack([make_2d(arr)], axis=2)
 
@@ -469,7 +469,7 @@ krg_values = bores.array(
         1.000,
     ]
 )
-kro_values = bores.array(
+krog_values = bores.array(
     [
         1.000,
         1.000,
@@ -495,10 +495,30 @@ gas_oil_table = bores.TwoPhaseRelPermTable(
     non_wetting_phase=bores.FluidPhase.GAS,
     reference_saturation=sg_values,
     reference_phase="non_wetting",  # table is indexed by Sg
-    wetting_phase_relative_permeability=kro_values,
+    wetting_phase_relative_permeability=krog_values,
     non_wetting_phase_relative_permeability=krg_values,
 )
-rock_fluid_tables = bores.RockFluidTables(relative_permeability_table=gas_oil_table)
+# Immobile connate water — krw = 0 for all Sw <= 1
+sw_values = bores.array([0.0, 0.12, 1.0])
+krw_values = bores.array([0.0, 0.0, 0.0])  # connate water, never mobile
+krow_values = bores.array([1.0, 1.0, 0.0])  # kro = 1 at Sw=Swc, 0 at Sw=1
+
+oil_water_table = bores.TwoPhaseRelPermTable(
+    wetting_phase=bores.FluidPhase.WATER,
+    non_wetting_phase=bores.FluidPhase.OIL,
+    reference_saturation=sw_values,
+    reference_phase="wetting",
+    wetting_phase_relative_permeability=krw_values,
+    non_wetting_phase_relative_permeability=krow_values,
+)
+
+rock_fluid_tables = bores.RockFluidTables(
+    relative_permeability_table=bores.ThreePhaseRelPermTable(
+        oil_water_table=oil_water_table,
+        gas_oil_table=gas_oil_table,
+        mixing_rule="eclipse_rule",
+    )
+)
 
 # Wells
 gas_molecular_weight = compute_gas_molecular_weight(gas_gravity=0.792)
@@ -570,7 +590,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="si",
+    scheme="impes",
     output_frequency=1,
     pressure_solver="direct",
     transport_solver="direct",
@@ -585,6 +605,7 @@ config = bores.Config(
     maximum_newton_saturation_change=0.05,
     maximum_pressure_change=300.0,
     cfl_threshold=0.6,
+    # jacobian_assembly_method="numerical"
 )
 
 # Run and monitor the simulation and collect states
@@ -592,11 +613,9 @@ states = list(bores.monitor(model, config))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
-    f"Final average pressure: {final.model.fluid_properties.pressure_grid[9, 9, 2]:.1f} psi"
+    f"Final average pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi"
 )
-print(
-    f"Final average bubble point pressure: {final.model.fluid_properties.oil_bubble_point_pressure_grid[9, 9, 2]:.1f} psi"
-)
+
 viz = bores.pyvista3d.DataVisualizer()
 plotter = viz.make_plot(final, property="gas_saturation", show_wells=True)
 plotter.show()

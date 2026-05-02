@@ -178,7 +178,7 @@ def coarsen_grid(
     )
 
     # Reshape to group blocks along each dimension
-    # E.g., (100, 50) with batch (2, 5) → (50, 2, 10, 5) → aggregate over axes (1, 3)
+    # E.g., (100, 50) with batch (2, 5) -> (50, 2, 10, 5) -> aggregate over axes (1, 3)
     reshape_shape = []
     for dim, b in zip(data_padded.shape, batch_size):
         reshape_shape.extend([dim // b, b])
@@ -874,7 +874,7 @@ def layer_to_link_permeability(
     The input grid can have any number of dimensions. All axes other than the
     one selected by `orientation` are treated as independent spatial locations
     and are passed through unchanged. The output has the same shape as the
-    input except that the selected axis is reduced by one (n_cells → n_cells - 1).
+    input except that the selected axis is reduced by one (n_cells -> n_cells - 1).
 
     :param cell_permeability: Array of per-cell permeability values (mD).
         The size along the axis selected by `orientation` is `n_cells`.
@@ -893,7 +893,7 @@ def layer_to_link_permeability(
     :param orientation: Flow direction. Accepts `Orientation.X/Y/Z` or the
         string literals `"x"`, `"y"`, `"z"`. Defaults to `Orientation.Z`.
         Follows the same convention as `build_layered_grid`:
-        X → axis 0, Y → axis 1, Z → axis 2.
+        X -> axis 0, Y -> axis 1, Z -> axis 2.
     :return: Array of interface link permeability values (mD) with the same
         shape as `cell_permeability` except the selected axis is reduced from
         `n_cells` to `n_cells - 1`.
@@ -994,7 +994,7 @@ def link_to_layer_permeability(
     ```
 
     The output has the same shape as `interface_permeability` except that the
-    axis selected by `orientation` grows by one (n_cells - 1 → n_cells).
+    axis selected by `orientation` grows by one (n_cells - 1 -> n_cells).
 
     :param interface_permeability: Array of interface link permeability values
         (mD).  The size along the axis selected by `orientation` is
@@ -1089,7 +1089,7 @@ def link_to_layer_permeability(
         ).copy(),
     )
 
-    # Propagate forward: anchor_index → last cell
+    # Propagate forward: anchor_index -> last cell
     for i in range(anchor_index, n_cells - 1):
         d_upper = cell_lenghts[i]
         d_lower = cell_lenghts[i + 1]
@@ -1107,7 +1107,7 @@ def link_to_layer_permeability(
             )
         _set(recovered, i + 1, d_lower / lower_resistance)
 
-    # Propagate backward: anchor_index → first cell
+    # Propagate backward: anchor_index -> first cell
     for i in range(anchor_index - 1, -1, -1):
         d_upper = cell_lenghts[i]
         d_lower = cell_lenghts[i + 1]

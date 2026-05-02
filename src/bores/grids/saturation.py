@@ -72,15 +72,15 @@ def build_saturation_grids(
     │   (depth < GOC - h_go/2)           │
     ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
     │   GAS-OIL TRANSITION               │  Smooth blend:
-    │   (GOC - h_go/2 to GOC + h_go/2)   │  Sg: high → low
-    │                                     │  So: low → high
+    │   (GOC - h_go/2 to GOC + h_go/2)   │  Sg: high -> low
+    │                                     │  So: low -> high
     ├─────────────────────────────────────┤ ← Gas-Oil Contact (GOC)
     │   OIL ZONE                         │  Pure oil zone
     │   (GOC + h_go/2 to OWC - h_ow/2)   │
     ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
     │   OIL-WATER TRANSITION             │  Smooth blend:
-    │   (OWC - h_ow/2 to OWC + h_ow/2)   │  Sw: low → high
-    │                                     │  So: high → low
+    │   (OWC - h_ow/2 to OWC + h_ow/2)   │  Sw: low -> high
+    │                                     │  So: high -> low
     ├─────────────────────────────────────┤ ← Oil-Water Contact (OWC)
     │   WATER ZONE                       │  Pure water zone
     │   (depth > OWC + h_ow/2)           │

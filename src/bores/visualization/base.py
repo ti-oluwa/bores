@@ -48,11 +48,11 @@ class ColorScheme(str, Enum):
     These color schemes are designed to be accessible to users with color vision deficiencies
     and are recommended for scientific visualization:
 
-    - `VIRIDIS`: Perceptually uniform, colorblind-friendly (blue → green → yellow)
+    - `VIRIDIS`: Perceptually uniform, colorblind-friendly (blue -> green -> yellow)
     - `CIVIDIS`: Optimized for colorblind accessibility, similar to viridis
-    - `PLASMA`: Colorblind-friendly (purple → pink → yellow)
-    - `INFERNO`: Colorblind-friendly (black → purple → yellow → white)
-    - `MAGMA`: Colorblind-friendly (black → purple → pink → yellow)
+    - `PLASMA`: Colorblind-friendly (purple -> pink -> yellow)
+    - `INFERNO`: Colorblind-friendly (black -> purple -> yellow -> white)
+    - `MAGMA`: Colorblind-friendly (black -> purple -> pink -> yellow)
 
     **Diverging Schemes:**
 

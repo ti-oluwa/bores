@@ -71,7 +71,7 @@ def setup_grid():
     # -------------------------------------------------------------------------
     # Bubble-point pressure
     # From Table 2: Pb = 4014.7 psia (highest saturated Rs table pressure)
-    # Pi = 4800 psia > Pb → reservoir initially UNDERSATURATED
+    # Pi = 4800 psia > Pb -> reservoir initially UNDERSATURATED
     # -------------------------------------------------------------------------
     oil_bubble_point_pressure_grid = bores.uniform_grid(
         grid_shape=grid_shape,
@@ -191,7 +191,7 @@ def setup_grid():
     # PVT TABLES — Complete data from Table 2 (Odeh 1981)
     # =========================================================================
 
-    # 9 pressure points: atmospheric → undersaturated
+    # 9 pressure points: atmospheric -> undersaturated
     pvt_pressures = bores.array(
         [
             14.7,  # Atmospheric
@@ -228,7 +228,7 @@ def setup_grid():
     )
 
     # Bo (RB/STB): Table 2, saturated + undersaturated column
-    # At Pb = 4014.7 → 1.6950; at 9014.7 → 1.5790 (Bo decreases above Pb)
+    # At Pb = 4014.7 -> 1.6950; at 9014.7 -> 1.5790 (Bo decreases above Pb)
     oil_fvf_values = bores.array(
         [
             1.0620,  # 14.7
@@ -294,7 +294,7 @@ def setup_grid():
             0.386,  # 9014.7
         ]
     )
-    # Convert RB/MSCF → ft³/SCF
+    # Convert RB/MSCF -> ft³/SCF
     gas_fvf_values = gas_fvf_values_rb_mscf * (
         bores.c.BARRELS_TO_CUBIC_FEET / 1000.0
     )
@@ -396,7 +396,7 @@ def setup_grid():
 
 
     # Water tables are 3-D: (n_pressures, n_temperatures, n_salinities)
-    # SPE1 uses fresh water → salinity = 0 ppm → n_salinities = 1
+    # SPE1 uses fresh water -> salinity = 0 ppm -> n_salinities = 1
     def make_3d(arr):
         return np.stack([make_2d(arr)], axis=2)
 
