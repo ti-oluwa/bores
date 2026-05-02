@@ -1195,15 +1195,7 @@ class KilloughLandRelPermModel(
 
     def get_oil_relperm_endpoint(self) -> float:
         """Resolve kro at connate water from the drainage table."""
-        drainage_table = self.oil_water_drainage_table
-        if isinstance(drainage_table, TwoPhaseRelPermTable):
-            if drainage_table.wetting_phase == FluidPhase.WATER:
-                return float(
-                    np.max(drainage_table.non_wetting_phase_relative_permeability)
-                )
-            return float(np.max(drainage_table.wetting_phase_relative_permeability))
-        # For full three-phase tables
-        return drainage_table.get_oil_relperm_endpoint()
+        return self.oil_water_drainage_table.get_oil_relperm_endpoint()
 
     def _parse_hysteresis_kwargs(
         self,

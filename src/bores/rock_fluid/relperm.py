@@ -1936,7 +1936,7 @@ def get_relperm_table(name: str) -> typing.Type[RelativePermeabilityTable]:
 
 @attrs.frozen
 class TwoPhaseRelPermTable(
-    Serializable,
+    RelativePermeabilityTable,
     load_exclude={
         "_wetting_pchip",
         "_wetting_dpchip",
@@ -2283,7 +2283,7 @@ class TwoPhaseRelPermTable(
         floor = _resolve_relperm_floor(self.min_non_wetting_relperm)
         return _apply_relperm_floor(kr, floor)
 
-    def get_relative_permeabilities(
+    def get_two_phase_relative_permeabilities(
         self,
         wetting_saturation: FloatOrArray,
         non_wetting_saturation: typing.Optional[FloatOrArray] = None,
@@ -2386,6 +2386,279 @@ class TwoPhaseRelPermTable(
             extrapolate_right=float(self.non_wetting_phase_relative_permeability[-1]),
         )
         return _apply_relperm_floor_to_derivative(dkr, kr_raw, floor)
+
+    def get_oil_relperm_endpoint(self) -> float:
+        """
+        Resolve the oil relative permeability endpoint.
+
+        For a two-phase table acting as a three-phase table, the endpoint is
+        the maximum of whichever phase array holds oil kr values.
+        """
+        if self.non_wetting_phase == FluidPhase.OIL:
+            return float(np.max(self.non_wetting_phase_relative_permeability))
+        elif self.wetting_phase == FluidPhase.OIL:
+            return float(np.max(self.wetting_phase_relative_permeability))
+        return 1.0
+
+    def get_relative_permeabilities(
+        self,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
+        **kwargs: typing.Any,
+    ) -> RelativePermeabilities:
+        """
+        Compute relative permeabilities for all three phases from a two-phase table.
+
+        The absent phase always returns zero. The reference saturation dispatched
+        to the underlying PCHIP interpolant is chosen by inspecting which phases
+        this table covers and what `reference_phase` is declared:
+
+        - **Oil-water table** (phases are OIL and WATER): krg = 0.  Sw or So is
+        forwarded to the interpolant according to `reference_phase`.
+        - **Gas-oil table** (phases are GAS and OIL): krw = 0.  So or Sg is
+        forwarded according to `reference_phase`.
+
+        Minimum relperm floors declared on the table are applied automatically
+        inside the underlying query methods and propagate transparently.
+
+        :param water_saturation: Water saturation (fraction) — scalar or array.
+        :param oil_saturation: Oil saturation (fraction) — scalar or array.
+        :param gas_saturation: Gas saturation (fraction) — scalar or array.
+        :return: `RelativePermeabilities` dict with keys `"water"`, `"oil"`, `"gas"`.
+        """
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+        )
+        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
+        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
+        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
+        sw, so, sg = np.broadcast_arrays(sw, so, sg)
+        zeros = np.zeros_like(sw)
+
+        phases = {self.wetting_phase, self.non_wetting_phase}
+
+        if phases == {FluidPhase.OIL, FluidPhase.WATER}:
+            if self.wetting_phase == FluidPhase.WATER:
+                krw = self.get_wetting_phase_relative_permeability(
+                    sw, non_wetting_saturation=so
+                )
+                kro = self.get_non_wetting_phase_relative_permeability(
+                    sw, non_wetting_saturation=so
+                )
+            else:
+                kro = self.get_wetting_phase_relative_permeability(
+                    so, non_wetting_saturation=sw
+                )
+                krw = self.get_non_wetting_phase_relative_permeability(
+                    so, non_wetting_saturation=sw
+                )
+            if is_scalar:
+                return RelativePermeabilities(
+                    water=float(np.atleast_1d(krw).ravel()[0]),
+                    oil=float(np.atleast_1d(kro).ravel()[0]),
+                    gas=0.0,
+                )
+            return RelativePermeabilities(water=krw, oil=kro, gas=zeros)  # type: ignore[typeddict-item]
+
+        if phases == {FluidPhase.OIL, FluidPhase.GAS}:
+            if self.wetting_phase == FluidPhase.OIL:
+                kro = self.get_wetting_phase_relative_permeability(
+                    so, non_wetting_saturation=sg
+                )
+                krg = self.get_non_wetting_phase_relative_permeability(
+                    so, non_wetting_saturation=sg
+                )
+            else:
+                krg = self.get_wetting_phase_relative_permeability(
+                    sg, non_wetting_saturation=so
+                )
+                kro = self.get_non_wetting_phase_relative_permeability(
+                    sg, non_wetting_saturation=so
+                )
+            if is_scalar:
+                return RelativePermeabilities(
+                    water=0.0,
+                    oil=float(np.atleast_1d(kro).ravel()[0]),
+                    gas=float(np.atleast_1d(krg).ravel()[0]),
+                )
+            return RelativePermeabilities(water=zeros, oil=kro, gas=krg)  # type: ignore[typeddict-item]
+
+        raise ValidationError(
+            f"Cannot dispatch three-phase saturations to a two-phase table with phases "
+            f"{self.wetting_phase!r} / {self.non_wetting_phase!r}. "
+            f"Expected OIL+WATER or OIL+GAS."
+        )
+
+    def get_relative_permeability_derivatives(
+        self,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
+        **kwargs: typing.Any,
+    ) -> RelativePermeabilityDerivatives:
+        """
+        Compute the nine partial derivatives of three-phase relative permeabilities
+        for a two-phase table.
+
+        The absent phase contributes zero to every derivative. The two active
+        phases contribute only along their natural saturation axis; all cross
+        derivatives (e.g. dkrw/dSg for an oil-water table) are zero.
+
+        Where a minimum relperm floor is active on this table (raw kr ≤ floor),
+        the corresponding derivative is zeroed out by the underlying query method,
+        keeping the Jacobian consistent with the floored kr value.
+
+        Returned layout (same as `ThreePhaseRelPermTable`):
+
+            dKrw_dSw, dKro_dSw, dKrg_dSw,
+            dKrw_dSo, dKro_dSo, dKrg_dSo,
+            dKrw_dSg, dKro_dSg, dKrg_dSg
+
+        :param water_saturation: Water saturation (fraction, 0 to 1).
+        :param oil_saturation: Oil saturation (fraction, 0 to 1).
+        :param gas_saturation: Gas saturation (fraction, 0 to 1).
+        :return: `RelativePermeabilityDerivatives` dictionary.
+        """
+        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
+        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
+        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
+        sw, so, sg = np.broadcast_arrays(sw, so, sg)
+        zeros = np.zeros_like(sw)
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+        )
+
+        phases = {self.wetting_phase, self.non_wetting_phase}
+
+        if phases == {FluidPhase.OIL, FluidPhase.WATER}:
+            # krg = 0 everywhere; all krg derivatives are zero
+            if self.wetting_phase == FluidPhase.WATER:
+                # reference: wetting=Sw or non_wetting=So depending on reference_phase
+                d_krw = self.get_wetting_phase_relative_permeability_derivative(
+                    water_saturation, non_wetting_saturation=oil_saturation
+                )
+                d_kro = self.get_non_wetting_phase_relative_permeability_derivative(
+                    water_saturation, non_wetting_saturation=oil_saturation
+                )
+                # Both curves live on the same reference axis
+                if self.reference_phase == "wetting":
+                    # reference is Sw: d/dSw is non-zero, d/dSo and d/dSg are zero
+                    d_krw_d_sw, d_krw_d_so, d_krw_d_sg = d_krw, zeros, zeros
+                    d_kro_d_sw, d_kro_d_so, d_kro_d_sg = d_kro, zeros, zeros
+                else:
+                    # reference is So: d/dSo is non-zero
+                    d_krw_d_sw, d_krw_d_so, d_krw_d_sg = zeros, d_krw, zeros
+                    d_kro_d_sw, d_kro_d_so, d_kro_d_sg = zeros, d_kro, zeros
+            else:
+                # wetting phase is OIL
+                d_kro = self.get_wetting_phase_relative_permeability_derivative(
+                    oil_saturation, non_wetting_saturation=water_saturation
+                )
+                d_krw = self.get_non_wetting_phase_relative_permeability_derivative(
+                    oil_saturation, non_wetting_saturation=water_saturation
+                )
+                if self.reference_phase == "wetting":
+                    d_kro_d_sw, d_kro_d_so, d_kro_d_sg = zeros, d_kro, zeros
+                    d_krw_d_sw, d_krw_d_so, d_krw_d_sg = zeros, d_krw, zeros
+                else:
+                    d_kro_d_sw, d_kro_d_so, d_kro_d_sg = d_kro, zeros, zeros
+                    d_krw_d_sw, d_krw_d_so, d_krw_d_sg = d_krw, zeros, zeros
+
+            # Repack into the 9-tuple order expected by RelativePermeabilityDerivatives
+            results = (
+                d_krw_d_sw,
+                d_kro_d_sw,
+                zeros,
+                d_krw_d_so,
+                d_kro_d_so,
+                zeros,
+                d_krw_d_sg,
+                d_kro_d_sg,
+                zeros,
+            )
+            if is_scalar:
+                results = tuple(float(np.atleast_1d(r).ravel()[0]) for r in results)
+            return RelativePermeabilityDerivatives(
+                dKrw_dSw=results[0],
+                dKro_dSw=results[1],
+                dKrg_dSw=results[2],
+                dKrw_dSo=results[3],
+                dKro_dSo=results[4],
+                dKrg_dSo=results[5],
+                dKrw_dSg=results[6],
+                dKro_dSg=results[7],
+                dKrg_dSg=results[8],
+            )
+
+        if phases == {FluidPhase.OIL, FluidPhase.GAS}:
+            # krw = 0 everywhere; all krw derivatives are zero
+            if self.wetting_phase == FluidPhase.OIL:
+                d_kro = self.get_wetting_phase_relative_permeability_derivative(
+                    oil_saturation, non_wetting_saturation=gas_saturation
+                )
+                d_krg = self.get_non_wetting_phase_relative_permeability_derivative(
+                    oil_saturation, non_wetting_saturation=gas_saturation
+                )
+                if self.reference_phase == "wetting":
+                    # reference is So
+                    d_kro_d_sw, d_kro_d_so, d_kro_d_sg = zeros, d_kro, zeros
+                    d_krg_d_sw, d_krg_d_so, d_krg_d_sg = zeros, d_krg, zeros
+                else:
+                    # reference is Sg
+                    d_kro_d_sw, d_kro_d_so, d_kro_d_sg = zeros, zeros, d_kro
+                    d_krg_d_sw, d_krg_d_so, d_krg_d_sg = zeros, zeros, d_krg
+            else:
+                # wetting phase is GAS
+                d_krg = self.get_wetting_phase_relative_permeability_derivative(
+                    gas_saturation, non_wetting_saturation=oil_saturation
+                )
+                d_kro = self.get_non_wetting_phase_relative_permeability_derivative(
+                    gas_saturation, non_wetting_saturation=oil_saturation
+                )
+                if self.reference_phase == "wetting":
+                    # reference is Sg
+                    d_krg_d_sw, d_krg_d_so, d_krg_d_sg = zeros, zeros, d_krg
+                    d_kro_d_sw, d_kro_d_so, d_kro_d_sg = zeros, zeros, d_kro
+                else:
+                    # reference is So
+                    d_krg_d_sw, d_krg_d_so, d_krg_d_sg = zeros, d_krg, zeros
+                    d_kro_d_sw, d_kro_d_so, d_kro_d_sg = zeros, d_kro, zeros
+
+            results = (
+                zeros,
+                d_kro_d_sw,
+                d_krg_d_sw,
+                zeros,
+                d_kro_d_so,
+                d_krg_d_so,
+                zeros,
+                d_kro_d_sg,
+                d_krg_d_sg,
+            )
+            if is_scalar:
+                results = tuple(float(np.atleast_1d(r).ravel()[0]) for r in results)
+            return RelativePermeabilityDerivatives(
+                dKrw_dSw=results[0],
+                dKro_dSw=results[1],
+                dKrg_dSw=results[2],
+                dKrw_dSo=results[3],
+                dKro_dSo=results[4],
+                dKrg_dSo=results[5],
+                dKrw_dSg=results[6],
+                dKro_dSg=results[7],
+                dKrg_dSg=results[8],
+            )
+
+        raise ValidationError(
+            f"Cannot dispatch three-phase derivatives to a two-phase table with phases "
+            f"{self.wetting_phase!r} / {self.non_wetting_phase!r}. "
+            f"Expected OIL+WATER or OIL+GAS."
+        )
 
 
 @relperm_table
@@ -4362,7 +4635,9 @@ def compute_let_three_phase_relative_permeabilities(
             np.zeros_like(sw),
             np.clip((sw - Swc) / movable_water_range, 0.0, 1.0),
         )
-        krw_ww = maximum_water_relperm * _let_relperm(sw_star_ww, water_L, water_E, water_T)
+        krw_ww = maximum_water_relperm * _let_relperm(
+            sw_star_ww, water_L, water_E, water_T
+        )
 
         movable_gas_range = 1.0 - Swc - Sgr - Sorg  # type: ignore[operator]
         sg_star_ww = np.where(

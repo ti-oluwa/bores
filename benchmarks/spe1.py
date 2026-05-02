@@ -578,24 +578,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         ]
     )
     krw_values = np.linspace(0.0, 0.00001, 14)
-    krow_values = bores.array(
-        [
-            0.000,
-            0.000,
-            0.0001,
-            0.001,
-            0.010,
-            0.021,
-            0.090,
-            0.200,
-            0.350,
-            0.700,
-            0.980,
-            0.997,
-            1.000,
-            1.000,
-        ]
-    )
+    krow_values = np.linspace(0.0, 1.0, 14)
     oil_water_table = bores.TwoPhaseRelPermTable(
         wetting_phase=bores.FluidPhase.WATER,
         non_wetting_phase=bores.FluidPhase.OIL,
@@ -608,50 +591,14 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
     relative_permeability_table = bores.ThreePhaseRelPermTable(
         oil_water_table=oil_water_table,
         gas_oil_table=gas_oil_table,
-        mixing_rule="max_rule",
+        mixing_rule="eclipse_rule",
     )
     rock_fluid_tables = bores.RockFluidTables(
         relative_permeability_table=relative_permeability_table
     )
 
-    # Gas pseudo-pressure table — Table 2 (Odeh 1981)
-    gas_pressures = bores.array(
-        [
-            14.7,
-            264.7,
-            514.7,
-            1014.7,
-            2014.7,
-            2514.7,
-            3014.7,
-            4014.7,
-            5014.7,
-            9014.7,
-        ]
-    )
-    gas_pseudo_pressures = bores.array(
-        [
-            0.000e0,  # 14.7
-            7.77916e6,  # 264.7
-            2.67580e7,  # 514.7
-            8.75262e7,  # 1014.7
-            2.70709e8,  # 2014.7
-            3.86910e8,  # 2514.7
-            5.16118e8,  # 3014.7
-            8.03963e8,  # 4014.7
-            1.12256e9,  # 5014.7
-            2.51845e9,  # 9014.7
-        ]
-    )
-    pseudo_pressure_table = bores.PseudoPressureTable(
-        pressures=gas_pressures,
-        pseudo_pressures=gas_pseudo_pressures,
-        reference_pressure=14.7,
-    )
 
-    # -------------------------------------------------------------------------
     # Wells
-    # -------------------------------------------------------------------------
     gas_molecular_weight = compute_gas_molecular_weight(gas_gravity=0.792)
 
     # Gas injector: cell (0,0,0), perforating Layer 1
@@ -671,7 +618,6 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
             specific_gravity=0.792,
             molecular_weight=gas_molecular_weight,
             is_miscible=False,
-            pseudo_pressure_table=pseudo_pressure_table,
             pvt_table=pvt_tables.gas,
         ),
         is_active=True,
@@ -705,7 +651,6 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
                 phase=bores.FluidPhase.GAS,
                 specific_gravity=0.792,
                 molecular_weight=gas_molecular_weight,
-                pseudo_pressure_table=pseudo_pressure_table,
             ),
             bores.ProducedFluid(
                 name="Water",
@@ -801,9 +746,9 @@ def setup_analysis(bores, states):
         interval=1, from_step=1, rate_type="injection"
     )
 
-    oil_hysteresis_state = []
-    water_hysteresis_state = []
-    gas_hysteresis_state = []
+    oil_saturation_history = []
+    water_saturation_history = []
+    gas_saturation_history = []
     avg_pressure_history = []
 
     volumetric_sweep_efficiency_history = []
@@ -825,9 +770,9 @@ def setup_analysis(bores, states):
         avg_gas_sat = fluid_properties.gas_saturation_grid[9, 9, 2]
         avg_pressure = s.rates.production_bhps.gas[9, 9, 2]
 
-        oil_hysteresis_state.append((time_step, avg_oil_sat))
-        water_hysteresis_state.append((time_step, avg_water_sat))
-        gas_hysteresis_state.append((time_step, avg_gas_sat))
+        oil_saturation_history.append((time_step, avg_oil_sat))
+        water_saturation_history.append((time_step, avg_water_sat))
+        gas_saturation_history.append((time_step, avg_gas_sat))
         avg_pressure_history.append((time_step, avg_pressure))
 
     for time_step, result in sweep_efficiency_history:
@@ -852,9 +797,9 @@ def setup_analysis(bores, states):
         analyst,
         avg_pressure_history,
         displacement_efficiency_history,
-        gas_hysteresis_state,
         gas_injection_rate_history,
         gas_rate_history,
+        gas_saturation_history,
         gor_history,
         oil_rate_history,
         recovery_efficiency_history,
@@ -881,13 +826,13 @@ def _(avg_pressure_history, bores, np):
 
 
 @app.cell
-def saturation_plots(bores, gas_hysteresis_state, np):
+def saturation_plots(bores, gas_saturation_history, np):
     # Saturation
     saturation_fig = bores.make_series_plot(
         data={
-            # "Avg. Water Saturation": np.array(water_hysteresis_state),
-            # "Avg. Oil Saturation": np.array(oil_hysteresis_state),
-            "Avg. Gas Saturation": np.array(gas_hysteresis_state),
+            # "Avg. Water Saturation": np.array(water_saturation_history),
+            # "Avg. Oil Saturation": np.array(oil_saturation_history),
+            "Avg. Gas Saturation": np.array(gas_saturation_history),
         },
         title="Saturation Analysis",
         x_label="Time Step",

@@ -1005,29 +1005,29 @@ class PVTTable(StoreSerializable):
 
         result = np.zeros_like(p_arr, dtype=float)
         saturated_mask = p_arr <= pb_arr
-        unsaturated_mask = ~saturated_mask
+        undersaturated_mask = ~saturated_mask
 
         if np.any(saturated_mask):
             result[saturated_mask] = self._pt_interpolate(  # type: ignore[index]
                 "viscosity", p_arr[saturated_mask], t_arr[saturated_mask]
             )
 
-        if np.any(unsaturated_mask):
+        if np.any(undersaturated_mask):
             mu_ob = self._pt_interpolate(
-                "viscosity", pb_arr[unsaturated_mask], t_arr[unsaturated_mask]
+                "viscosity", pb_arr[undersaturated_mask], t_arr[undersaturated_mask]
             )
             if mu_ob is None:
-                result[unsaturated_mask] = self._pt_interpolate(  # type: ignore[index]
-                    "viscosity", p_arr[unsaturated_mask], t_arr[unsaturated_mask]
+                result[undersaturated_mask] = self._pt_interpolate(  # type: ignore[index]
+                    "viscosity", p_arr[undersaturated_mask], t_arr[undersaturated_mask]
                 )
             else:
-                p_under = p_arr[unsaturated_mask]
-                pb_under = pb_arr[unsaturated_mask]
+                p_under = p_arr[undersaturated_mask]
+                pb_under = pb_arr[undersaturated_mask]
                 mu_ob_arr = np.asarray(mu_ob)
                 X = 2.6 * (p_under**1.187) * np.exp(-11.513 - 8.98e-5 * p_under)
                 X = np.clip(X, 0.0, 5.0)
                 pressure_ratio = np.clip(p_under / pb_under, 1.0, None)
-                result[unsaturated_mask] = np.clip(
+                result[undersaturated_mask] = np.clip(
                     mu_ob_arr * (pressure_ratio**X),
                     mu_ob_arr,
                     mu_ob_arr * 100.0,
@@ -1122,32 +1122,32 @@ class PVTTable(StoreSerializable):
 
         result = np.zeros_like(p_arr, dtype=float)
         saturated_mask = p_arr <= pb_arr
-        unsaturated_mask = ~saturated_mask
+        undersaturated_mask = ~saturated_mask
 
         if np.any(saturated_mask):
             result[saturated_mask] = self._pt_interpolate(  # type: ignore[index]
                 "formation_volume_factor", p_arr[saturated_mask], t_arr[saturated_mask]
             )
 
-        if np.any(unsaturated_mask):
+        if np.any(undersaturated_mask):
             oil_fvf_at_pb = self._pt_interpolate(
                 "formation_volume_factor",
-                pb_arr[unsaturated_mask],
-                t_arr[unsaturated_mask],
+                pb_arr[undersaturated_mask],
+                t_arr[undersaturated_mask],
             )
             if "compressibility" in self._interpolators:
                 co_at_pb = self._pt_interpolate(
-                    "compressibility", pb_arr[unsaturated_mask], t_arr[unsaturated_mask]
+                    "compressibility", pb_arr[undersaturated_mask], t_arr[undersaturated_mask]
                 )
                 co_at_p = self._pt_interpolate(
-                    "compressibility", p_arr[unsaturated_mask], t_arr[unsaturated_mask]
+                    "compressibility", p_arr[undersaturated_mask], t_arr[undersaturated_mask]
                 )
                 avg_co = 0.5 * (np.asarray(co_at_pb) + np.asarray(co_at_p))
-                result[unsaturated_mask] = np.asarray(oil_fvf_at_pb) * np.exp(
-                    -avg_co * (p_arr[unsaturated_mask] - pb_arr[unsaturated_mask])
+                result[undersaturated_mask] = np.asarray(oil_fvf_at_pb) * np.exp(
+                    -avg_co * (p_arr[undersaturated_mask] - pb_arr[undersaturated_mask])
                 )
             else:
-                result[unsaturated_mask] = np.asarray(oil_fvf_at_pb)
+                result[undersaturated_mask] = np.asarray(oil_fvf_at_pb)
 
         clamps = self.clamps
         if "formation_volume_factor" in clamps:
@@ -1364,15 +1364,15 @@ class PVTTable(StoreSerializable):
 
         result = np.zeros_like(p_arr, dtype=float)
         saturated_mask = p_arr <= pb_arr
-        unsaturated_mask = ~saturated_mask
+        undersaturated_mask = ~saturated_mask
 
         if np.any(saturated_mask):
             result[saturated_mask] = self._pt_interpolate(
                 "solution_gor", p_arr[saturated_mask], t_arr[saturated_mask]
             )
-        if np.any(unsaturated_mask):
-            result[unsaturated_mask] = self._pt_interpolate(
-                "solution_gor", pb_arr[unsaturated_mask], t_arr[unsaturated_mask]
+        if np.any(undersaturated_mask):
+            result[undersaturated_mask] = self._pt_interpolate(
+                "solution_gor", pb_arr[undersaturated_mask], t_arr[undersaturated_mask]
             )
 
         clamps = self.clamps

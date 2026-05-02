@@ -469,7 +469,7 @@ krg_values = bores.array(
         1.000,
     ]
 )
-krog_values = bores.array(
+kro_values = bores.array(
     [
         1.000,
         1.000,
@@ -495,68 +495,10 @@ gas_oil_table = bores.TwoPhaseRelPermTable(
     non_wetting_phase=bores.FluidPhase.GAS,
     reference_saturation=sg_values,
     reference_phase="non_wetting",  # table is indexed by Sg
-    wetting_phase_relative_permeability=krog_values,
+    wetting_phase_relative_permeability=kro_values,
     non_wetting_phase_relative_permeability=krg_values,
 )
-
-# Oil-water table: SPE1 is a gas-oil case with connate water only.
-# krw = 0 everywhere (no water production); kro depends on Sw.
-# Sw spans from Swc (0.12) to 1.0; at Sw = Swc, kro = 1.0.
-# Reference_phase = "wetting" so the table is indexed by Sw.
-so_values = bores.array(
-    [
-        0.00,
-        0.18,
-        0.28,
-        0.38,
-        0.43,
-        0.48,
-        0.58,
-        0.63,
-        0.68,
-        0.76,
-        0.83,
-        0.86,
-        0.879,
-        0.88,
-    ]
-)
-krw_values = np.linspace(0.0, 0.00001, 14)
-krow_values = bores.array(
-    [
-        0.000,
-        0.000,
-        0.0001,
-        0.001,
-        0.010,
-        0.021,
-        0.090,
-        0.200,
-        0.350,
-        0.700,
-        0.980,
-        0.997,
-        1.000,
-        1.000,
-    ]
-)
-oil_water_table = bores.TwoPhaseRelPermTable(
-    wetting_phase=bores.FluidPhase.WATER,
-    non_wetting_phase=bores.FluidPhase.OIL,
-    reference_saturation=so_values,
-    reference_phase="non_wetting",  # indexed by So
-    wetting_phase_relative_permeability=krw_values,
-    non_wetting_phase_relative_permeability=krow_values,
-)
-
-relative_permeability_table = bores.ThreePhaseRelPermTable(
-    oil_water_table=oil_water_table,
-    gas_oil_table=gas_oil_table,
-    mixing_rule=bores.eclipse_rule,
-)
-rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=relative_permeability_table
-)
+rock_fluid_tables = bores.RockFluidTables(relative_permeability_table=gas_oil_table)
 
 # Wells
 gas_molecular_weight = compute_gas_molecular_weight(gas_gravity=0.792)
@@ -609,7 +551,7 @@ producer = bores.production_well(
             phase=bores.FluidPhase.GAS,
             specific_gravity=0.792,
             molecular_weight=gas_molecular_weight,
-        )
+        ),
     ],
     skin_factor=0.0,
     is_active=True,
@@ -650,8 +592,11 @@ states = list(bores.monitor(model, config))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
-    f"Final average pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi"
+    f"Final average pressure: {final.model.fluid_properties.pressure_grid[9, 9, 2]:.1f} psi"
+)
+print(
+    f"Final average bubble point pressure: {final.model.fluid_properties.oil_bubble_point_pressure_grid[9, 9, 2]:.1f} psi"
 )
 viz = bores.pyvista3d.DataVisualizer()
-plotter = viz.make_plot(final, property="oil_saturation", show_wells=True)
+plotter = viz.make_plot(final, property="gas_saturation", show_wells=True)
 plotter.show()
