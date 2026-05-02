@@ -12,7 +12,7 @@ from bores.correlations.core import (
 
 logging.basicConfig(level=logging.DEBUG)
 
-bores.use_32bit_precision()
+# bores.use_32bit_precision()
 
 # -------------------------------------------------------------------------
 # Grid geometry — SPE1 benchmark (Odeh, 1981, JPT)

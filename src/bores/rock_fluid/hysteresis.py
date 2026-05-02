@@ -1077,24 +1077,16 @@ class KilloughLandRelPermModel(
 
     __type__ = "killough_land_relperm_model"
 
-    oil_water_drainage_table: typing.Union[
-        TwoPhaseRelPermTable, RelativePermeabilityTable
-    ]
+    oil_water_drainage_table: RelativePermeabilityTable
     """Primary drainage relative permeability table for the oil-water system."""
 
-    gas_oil_drainage_table: typing.Union[
-        TwoPhaseRelPermTable, RelativePermeabilityTable
-    ]
+    gas_oil_drainage_table: RelativePermeabilityTable
     """Primary drainage relative permeability table for the gas-oil system."""
 
-    oil_water_imbibition_table: typing.Optional[
-        typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable]
-    ] = None
+    oil_water_imbibition_table: typing.Optional[RelativePermeabilityTable] = None
     """Primary imbibition table for the oil-water system. Defaults to the drainage table."""
 
-    gas_oil_imbibition_table: typing.Optional[
-        typing.Union[TwoPhaseRelPermTable, RelativePermeabilityTable]
-    ] = None
+    gas_oil_imbibition_table: typing.Optional[RelativePermeabilityTable] = None
     """Primary imbibition table for the gas-oil system. Defaults to the drainage table."""
 
     land_trapping_coefficient_water: float = 1.0

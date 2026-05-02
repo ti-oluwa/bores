@@ -480,7 +480,7 @@ def setup_grid():
 
 
 @app.cell
-def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
+def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     from bores.correlations.core import compute_gas_molecular_weight
 
     # -------------------------------------------------------------------------
@@ -525,7 +525,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
             1.000,
         ]
     )
-    krog_values = bores.array(
+    kro_values = bores.array(
         [
             1.000,
             1.000,
@@ -551,50 +551,11 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         non_wetting_phase=bores.FluidPhase.GAS,
         reference_saturation=sg_values,
         reference_phase="non_wetting",  # table is indexed by Sg
-        wetting_phase_relative_permeability=krog_values,
+        wetting_phase_relative_permeability=kro_values,
         non_wetting_phase_relative_permeability=krg_values,
     )
-
-    # Oil-water table: SPE1 is a gas-oil case with connate water only.
-    # krw = 0 everywhere (no water production); kro depends on Sw.
-    # Sw spans from Swc (0.12) to 1.0; at Sw = Swc, kro = 1.0.
-    # Reference_phase = "wetting" so the table is indexed by Sw.
-    so_values = bores.array(
-        [
-            0.00,
-            0.18,
-            0.28,
-            0.38,
-            0.43,
-            0.48,
-            0.58,
-            0.63,
-            0.68,
-            0.76,
-            0.83,
-            0.86,
-            0.879,
-            0.88,
-        ]
-    )
-    krw_values = np.linspace(0.0, 0.00001, 14)
-    krow_values = np.linspace(0.0, 1.0, 14)
-    oil_water_table = bores.TwoPhaseRelPermTable(
-        wetting_phase=bores.FluidPhase.WATER,
-        non_wetting_phase=bores.FluidPhase.OIL,
-        reference_saturation=so_values,
-        reference_phase="non_wetting",  # indexed by So
-        wetting_phase_relative_permeability=krw_values,
-        non_wetting_phase_relative_permeability=krow_values,
-    )
-
-    relative_permeability_table = bores.ThreePhaseRelPermTable(
-        oil_water_table=oil_water_table,
-        gas_oil_table=gas_oil_table,
-        mixing_rule="eclipse_rule",
-    )
     rock_fluid_tables = bores.RockFluidTables(
-        relative_permeability_table=relative_permeability_table
+        relative_permeability_table=gas_oil_table
     )
 
 

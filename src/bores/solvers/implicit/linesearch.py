@@ -27,13 +27,20 @@ def cubic_min(
     :param dfb: Derivative at b.
     :return: Minimiser of the cubic, clamped to [a, b].
     """
+    if abs(b - a) < 1e-14:
+        return 0.5 * (a + b)
+
     d1 = dfa + dfb - 3.0 * (fb - fa) / (b - a)
     discriminant = d1 * d1 - dfa * dfb
     if discriminant < 0.0:
         return 0.5 * (a + b)
 
     d2 = np.sqrt(discriminant)
-    alpha = b - (b - a) * (dfb + d2 - d1) / (dfb - dfa + 2.0 * d2)
+    denom = dfb - dfa + 2.0 * d2
+    if abs(denom) < 1e-14:
+        return 0.5 * (a + b)
+
+    alpha = b - (b - a) * (dfb + d2 - d1) / denom
     return float(min(max(alpha, a), b))
 
 
@@ -102,18 +109,24 @@ def line_search(
 
         # Cubic interpolation for next trial step
         # Approximate derivative at current α by finite difference
-        dfb = (norm * norm - norm_prev * norm_prev) / max(alpha - alpha_prev, 1e-14)
-        alpha_next = cubic_min(
-            alpha_prev,
-            norm_prev * norm_prev,
-            dfa,
-            alpha,
-            norm * norm,
-            dfb,
-        )
-        # Safety bounds: stay in (0.1·alpha, 0.9·alpha)
-        alpha_next = float(np.clip(alpha_next, 0.1 * alpha, 0.9 * alpha))
+        interval = alpha - alpha_prev
+        if abs(interval) > 1e-14:
+            dfb = (norm * norm - norm_prev * norm_prev) / interval
+            alpha_next = cubic_min(
+                alpha_prev,
+                norm_prev * norm_prev,
+                dfa,
+                alpha,
+                norm * norm,
+                dfb,
+            )
+            alpha_next = float(np.clip(alpha_next, 0.1 * alpha, 0.9 * alpha))
+        else:
+            # Degenerate interval. Fall back to bisection
+            dfb = dfa
+            alpha_next = 0.5 * alpha
 
+        # Safety bounds: stay in (0.1·alpha, 0.9·alpha)
         alpha_prev = alpha
         norm_prev = norm
         dfa = dfb

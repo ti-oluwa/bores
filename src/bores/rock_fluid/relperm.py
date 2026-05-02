@@ -1934,6 +1934,7 @@ def get_relperm_table(name: str) -> typing.Type[RelativePermeabilityTable]:
         return _RELPERM_TABLES[name]
 
 
+@relperm_table
 @attrs.frozen
 class TwoPhaseRelPermTable(
     RelativePermeabilityTable,
@@ -2033,7 +2034,7 @@ class TwoPhaseRelPermTable(
     correct saturation grid without hard-coding assumptions.
     """
 
-    min_wetting_relperm: RelPermFloor = attrs.field(default=None)
+    min_wetting_relperm: RelPermFloor = None
     """
     Minimum floor for the wetting-phase relative permeability.
  
@@ -2046,7 +2047,7 @@ class TwoPhaseRelPermTable(
     the kr value (no MBE from mismatched kr/derivative pairs).
     """
 
-    min_non_wetting_relperm: RelPermFloor = attrs.field(default=None)
+    min_non_wetting_relperm: RelPermFloor = None
     """
     Minimum floor for the non-wetting-phase relative permeability.
  
@@ -2077,8 +2078,7 @@ class TwoPhaseRelPermTable(
     """
     Grid spacing mode used when building the expanded knot grid.
  
-    Passed directly to `_build_saturation_reference_grid`.  Typical
-    values are `"cosine"` (default, clusters points near endpoints) and
+    Typical values are `"cosine"` (default, clusters points near endpoints) and
     `"linspace"` (uniform).
     """
 
@@ -2540,10 +2540,10 @@ class TwoPhaseRelPermTable(
             if self.wetting_phase == FluidPhase.WATER:
                 # reference: wetting=Sw or non_wetting=So depending on reference_phase
                 d_krw = self.get_wetting_phase_relative_permeability_derivative(
-                    water_saturation, non_wetting_saturation=oil_saturation
+                    sw, non_wetting_saturation=so
                 )
                 d_kro = self.get_non_wetting_phase_relative_permeability_derivative(
-                    water_saturation, non_wetting_saturation=oil_saturation
+                    sw, non_wetting_saturation=so
                 )
                 # Both curves live on the same reference axis
                 if self.reference_phase == "wetting":
@@ -2557,10 +2557,10 @@ class TwoPhaseRelPermTable(
             else:
                 # wetting phase is OIL
                 d_kro = self.get_wetting_phase_relative_permeability_derivative(
-                    oil_saturation, non_wetting_saturation=water_saturation
+                    so, non_wetting_saturation=sw
                 )
                 d_krw = self.get_non_wetting_phase_relative_permeability_derivative(
-                    oil_saturation, non_wetting_saturation=water_saturation
+                    so, non_wetting_saturation=sw
                 )
                 if self.reference_phase == "wetting":
                     d_kro_d_sw, d_kro_d_so, d_kro_d_sg = zeros, d_kro, zeros
@@ -2599,10 +2599,10 @@ class TwoPhaseRelPermTable(
             # krw = 0 everywhere; all krw derivatives are zero
             if self.wetting_phase == FluidPhase.OIL:
                 d_kro = self.get_wetting_phase_relative_permeability_derivative(
-                    oil_saturation, non_wetting_saturation=gas_saturation
+                    so, non_wetting_saturation=sg
                 )
                 d_krg = self.get_non_wetting_phase_relative_permeability_derivative(
-                    oil_saturation, non_wetting_saturation=gas_saturation
+                    so, non_wetting_saturation=sg
                 )
                 if self.reference_phase == "wetting":
                     # reference is So
@@ -2615,10 +2615,10 @@ class TwoPhaseRelPermTable(
             else:
                 # wetting phase is GAS
                 d_krg = self.get_wetting_phase_relative_permeability_derivative(
-                    gas_saturation, non_wetting_saturation=oil_saturation
+                    sg, non_wetting_saturation=so
                 )
                 d_kro = self.get_non_wetting_phase_relative_permeability_derivative(
-                    gas_saturation, non_wetting_saturation=oil_saturation
+                    sg, non_wetting_saturation=so
                 )
                 if self.reference_phase == "wetting":
                     # reference is Sg
