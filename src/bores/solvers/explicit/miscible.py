@@ -28,7 +28,7 @@ from bores.types import (
 )
 from bores.utils import clip
 from bores.wells.base import Wells
-from bores.wells.controls import CoupledRateControl
+from bores.wells.controls import ProducerRateControl
 from bores.wells.indices import WellsIndices
 
 __all__ = ["solve_transport"]
@@ -1193,7 +1193,7 @@ def compute_well_rate_grids(
         if not well.is_open:
             continue
 
-        is_couple_controlled = isinstance(well.control, CoupledRateControl)
+        is_couple_controlled = isinstance(well.control, ProducerRateControl)
         wells_indices = wells_indices.production[well.name]
         # Compute rates for each perforated cell using cached well indices
         for perforation_index in wells_indices:
@@ -1217,7 +1217,7 @@ def compute_well_rate_grids(
             cell_oil_production_rate = 0.0
             cell_gas_production_rate = 0.0
 
-            # Build primary phase context if using CoupledRateControl
+            # Build primary phase context if using ProducerRateControl
             primary_phase_context = {}
             if is_couple_controlled:
                 primary_phase_context = well.control.build_context(  # type: ignore

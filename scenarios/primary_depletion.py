@@ -34,7 +34,7 @@ def setup_run():
     )
 
     # Production well
-    control = bores.CoupledRateControl(
+    control = bores.ProducerRateControl(
         primary_phase="oil",
         primary_control=bores.AdaptiveRateControl(
             target_rate=-2000,

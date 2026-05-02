@@ -142,7 +142,7 @@ producer = bores.production_well(
     well_name="PROD-1",
     perforating_intervals=[((14, 14, 0), (14, 14, 2))],
     radius=0.25,
-    control=bores.CoupledRateControl(
+    control=bores.ProducerRateControl(
         primary_phase=bores.FluidPhase.OIL,
         primary_control=bores.AdaptiveRateControl(
             target_rate=-400.0,
@@ -164,9 +164,9 @@ producer = bores.production_well(
 )
 ```
 
-The producer sits in the opposite corner at (14, 14). We use `CoupledRateControl` with oil as the primary phase and a target rate of -400 STB/day. The simulator computes the BHP needed to deliver that oil rate, and water flows naturally at whatever rate corresponds to that BHP. The `bhp_limit=800.0` prevents the BHP from dropping below 800 psi. The `ProductionClamp` prevents any accidental backflow of water into the reservoir.
+The producer sits in the opposite corner at (14, 14). We use `ProducerRateControl` with oil as the primary phase and a target rate of -400 STB/day. The simulator computes the BHP needed to deliver that oil rate, and water flows naturally at whatever rate corresponds to that BHP. The `bhp_limit=800.0` prevents the BHP from dropping below 800 psi. The `ProductionClamp` prevents any accidental backflow of water into the reservoir.
 
-Notice that the `produced_fluids` list includes both oil and water. Before water breakthrough, the producer will mainly produce oil. After breakthrough, an increasing fraction of the produced fluid will be water. Because we use `CoupledRateControl`, the oil rate stays at the target while the water rate grows with increasing water cut.
+Notice that the `produced_fluids` list includes both oil and water. Before water breakthrough, the producer will mainly produce oil. After breakthrough, an increasing fraction of the produced fluid will be water. Because we use `ProducerRateControl`, the oil rate stays at the target while the water rate grows with increasing water cut.
 
 ---
 

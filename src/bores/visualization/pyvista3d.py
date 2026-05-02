@@ -1875,7 +1875,7 @@ class DataVisualizer:
         labels: typing.Optional[Labels] = None,
         show_wells: bool = False,
         **kwargs: typing.Any,
-    ) -> typing.Any:
+    ) -> pv.Plotter:
         """
         Create interactive 3D visualization of reservoir data.
 
@@ -1908,7 +1908,7 @@ class DataVisualizer:
             - threshold/sample_rate/point_size: Scatter3D options
             - injection_color/production_color: Well colors
         :return: Configured `pv.Plotter` instance. Call `.show()` to display
-        :raises ValidationError: If inputs are invalid or incompatible
+        :raises: `ValidationError` If inputs are invalid or incompatible
 
         Examples:
         ```python
@@ -2128,7 +2128,7 @@ class DataVisualizer:
         output_gif: typing.Optional[str] = None,
         labels: typing.Optional[Labels] = None,
         **kwargs: typing.Any,
-    ) -> typing.List[typing.Any]:
+    ) -> typing.List[pv.Plotter]:
         """
         Create animation from time-series data with optional export.
 
@@ -2213,7 +2213,7 @@ class DataVisualizer:
         if exporter is not None:
 
             def _frames(
-                plotter: typing.List[pv.Plotter],
+                plotters: typing.List[pv.Plotter],
             ) -> typing.Generator[npt.NDArray, None, None]:
                 for i, item in enumerate(sequence[::step_size]):
                     frame_title = title or (

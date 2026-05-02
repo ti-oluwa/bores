@@ -103,7 +103,7 @@ def setup_grid():
     # -------------------------------------------------------------------------
     kx_values = bores.array([500.0, 50.0, 200.0])  # mD
     ky_values = bores.array([500.0, 50.0, 200.0])  # mD
-    kz_values = bores.array([50.0, 50.0, 25.0])  # mD  (kv = 0.1 × kh)
+    kz_values = bores.array([50.0, 5.0, 20.0])  # mD  (kv = 0.1 × kh)
 
     kx_grid = bores.layered_grid(
         grid_shape=grid_shape,
@@ -608,7 +608,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
     relative_permeability_table = bores.ThreePhaseRelPermTable(
         oil_water_table=oil_water_table,
         gas_oil_table=gas_oil_table,
-        mixing_rule="eclipse_rule",
+        mixing_rule="max_rule",
     )
     rock_fluid_tables = bores.RockFluidTables(
         relative_permeability_table=relative_permeability_table
@@ -684,14 +684,14 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         well_name="OIL-PROD",
         perforating_intervals=[((9, 9, 2), (9, 9, 2))],
         radius=0.25,
-        control=bores.CoupledRateControl(
-            primary_phase="oil",
-            primary_control=bores.AdaptiveRateControl(
+        control=bores.ProducerRateControl(
+            controlling_phase="oil",
+            control=bores.AdaptiveRateControl(
                 target_rate=-20000,  # 20 MSTB/D (negative = production)
                 bhp_limit=1000.0,  # min BHP (psia)
                 clamp=bores.ProductionClamp(),
             ),
-            secondary_clamp=bores.ProductionClamp(),
+            clamp=bores.ProductionClamp(),
         ),
         produced_fluids=[
             bores.ProducedFluid(
@@ -745,13 +745,13 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         pvt_tables=pvt_tables,
         wells=wells,
         disable_capillary_effects=True,
-        freeze_saturation_pressure=True,
+        # freeze_saturation_pressure=True,
         maximum_gas_saturation_change=0.05,
         maximum_oil_saturation_change=0.05,
         maximum_water_saturation_change=0.05,
         maximum_newton_saturation_change=0.05,
         maximum_pressure_change=300.0,
-        cfl_threshold=0.6,
+        cfl_threshold=0.8,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
     return (wells,)
@@ -775,9 +775,6 @@ def run_simulation(Path, bores):
     # with bores.StateStream(run, store=store, background_io=True) as stream:
     #     last_state = stream.last()
     #     last_state.model.save(Path("./benchmarks/runs/spe1/results/model.h5"))
-
-    # with bores.new_task_pool(concurrency=3) as pool:
-    #     states = list(run(config=config.with_updates(task_pool=pool)))
 
     states = list(run)
     return (states,)
@@ -826,7 +823,7 @@ def setup_analysis(bores, states):
         avg_oil_sat = fluid_properties.oil_saturation_grid.mean()
         avg_water_sat = fluid_properties.water_saturation_grid.mean()
         avg_gas_sat = fluid_properties.gas_saturation_grid[9, 9, 2]
-        avg_pressure = s.rates.injection_bhps.gas[0, 0, 0]
+        avg_pressure = s.rates.production_bhps.gas[9, 9, 2]
 
         oil_hysteresis_state.append((time_step, avg_oil_sat))
         water_hysteresis_state.append((time_step, avg_water_sat))
@@ -855,9 +852,9 @@ def setup_analysis(bores, states):
         analyst,
         avg_pressure_history,
         displacement_efficiency_history,
+        gas_hysteresis_state,
         gas_injection_rate_history,
         gas_rate_history,
-        gas_hysteresis_state,
         gor_history,
         oil_rate_history,
         recovery_efficiency_history,
@@ -1180,7 +1177,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 
 @app.cell
 def _(bores):
-    viz = bores.pyvista3d.DataVisualizer(bores.pyvista3d.PlotConfig(off_screen=False))
+    viz = bores.pyvista3d.DataVisualizer(config=bores.pyvista3d.PlotConfig(off_screen=False))
     return (viz,)
 
 
@@ -1212,7 +1209,7 @@ def _(bores, states, viz, wells):
 
     property = "gas-sat"
     figures = []
-    timesteps = [168]
+    timesteps = [250]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

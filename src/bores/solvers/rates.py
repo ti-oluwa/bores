@@ -24,7 +24,7 @@ from bores.types import (
     ThreeDimensions,
 )
 from bores.wells.base import Wells
-from bores.wells.controls import CoupledRateControl
+from bores.wells.controls import ProducerRateControl
 from bores.wells.core import get_pseudo_pressure_table
 from bores.wells.indices import WellsIndices
 
@@ -213,7 +213,7 @@ def compute_well_rates(
         injected_fluid = well.injected_fluid
         injected_phase = injected_fluid.phase
         is_gas = injected_phase == FluidPhase.GAS
-        use_pseudo_pressure = config.use_pseudo_pressure and is_gas
+        use_pseudo_pressure = is_gas and config.use_pseudo_pressure
         indices = wells_indices.injection[well.name]
 
         for perforation_index in indices:
@@ -297,7 +297,6 @@ def compute_well_rates(
             )
             if can_flow:
                 if not use_pseudo_pressure:
-                    # Regular linear
                     well_transmissibility = (
                         well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
                     )
@@ -353,7 +352,7 @@ def compute_well_rates(
         if not well.is_open:
             continue
 
-        is_couple_controlled = isinstance(well.control, CoupledRateControl)
+        is_producer_control = isinstance(well.control, ProducerRateControl)
         indices = wells_indices.production[well.name]
 
         for perforation_index in indices:
@@ -363,8 +362,9 @@ def compute_well_rates(
             cell_pressure = typing.cast(float, pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
 
-            context: dict = {}
-            if is_couple_controlled:
+            shared_bhp: typing.Optional[float] = None
+            if is_producer_control:
+                # Compute shared BHP once, before the phase loop
                 context = well.control.build_context(  # type: ignore
                     produced_fluids=well.produced_fluids,
                     oil_mobility=oil_relative_mobility_grid[i, j, k],
@@ -377,9 +377,17 @@ def compute_well_rates(
                     water_compressibility=water_compressibility_grid[i, j, k],
                     gas_compressibility=gas_compressibility_grid[i, j, k],
                     oil_viscosity=oil_viscosity_grid[i, j, k],
-                    gas_viscosity=gas_viscosity_grid[i, j, k],
                     water_viscosity=water_viscosity_grid[i, j, k],
+                    gas_viscosity=gas_viscosity_grid[i, j, k],
                 )
+                if context:
+                    shared_bhp = well.control.compute_bhp(  # type: ignore
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        well_index=well_index,
+                        allocation_fraction=allocation_fraction,
+                        **context,
+                    )
 
             water_flow_rate = 0.0
             oil_flow_rate = 0.0
@@ -398,7 +406,7 @@ def compute_well_rates(
                 produced_phase = produced_fluid.phase
                 is_gas = produced_phase == FluidPhase.GAS
                 is_water = produced_phase == FluidPhase.WATER
-                use_pseudo_pressure = config.use_pseudo_pressure and is_gas
+                use_pseudo_pressure = is_gas and config.use_pseudo_pressure
 
                 if is_gas:
                     phase_mobility = typing.cast(
@@ -434,22 +442,41 @@ def compute_well_rates(
                     )
                     phase_viscosity = typing.cast(float, oil_viscosity_grid[i, j, k])
 
-                control = well.get_control(
-                    pressure=cell_pressure,
-                    temperature=cell_temperature,
-                    well_index=well_index,
-                    phase_viscosity=phase_viscosity,
-                    phase_mobility=phase_mobility,
-                    fluid=produced_fluid,
-                    fluid_compressibility=phase_compressibility,
-                    use_pseudo_pressure=use_pseudo_pressure,
-                    formation_volume_factor=phase_fvf,
-                    allocation_fraction=allocation_fraction,
-                    pvt_tables=config.pvt_tables,
-                    **context,
-                )
-                flow_rate = control.rate
-                effective_bhp = control.bhp
+                if is_producer_control and shared_bhp is not None:
+                    # BHP already computed above. Each phase uses its own mobility
+                    # but all phases share the same BHP.
+                    flow_rate = well.control.get_flow_rate(
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        well_index=well_index,
+                        fluid=produced_fluid,
+                        formation_volume_factor=phase_fvf,
+                        shared_bhp=shared_bhp,
+                        phase_viscosity=phase_viscosity,
+                        phase_mobility=phase_mobility,
+                        allocation_fraction=allocation_fraction,
+                        is_active=well.is_open,
+                        use_pseudo_pressure=use_pseudo_pressure,
+                        fluid_compressibility=phase_compressibility,
+                        pvt_tables=config.pvt_tables,
+                    )
+                    effective_bhp = shared_bhp
+                else:
+                    control = well.get_control(
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        well_index=well_index,
+                        phase_viscosity=phase_viscosity,
+                        phase_mobility=phase_mobility,
+                        fluid=produced_fluid,
+                        fluid_compressibility=phase_compressibility,
+                        use_pseudo_pressure=use_pseudo_pressure,
+                        formation_volume_factor=phase_fvf,
+                        allocation_fraction=allocation_fraction,
+                        pvt_tables=config.pvt_tables,
+                    )
+                    flow_rate = control.rate
+                    effective_bhp = control.bhp
 
                 if flow_rate > 0.0 and config.warn_well_anomalies:
                     _warn_production_rate(
@@ -481,7 +508,6 @@ def compute_well_rates(
                             phase_transmissibility * effective_bhp
                         )
                     else:
-                        # Pseudo pressure linearization
                         phase_transmissibility = (
                             well_index
                             * phase_mobility
@@ -510,7 +536,6 @@ def compute_well_rates(
                     gas_phase_fvf = phase_fvf
                     if can_flow:
                         gas_effective_bhp = effective_bhp
-
                     net_gas_well_rate_grid[i, j, k] += flow_rate
                     net_gas_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 elif is_water:
@@ -521,7 +546,6 @@ def compute_well_rates(
                     water_phase_fvf = phase_fvf
                     if can_flow:
                         water_effective_bhp = effective_bhp
-
                     net_water_well_rate_grid[i, j, k] += flow_rate
                     net_water_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 else:
@@ -532,7 +556,6 @@ def compute_well_rates(
                     oil_phase_fvf = phase_fvf
                     if can_flow:
                         oil_effective_bhp = effective_bhp
-
                     net_oil_well_rate_grid[i, j, k] += flow_rate
                     net_oil_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
 

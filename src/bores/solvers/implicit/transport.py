@@ -1534,10 +1534,10 @@ def assemble_numerical_jacobian(
 
     for cell_idx in range(total_cell_count):
         i, j, k = from_1D_index(
-            cell_idx,
-            cell_count_x,
-            cell_count_y,
-            cell_count_z,
+            idx=cell_idx,
+            cell_count_x=cell_count_x,
+            cell_count_y=cell_count_y,
+            cell_count_z=cell_count_z,
         )
 
         # Affected cells: this cell + all face neighbours (for sparsity)
@@ -1615,21 +1615,21 @@ def assemble_numerical_jacobian(
             oil_saturation_grid[i, j, k] = original_oil_saturation
 
             for affected_idx in affected_cell_indices:
-                row_water = 2 * affected_idx
+                water_row = 2 * affected_idx
                 dR_water = (
-                    residual_perturbed[row_water] - residual_base[row_water]
+                    residual_perturbed[water_row] - residual_base[water_row]
                 ) / epsilon
                 if abs(dR_water) > 1e-30:
-                    rows.append(row_water)
+                    rows.append(water_row)
                     cols.append(column)
                     vals.append(dR_water)
 
-                row_gas = 2 * affected_idx + 1
+                gas_row = 2 * affected_idx + 1
                 dR_gas = (
-                    residual_perturbed[row_gas] - residual_base[row_gas]
+                    residual_perturbed[gas_row] - residual_base[gas_row]
                 ) / epsilon
                 if abs(dR_gas) > 1e-30:
-                    rows.append(row_gas)
+                    rows.append(gas_row)
                     cols.append(column)
                     vals.append(dR_gas)
 

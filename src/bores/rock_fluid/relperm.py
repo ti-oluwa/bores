@@ -1577,14 +1577,14 @@ def eclipse_rule(
     """
     total_mobile = oil_saturation + water_saturation + gas_saturation
 
-    # Saturation factors - use np.where to avoid type inconsistency
+    # Saturation factors
     denom_w = oil_saturation + gas_saturation
     f_w = np.where(denom_w > 0.0, oil_saturation / denom_w, 0.0)
 
     denom_g = oil_saturation + water_saturation
     f_g = np.where(denom_g > 0.0, oil_saturation / denom_g, 0.0)
 
-    # Return 0 if total_mobile is zero, otherwise compute kro
+    # Return 0 if `total_mobile` is zero, otherwise compute kro
     result = (kro_w * f_w) + (kro_g * f_g)
     return np.where(total_mobile > 0.0, result, 0.0)
 

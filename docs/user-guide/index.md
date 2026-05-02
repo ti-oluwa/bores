@@ -14,7 +14,7 @@ The User Guide provides detailed documentation for every major subsystem in BORE
 | [Fluids](fluids.md) | Fluid class, custom gas characterization, pseudo-pressure for gas wells |
 | **Wells** | |
 | [Well Basics](wells/basics.md) | Production and injection wells, perforations, well index, skin factor |
-| [Well Controls](wells/controls.md) | Rate controls, BHP controls, CoupledRateControl, MultiPhaseControl |
+| [Well Controls](wells/controls.md) | Rate controls, BHP controls, ProducerRateControl, MultiPhaseControl |
 | [Well Fluids](wells/fluids.md) | Produced fluids, injected fluids, CO2 property overrides |
 | [Well Schedules](wells/schedules.md) | Time-dependent well events, predicates, and actions |
 | [Well Patterns](wells/patterns.md) | Common well placement patterns for waterfloods and EOR |

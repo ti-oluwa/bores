@@ -25,7 +25,7 @@ produced_fluids = [
 ]
 
 # Production control
-prod_control = bores.CoupledRateControl(
+prod_control = bores.ProducerRateControl(
     primary_phase=bores.FluidPhase.OIL,
     primary_control=bores.AdaptiveRateControl(
         target_rate=-300.0,

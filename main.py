@@ -98,7 +98,7 @@ producer = bores.production_well(
     well_name="PROD-1",
     perforating_intervals=[((9, 9, 1), (9, 9, 1))],
     radius=0.25,
-    control=bores.CoupledRateControl(
+    control=bores.ProducerRateControl(
         primary_phase=bores.FluidPhase.OIL,  # Can be set to "oil" too
         primary_control=bores.AdaptiveRateControl(
             target_rate=-10000.0,
@@ -159,7 +159,7 @@ config = bores.Config(
     maximum_pressure_change=500,
     # freeze_saturation_pressure=True,
     # disable_capillary_effects=True,
-    cfl_threshold=0.5,    
+    cfl_threshold=0.5,
 )
 
 

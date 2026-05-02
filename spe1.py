@@ -12,7 +12,7 @@ from bores.correlations.core import (
 
 logging.basicConfig(level=logging.DEBUG)
 
-# bores.use_32bit_precision()
+bores.use_32bit_precision()
 
 # -------------------------------------------------------------------------
 # Grid geometry — SPE1 benchmark (Odeh, 1981, JPT)
@@ -92,7 +92,7 @@ rock_compressibility = 3.0e-6  # 1/psi
 # -------------------------------------------------------------------------
 kx_values = bores.array([500.0, 50.0, 200.0])  # mD
 ky_values = bores.array([500.0, 50.0, 200.0])  # mD
-kz_values = bores.array([50.0, 50.0, 25.0])  # mD
+kz_values = bores.array([50.0, 5.0, 20.0])  # mD
 
 kx_grid = bores.layered_grid(
     grid_shape=grid_shape,
@@ -423,7 +423,6 @@ model = bores.reservoir_model(
     connate_water_saturation_grid=connate_water_saturation_grid,
     residual_gas_saturation_grid=residual_gas_saturation_grid,
     net_to_gross_grid=net_to_gross_grid,
-    # solution_gas_to_oil_ratio_grid=bores.uniform_grid(grid_shape),
     water_salinity_grid=bores.uniform_grid(grid_shape),
     dip_angle=0.0,
     dip_azimuth=0.0,
@@ -553,45 +552,10 @@ oil_water_table = bores.TwoPhaseRelPermTable(
 relative_permeability_table = bores.ThreePhaseRelPermTable(
     oil_water_table=oil_water_table,
     gas_oil_table=gas_oil_table,
-    mixing_rule="eclipse_rule",
+    mixing_rule=bores.eclipse_rule,
 )
 rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=relative_permeability_table
-)
-
-# Gas pseudo-pressure table — Table 2 (Odeh 1981)
-gas_pressures = bores.array(
-    [
-        14.7,
-        264.7,
-        514.7,
-        1014.7,
-        2014.7,
-        2514.7,
-        3014.7,
-        4014.7,
-        5014.7,
-        9014.7,
-    ]
-)
-gas_pseudo_pressures = bores.array(
-    [
-        0.000e0,  # 14.7
-        7.77916e6,  # 264.7
-        2.67580e7,  # 514.7
-        8.75262e7,  # 1014.7
-        2.70709e8,  # 2014.7
-        3.86910e8,  # 2514.7
-        5.16118e8,  # 3014.7
-        8.03963e8,  # 4014.7
-        1.12256e9,  # 5014.7
-        2.51845e9,  # 9014.7
-    ]
-)
-pseudo_pressure_table = bores.PseudoPressureTable(
-    pressures=gas_pressures,
-    pseudo_pressures=gas_pseudo_pressures,
-    reference_pressure=14.7,
 )
 
 # Wells
@@ -615,7 +579,6 @@ injector = bores.injection_well(
         molecular_weight=gas_molecular_weight,
         is_miscible=False,
         pvt_table=pvt_tables.gas,
-        pseudo_pressure_table=pseudo_pressure_table,
     ),
     is_active=True,
     skin_factor=0.0,
@@ -627,9 +590,8 @@ producer = bores.production_well(
     well_name="OIL-PROD",
     perforating_intervals=[((9, 9, 2), (9, 9, 2))],
     radius=0.25,
-    control=bores.CoupledRateControl(
-        primary_phase="oil",
-        primary_control=bores.AdaptiveRateControl(
+    control=bores.ProducerRateControl(
+        control=bores.AdaptiveRateControl(
             target_rate=-20000,  # 20 MSTB/D
             bhp_limit=1000.0,  # min BHP (psia)
             clamp=bores.ProductionClamp(),
@@ -647,7 +609,6 @@ producer = bores.production_well(
             phase=bores.FluidPhase.GAS,
             specific_gravity=0.792,
             molecular_weight=gas_molecular_weight,
-            pseudo_pressure_table=pseudo_pressure_table,
         )
     ],
     skin_factor=0.0,
@@ -659,7 +620,7 @@ timer = bores.Timer(
     initial_step_size=bores.Time(days=1.0),
     maximum_step_size=bores.Time(days=30.0),
     minimum_step_size=bores.Time(minutes=10.0),
-    simulation_time=bores.Time(years=3.5),
+    simulation_time=bores.Time(years=10.0),
     ramp_up_factor=1.3,
     maximum_rejections=20,
 )
@@ -691,3 +652,6 @@ print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
     f"Final average pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi"
 )
+viz = bores.pyvista3d.DataVisualizer()
+plotter = viz.make_plot(final, property="oil_saturation", show_wells=True)
+plotter.show()

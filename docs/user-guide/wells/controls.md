@@ -6,7 +6,7 @@ Well controls define the operating strategy for each well: how the simulator det
 
 In real field operations, wells are typically controlled by one of two modes: constant rate (the operator sets a target production or injection rate, and the well delivers that rate as long as it physically can) or constant pressure (the operator sets a bottom-hole pressure, and the well produces or injects whatever rate the reservoir can deliver at that drawdown). Most production wells start under rate control and switch to pressure control when the reservoir can no longer sustain the target rate. BORES models this with the `AdaptiveRateControl`, which automatically switches between rate and pressure modes.
 
-For production wells in three-phase simulation, a single-phase control is rarely sufficient because oil, water, and gas all flow simultaneously. The standard approach is to control the rate of one "primary" phase (usually oil) and let the other phases produce at whatever rate corresponds to the resulting bottom-hole pressure. BORES provides `CoupledRateControl` for this purpose, and `MultiPhaseControl` for cases where you need separate controls for each phase.
+For production wells in three-phase simulation, a single-phase control is rarely sufficient because oil, water, and gas all flow simultaneously. The standard approach is to control the rate of one "primary" phase (usually oil) and let the other phases produce at whatever rate corresponds to the resulting bottom-hole pressure. BORES provides `ProducerRateControl` for this purpose, and `MultiPhaseControl` for cases where you need separate controls for each phase.
 
 ---
 
@@ -113,7 +113,7 @@ This is the industry-standard approach for modeling depletion-drive reservoirs w
 
 ---
 
-## `CoupledRateControl`
+## `ProducerRateControl`
 
 The recommended control for production wells in three-phase simulation. It fixes the rate of one "primary" phase (typically oil) and computes the BHP required to deliver that rate. All other phases (water and gas) then produce at whatever their natural Darcy rates are at the resulting BHP.
 
@@ -122,7 +122,7 @@ This is the standard approach in reservoir simulation because it reflects how pr
 ```python
 import bores
 
-control = bores.CoupledRateControl(
+control = bores.ProducerRateControl(
     primary_phase=bores.FluidPhase.OIL,
     primary_control=bores.AdaptiveRateControl(
         target_rate=-500.0,
@@ -151,9 +151,9 @@ At each timestep, for each grid cell the well perforates:
 
 This approach ensures physical consistency: all phases share the same wellbore pressure, and the total production rate is the sum of the individual phase rates at that pressure.
 
-!!! tip "Always Use CoupledRateControl for Producers"
+!!! tip "Always Use ProducerRateControl for Producers"
 
-    For production wells in three-phase simulations, always use `CoupledRateControl` rather than a bare `AdaptiveRateControl`. A bare `AdaptiveRateControl` applies the same target rate to ALL phases independently, which is physically incorrect. With `CoupledRateControl`, you control only the phase you care about and let the others flow naturally.
+    For production wells in three-phase simulations, always use `ProducerRateControl` rather than a bare `AdaptiveRateControl`. A bare `AdaptiveRateControl` applies the same target rate to ALL phases independently, which is physically incorrect. With `ProducerRateControl`, you control only the phase you care about and let the others flow naturally.
 
 ---
 
@@ -182,7 +182,7 @@ control = bores.MultiPhaseControl(
 )
 ```
 
-Each phase operates under its own control independently. This is less physically realistic than `CoupledRateControl` (because in reality, all phases share the same wellbore pressure), but it is useful for certain history-matching scenarios where you want to prescribe known production rates for each phase separately.
+Each phase operates under its own control independently. This is less physically realistic than `ProducerRateControl` (because in reality, all phases share the same wellbore pressure), but it is useful for certain history-matching scenarios where you want to prescribe known production rates for each phase separately.
 
 | Parameter | Default | Description |
 | --- | --- | --- |
@@ -192,7 +192,7 @@ Each phase operates under its own control independently. This is less physically
 
 !!! info "When to Use MultiPhaseControl"
 
-    Use `MultiPhaseControl` when you have measured production data for each phase separately and want to replay those rates in a history-matching study. For predictive simulations, `CoupledRateControl` is more physically meaningful because it lets the reservoir determine the water cut and GOR based on mobility and relative permeability.
+    Use `MultiPhaseControl` when you have measured production data for each phase separately and want to replay those rates in a history-matching study. For predictive simulations, `ProducerRateControl` is more physically meaningful because it lets the reservoir determine the water cut and GOR based on mobility and relative permeability.
 
 ---
 
@@ -237,8 +237,8 @@ control = bores.RateControl(
 
 | Scenario | Recommended Control |
 | --- | --- |
-| Production well (general case) | `CoupledRateControl` with `AdaptiveRateControl` |
-| Gas production well | `CoupledRateControl` with `primary_phase=GAS` |
+| Production well (general case) | `ProducerRateControl` with `AdaptiveRateControl` |
+| Gas production well | `ProducerRateControl` with `primary_phase=GAS` |
 | Water injection | `RateControl` or `AdaptiveRateControl` |
 | Gas injection | `RateControl` or `AdaptiveRateControl` |
 | Constant-pressure production | `BHPControl` with `ProductionClamp` |

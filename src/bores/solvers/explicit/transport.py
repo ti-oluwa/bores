@@ -1650,7 +1650,7 @@ def apply_updates(
                     net_gas_total_mass_flux_grid[i, j, k] + well_gas_mass_rate
                 )
 
-                # Free gas saturation — simultaneous solution
+                # Compute free gas saturation using simultaneous solution
                 #
                 # Substituting So = 1 - Sw - Sg into the gas mass balance:
                 #   M_g = rho_g*Sg + rho_o*alpha*(1-Sw-Sg) + rho_w*alpha_w*Sw

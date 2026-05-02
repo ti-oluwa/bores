@@ -2047,6 +2047,10 @@ def run(
     capture_timer_state = config.capture_timer_state
     enable_hysteresis = config.enable_hysteresis
     apply_dip = not config.disable_structural_dip
+    needs_injector_seeding = (
+        config.minimum_injector_water_saturation
+        and config.minimum_injector_gas_saturation
+    )
 
     logger.info("Starting simulation workflow...")
     logger.info(
@@ -2109,7 +2113,7 @@ def run(
         model = model.evolve(fluid_properties=fluid_properties)
 
         # Seed injector saturations to avoid phase deadlock at t=0
-        if has_wells:
+        if has_wells and needs_injector_seeding:
             logger.debug("Seeding injection saturations in injector perforations...")
             fluid_properties = seed_injection_saturations(
                 fluid_properties=fluid_properties,
@@ -2219,7 +2223,7 @@ def run(
                     well_schedules.apply(wells, state)
 
                 if new_step > 1:
-                    if has_wells:
+                    if has_wells and needs_injector_seeding:
                         logger.debug(
                             "Enforcing minimum injector saturations for time step %d...",
                             new_step,

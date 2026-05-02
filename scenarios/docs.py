@@ -121,12 +121,12 @@ def _():
     )
 
     # Production well in opposite corner (9,9) perforated across all 3 layers.
-    # CoupledRateControl fixes the oil rate; water and gas flow naturally.
+    # ProducerRateControl fixes the oil rate; water and gas flow naturally.
     producer = bores.production_well(
         well_name="PROD-1",
         perforating_intervals=[((9, 9, 2), (9, 9, 2))],
         radius=0.25,  # ft
-        control=bores.CoupledRateControl(
+        control=bores.ProducerRateControl(
             primary_phase=bores.FluidPhase.OIL,
             primary_control=bores.AdaptiveRateControl(
                 target_rate=-10_000.0,  # produce 10,000 STB/day of oil

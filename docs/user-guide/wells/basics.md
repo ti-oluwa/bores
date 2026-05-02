@@ -53,7 +53,7 @@ producer = bores.production_well(
             molecular_weight=16.04,
         ),
     ],
-    control=bores.CoupledRateControl(
+    control=bores.ProducerRateControl(
         primary_phase=bores.FluidPhase.OIL,
         primary_control=bores.AdaptiveRateControl(
             target_rate=-500.0,

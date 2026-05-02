@@ -255,7 +255,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
         :param pvt_tables: `PVTTables` object for fluid property lookups
-        :param kwargs: Additional control-specific context (e.g., primary phase properties for CoupledRateControl).
+        :param kwargs: Additional control-specific context (e.g., primary phase properties for ProducerRateControl).
         :return: The flow rate in (bbl/day or ft³/day).
         """
         return self.control.get_flow_rate(
@@ -303,7 +303,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
         :param pvt_tables: `PVTTables` object for fluid property lookups
-        :param kwargs: Additional control-specific context (e.g., primary phase properties for CoupledRateControl).
+        :param kwargs: Additional control-specific context (e.g., primary phase properties for ProducerRateControl).
         :return: The bottom-hole pressure (psi).
         """
         return self.control.get_bottom_hole_pressure(
@@ -352,7 +352,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
         :param pvt_tables: `PVTTables` object for fluid property lookups
-        :param kwargs: Additional control-specific context (e.g., primary phase properties for CoupledRateControl).
+        :param kwargs: Additional control-specific context (e.g., primary phase properties for ProducerRateControl).
         :return: `ControlInfo` containing the flow rate (bbl/day or
             ft³/day) and effective BHP (psi).
         """

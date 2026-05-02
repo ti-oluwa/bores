@@ -200,7 +200,7 @@ injector_control = bores.RateControl(
 )
 
 # Production well: fix the oil rate, let other phases flow naturally
-producer_control = bores.CoupledRateControl(
+producer_control = bores.ProducerRateControl(
     primary_phase=bores.FluidPhase.OIL,
     primary_control=bores.AdaptiveRateControl(
         target_rate=-500.0,       # -500 STB/day of oil (production)
