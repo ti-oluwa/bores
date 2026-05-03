@@ -1139,7 +1139,7 @@ def make_saturation_grid(
     """
     Build a 1-D saturation grid over `[s_min, s_max]`.
 
-    :param n_points: Number of grid points (≥ 2).
+    :param n_points: Number of grid points (>= 2).
     :param s_min: Physical saturation range. Must satisfy `0 ≤ s_min < s_max ≤ 1`.
     :param s_max: Physical saturation range. Must satisfy `0 ≤ s_min < s_max ≤ 1`.
     :param spacing: `"cosine"` (default) — Chebyshev-cosine spacing, denser at the
@@ -1148,7 +1148,7 @@ def make_saturation_grid(
     monotonically increasing.
     """
     if n_points < 2:
-        raise ValueError(f"`n_points` must be ≥ 2, got {n_points}")
+        raise ValueError(f"`n_points` must be >= 2, got {n_points}")
     if not (0.0 <= s_min < s_max <= 1.0):
         raise ValueError(
             f"Require 0 ≤ s_min < s_max ≤ 1, got `s_min={s_min}`, `s_max={s_max}`"

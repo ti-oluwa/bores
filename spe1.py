@@ -188,7 +188,7 @@ pvt_pressures = bores.array(
     ]
 )
 
-# Two temperature entries (isothermal at 200 °F; need ≥ 2 for 2-D table)
+# Two temperature entries (isothermal at 200 °F; need >= 2 for 2-D table)
 pvt_temperatures = bores.array([200.0, 201.0])
 
 # OIL: Solution GOR (Rs), Bo, μo, ρo — all from Table 2
@@ -590,7 +590,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="impes",
+    scheme="si",
     output_frequency=1,
     pressure_solver="direct",
     transport_solver="direct",
@@ -608,8 +608,16 @@ config = bores.Config(
     # jacobian_assembly_method="numerical"
 )
 
+run = bores.Run(
+    model,
+    config,
+    name="SPE1",
+    description="SPE 1ST Comparative Solution Project Test",
+    tags=["gas-injection", "benchmark"]
+)
+run.validate()
 # Run and monitor the simulation and collect states
-states = list(bores.monitor(model, config))
+states = list(bores.monitor(run))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(

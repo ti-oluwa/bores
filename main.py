@@ -99,14 +99,14 @@ producer = bores.production_well(
     perforating_intervals=[((9, 9, 1), (9, 9, 1))],
     radius=0.25,
     control=bores.ProducerRateControl(
-        primary_phase=bores.FluidPhase.OIL,  # Can be set to "oil" too
-        primary_control=bores.AdaptiveRateControl(
+        controlling_phase=bores.FluidPhase.OIL,  # Can be set to "oil" too
+        control=bores.AdaptiveRateControl(
             target_rate=-10000.0,
             target_phase="oil",
             bhp_limit=1000.0,
             clamp=bores.ProductionClamp(),
         ),
-        secondary_clamp=bores.ProductionClamp(),
+        clamp=bores.ProductionClamp(),
     ),
     produced_fluids=[
         bores.ProducedFluid(
@@ -162,9 +162,10 @@ config = bores.Config(
     cfl_threshold=0.5,
 )
 
-
+run = bores.Run(model, config)
+run.validate()
 # Run and monitor the simulation and collect states
-states = list(bores.monitor(model, config))
+states = list(bores.monitor(run))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(

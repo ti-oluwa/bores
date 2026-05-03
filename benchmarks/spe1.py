@@ -206,7 +206,7 @@ def setup_grid():
         ]
     )
 
-    # Two temperature entries (isothermal at 200 °F; need ≥ 2 for 2-D table)
+    # Two temperature entries (isothermal at 200 °F; need >= 2 for 2-D table)
     pvt_temperatures = bores.array([200.0, 201.0])
 
     # -------------------------------------------------------------------------
@@ -554,8 +554,26 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         wetting_phase_relative_permeability=kro_values,
         non_wetting_phase_relative_permeability=krg_values,
     )
+    # Immobile connate water — krw = 0 for all Sw <= 1
+    sw_values = bores.array([0.0, 0.12, 1.0])
+    krw_values = bores.array([0.0, 0.0, 0.0])  # connate water, never mobile
+    krow_values = bores.array([1.0, 1.0, 0.0])  # kro = 1 at Sw=Swc, 0 at Sw=1
+
+    oil_water_table = bores.TwoPhaseRelPermTable(
+        wetting_phase=bores.FluidPhase.WATER,
+        non_wetting_phase=bores.FluidPhase.OIL,
+        reference_saturation=sw_values,
+        reference_phase="wetting",
+        wetting_phase_relative_permeability=krw_values,
+        non_wetting_phase_relative_permeability=krow_values,
+    )
+
     rock_fluid_tables = bores.RockFluidTables(
-        relative_permeability_table=gas_oil_table
+        relative_permeability_table=bores.ThreePhaseRelPermTable(
+            oil_water_table=oil_water_table,
+            gas_oil_table=gas_oil_table,
+            mixing_rule="eclipse_rule",
+        )
     )
 
 

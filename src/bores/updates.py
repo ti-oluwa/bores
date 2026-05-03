@@ -103,7 +103,7 @@ def update_fluid_properties(
     - Recalculates bubble point pressure (Pb) using API, temperature, and gas gravity.
     - Determines GOR:
         - If current pressure < Pb: compute GOR using Vazquez-Beggs correlation.
-        - If current pressure ≥ Pb: GOR = GOR at Pb (Rs = Rs_b).
+        - If current pressure >= Pb: GOR = GOR at Pb (Rs = Rs_b).
     - Computes:
         - Oil formation volume factor (Bo) using pressure, Pb, GOR, and gravity.
         - Oil compressibility (Co) using updated GOR and Pb.

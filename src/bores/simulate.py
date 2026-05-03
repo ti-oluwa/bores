@@ -52,6 +52,7 @@ from bores.tables.pvt import PVTDataSet, PVTTables
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDimensions
 from bores.updates import update_fluid_properties, update_residual_saturation_grids
+from bores.validation import ValidationReport, validate
 from bores.wells.base import Wells
 from bores.wells.indices import WellsIndices, build_wells_indices, update_wells_indices
 
@@ -1882,7 +1883,7 @@ class Run(StoreSerializable):
     description: typing.Optional[str] = None
     """Detailed description of the simulation."""
 
-    tags: typing.Tuple[str, ...] = attrs.field(factory=tuple)
+    tags: typing.List[str] = attrs.field(factory=list)
     """Tags for organizing runs."""
 
     created_at: typing.Optional[str] = attrs.field(
@@ -1914,6 +1915,38 @@ class Run(StoreSerializable):
 
     def __iter__(self) -> typing.Iterator[ModelState[ThreeDimensions]]:
         return iter(self())
+
+    def validate(
+        self,
+        *,
+        correct_inplace: bool = True,
+        raise_on_error: bool = True,
+        zero_flow_tolerance: typing.Optional[float] = None,
+        emit_log: bool = True,
+    ) -> ValidationReport:
+        """
+        Run a comprehensive pre-simulation validation on *model* and *config*
+        using `validate`.
+
+        :param correct_inplace: When True, small correctable issues are fixed directly
+            on the model arrays. When False, they are reported as warnings or errors.
+        :param raise_on_error: When True, a `ModelValidationError` is raised after
+            all checks complete if any fatal errors were found.
+        :param zero_flow_tolerance: Override the tolerance for the zero-flow equilibrium
+            check. When None the value is selected automatically from grid scale.
+        :param emit_log: When True, each issue is emitted through `logging`.
+        :return: Full `ValidationReport`.
+        :raises ModelValidationError: If `raise_on_error=True` and any ERROR-severity
+            issues were found.
+        """
+        return validate(
+            self.model,
+            self.config,
+            correct_inplace=correct_inplace,
+            raise_on_error=raise_on_error,
+            zero_flow_tolerance=zero_flow_tolerance,
+            emit_log=emit_log,
+        )
 
     @classmethod
     def from_files(

@@ -410,7 +410,7 @@ class PVTTable(StoreSerializable):
 
         :param data: Phase-tagged raw PVT data or path to PVT data file.
         :param interpolation_method: `"linear"` (default) or `"cubic"`.
-            Cubic requires ≥ 4 points along each axis and uses a two-stage
+            Cubic requires >= 4 points along each axis and uses a two-stage
             PCHIP-along-axes method for 2D oil/gas tables.
         :param validate: Run physical-consistency checks on `data`.
         :param warn_on_extrapolation: Log a warning when queries fall outside
@@ -680,7 +680,7 @@ class PVTTable(StoreSerializable):
             and np.any(data.density_table >= 50.0)
         ):
             warnings.warn(
-                "Gas density table contains values ≥ 50 lbm/ft³, which is unusually "
+                "Gas density table contains values >= 50 lbm/ft³, which is unusually "
                 "high. Verify units (expected lbm/ft³).",
                 UserWarning,
                 stacklevel=3,
@@ -1560,7 +1560,7 @@ class PVTTables(StoreSerializable):
 
         :param dataset: Source `PVTDataSet` containing raw tabulated data.
         :param interpolation_method: `"linear"` (default) or `"cubic"`.
-            Cubic requires ≥ 4 points along each axis.
+            Cubic requires >= 4 points along each axis.
         :param validate: Run physical-consistency checks on each phase's data.
         :param warn_on_extrapolation: Log warnings when queries exceed table bounds.
         :param clamps: Property clamp overrides, a mapping of `FluidPhase` to per-phase clamp dicts.

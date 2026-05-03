@@ -1363,7 +1363,7 @@ def compute_gas_to_oil_ratio(
 
     Two regimes:
         - **Saturated region (P < Pb)**: GOR is pressure-dependent.
-        - **Undersaturated region (P ≥ Pb)**: GOR = GORb (constant). If not given, it is computed.
+        - **Undersaturated region (P >= Pb)**: GOR = GORb (constant). If not given, it is computed.
 
     The Vazquez-Beggs formula is:
 

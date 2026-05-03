@@ -59,7 +59,7 @@ def build_saturation_grids(
     │   So + Sw + Sg = 1.0               │  Sw = Swc
     │   Original accumulation            │  Sg = Sgr
     ├─────────────────────────────────────┤ ← Oil-Water Contact (OWC)
-    │   WATER ZONE (depth ≥ OWC)        │  Sw = 1 - Sor_water
+    │   WATER ZONE (depth >= OWC)        │  Sw = 1 - Sor_water
     │   Sw + So + Sg = 1.0               │  So = Sor_water
     │   Water has displaced oil          │  Sg = 0
     └─────────────────────────────────────┘
@@ -236,7 +236,7 @@ def build_saturation_grids(
     - Depth increases downward: smaller depth = shallower (top), larger depth = deeper (bottom)
     - Gas cap: depth < GOC (shallowest zone, uses Sor_gas)
     - Oil zone: GOC ≤ depth < OWC (middle zone, uses Sgr)
-    - Water zone: depth ≥ OWC (deepest zone, uses Sor_water)
+    - Water zone: depth >= OWC (deepest zone, uses Sor_water)
     - Inactive cells (porosity ≤ 0 or NaN) have zero saturation for all phases
     - All saturations are normalized to sum to exactly 1.0 in active cells
     - For heterogeneous reservoirs, provide spatially varying property grids

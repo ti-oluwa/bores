@@ -559,7 +559,7 @@ class Config(
     """
 
     zero_flow_relative_flux_tolerance: float = attrs.field(
-        default=1e-6,
+        default=1e-5,
         validator=attrs.validators.gt(0),
     )
     """

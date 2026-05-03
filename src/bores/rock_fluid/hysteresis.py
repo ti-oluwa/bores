@@ -75,7 +75,7 @@ def _compute_land_residual_saturation_scalar(
         drainage-imbibition reversal point.
     :param maximum_residual_saturation: Maximum residual saturation from the
         drainage endpoint (S_r_max).
-    :param land_trapping_coefficient: Land trapping coefficient *C* (≥ 0).
+    :param land_trapping_coefficient: Land trapping coefficient *C* (>= 0).
     :param saturation_epsilon: Small value to guard against division by zero.
     :return: Dynamic residual saturation (scalar).
     """
@@ -105,7 +105,7 @@ def _compute_land_residual_saturation_array(
         drainage-imbibition reversal points (1-D or N-D array).
     :param maximum_residual_saturation: Maximum residual saturation from the
         drainage endpoint (scalar).
-    :param land_trapping_coefficient: Land trapping coefficient *C* (≥ 0).
+    :param land_trapping_coefficient: Land trapping coefficient *C* (>= 0).
     :param saturation_epsilon: Small value to guard against division by zero.
     :return: Dynamic residual saturation array with the same shape as the input.
     """
@@ -138,7 +138,7 @@ def _compute_land_residual_saturation(
         drainage-imbibition reversal point (scalar or array).
     :param maximum_residual_saturation: Maximum residual saturation from the
         drainage endpoint (S_r_max).
-    :param land_trapping_coefficient: Land trapping coefficient *C* (≥ 0).
+    :param land_trapping_coefficient: Land trapping coefficient *C* (>= 0).
     :param saturation_epsilon: Small value to guard against division by zero.
     :return: Dynamic residual saturation matching the shape of the input.
     """
@@ -1090,10 +1090,10 @@ class KilloughLandRelPermModel(
     """Primary imbibition table for the gas-oil system. Defaults to the drainage table."""
 
     land_trapping_coefficient_water: float = 1.0
-    """Land trapping coefficient *C* for the oil-water system (≥ 0)."""
+    """Land trapping coefficient *C* for the oil-water system (>= 0)."""
 
     land_trapping_coefficient_gas: float = 1.0
-    """Land trapping coefficient *C* for the gas-oil system (≥ 0)."""
+    """Land trapping coefficient *C* for the gas-oil system (>= 0)."""
 
     maximum_residual_oil_saturation_water: typing.Optional[float] = None
     """
