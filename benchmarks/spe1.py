@@ -747,7 +747,7 @@ def setup_analysis(bores, states):
         avg_oil_sat = fluid_properties.oil_saturation_grid.mean()
         avg_water_sat = fluid_properties.water_saturation_grid.mean()
         avg_gas_sat = fluid_properties.gas_saturation_grid[9, 9, 2]
-        avg_pressure = s.rates.production_bhps.gas[9, 9, 2]
+        avg_pressure = s.rates.injection_bhps.gas[0,0,0]
 
         oil_saturation_history.append((time_step, avg_oil_sat))
         water_saturation_history.append((time_step, avg_water_sat))

@@ -590,7 +590,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="si",
+    scheme="impes",
     output_frequency=1,
     pressure_solver="direct",
     transport_solver="direct",
@@ -605,7 +605,7 @@ config = bores.Config(
     maximum_newton_saturation_change=0.05,
     maximum_pressure_change=300.0,
     cfl_threshold=0.6,
-    # jacobian_assembly_method="numerical"
+    # jacobian_assembly_method="numerical",
 )
 
 run = bores.Run(
@@ -613,17 +613,47 @@ run = bores.Run(
     config,
     name="SPE1",
     description="SPE 1ST Comparative Solution Project Test",
-    tags=["gas-injection", "benchmark"]
+    tags=["gas-injection", "benchmark"],
 )
 run.validate()
+
+
+def diagnostic(result: bores.StepResult) -> None:
+    producer_cell = (9, 9, 2)
+    i, j, k = producer_cell
+    fluid_properties = result.fluid_properties
+    cell_pressure = fluid_properties.pressure_grid[i, j, k]
+    cell_so = fluid_properties.oil_saturation_grid[i, j, k]
+    cell_sg = fluid_properties.gas_saturation_grid[i, j, k]
+    cell_pb = fluid_properties.oil_bubble_point_pressure_grid[i, j, k]
+
+    # Get producer BHP from rates
+    prod_bhp = result.rates.production_bhps.oil[i, j, k]
+
+    # Average reservoir pressure
+    avg_p = fluid_properties.pressure_grid.mean()
+
+    print(
+        f"Day {result.time / 86400:.1f}: "
+        f"P_cell={cell_pressure:.1f} P_avg={avg_p:.1f} "
+        f"BHP={prod_bhp:.1f} Pb={cell_pb:.1f} "
+        f"So={cell_so:.3f} Sg={cell_sg:.3f}"
+    )
+
+
 # Run and monitor the simulation and collect states
-states = list(bores.monitor(run))
+states = list(bores.monitor(run, on_step_accepted=diagnostic))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
     f"Final average pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi"
 )
 
-viz = bores.pyvista3d.DataVisualizer()
-plotter = viz.make_plot(final, property="gas_saturation", show_wells=True)
-plotter.show()
+# viz = bores.pyvista3d.DataVisualizer()
+# plotter = viz.make_plot(
+#     final,
+#     property="gas_saturation",
+#     show_wells=True,
+#     z_scale=10,
+# )
+# plotter.show()

@@ -539,6 +539,7 @@ def check_zero_flow_initialization(
     md_per_cp_to_ft2_per_psi_per_day = (
         c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
     )
+    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
 
     water_density_grid = fluid_properties.water_density_grid
     oil_density_grid = fluid_properties.oil_effective_density_grid
@@ -579,6 +580,7 @@ def check_zero_flow_initialization(
             elevation_grid=elevation_grid,
             gravitational_constant=gravitational_constant,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+            bbl_to_ft3=bbl_to_ft3,
             dtype=dtype,
         )
     )

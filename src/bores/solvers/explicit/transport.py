@@ -140,6 +140,7 @@ def solve_transport(
     :return: `Solution` containing updated saturations.
     """
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
+    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
     porosity_grid = rock_properties.porosity_grid
     net_to_gross_grid = rock_properties.net_to_gross_grid
 
@@ -209,6 +210,7 @@ def solve_transport(
         elevation_grid=elevation_grid,
         gravitational_constant=gravitational_constant,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        bbl_to_ft3=bbl_to_ft3,
         dtype=dtype,
     )
 
@@ -275,6 +277,7 @@ def solve_transport(
         cell_size_y=cell_size_y,
         time_step_in_days=time_step_in_days,
         cfl_threshold=config.cfl_threshold,
+        bbl_to_ft3=bbl_to_ft3,
         dtype=dtype,
     )
 
@@ -617,6 +620,7 @@ def assemble_flux_contributions(
     elevation_grid: ThreeDimensionalGrid,
     gravitational_constant: float,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
     dtype: npt.DTypeLike,
 ) -> typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid]:
     """
@@ -738,11 +742,13 @@ def assemble_flux_contributions(
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_oil_fvf
+                    * bbl_to_ft3
                 )
                 cell_alpha_gas_solubility_in_water = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_water_fvf
+                    * bbl_to_ft3
                 )
 
                 net_mass_water_flux = 0.0
@@ -784,6 +790,7 @@ def assemble_flux_contributions(
                             solution_gas_to_oil_ratio_grid[east_i, j, k]
                             * gas_formation_volume_factor_grid[east_i, j, k]
                             / max(oil_formation_volume_factor_grid[east_i, j, k], 1e-30)
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -795,6 +802,7 @@ def assemble_flux_contributions(
                             / max(
                                 water_formation_volume_factor_grid[east_i, j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -889,6 +897,7 @@ def assemble_flux_contributions(
                             solution_gas_to_oil_ratio_grid[west_i, j, k]
                             * gas_formation_volume_factor_grid[west_i, j, k]
                             / max(oil_formation_volume_factor_grid[west_i, j, k], 1e-30)
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -900,6 +909,7 @@ def assemble_flux_contributions(
                             / max(
                                 water_formation_volume_factor_grid[west_i, j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -996,6 +1006,7 @@ def assemble_flux_contributions(
                             / max(
                                 oil_formation_volume_factor_grid[i, south_j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -1007,6 +1018,7 @@ def assemble_flux_contributions(
                             / max(
                                 water_formation_volume_factor_grid[i, south_j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -1103,6 +1115,7 @@ def assemble_flux_contributions(
                             / max(
                                 oil_formation_volume_factor_grid[i, north_j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -1114,6 +1127,7 @@ def assemble_flux_contributions(
                             / max(
                                 water_formation_volume_factor_grid[i, north_j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -1210,6 +1224,7 @@ def assemble_flux_contributions(
                             / max(
                                 oil_formation_volume_factor_grid[i, j, bottom_k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -1222,6 +1237,7 @@ def assemble_flux_contributions(
                                 water_formation_volume_factor_grid[i, j, bottom_k],
                                 1e-30,
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -1316,6 +1332,7 @@ def assemble_flux_contributions(
                             solution_gas_to_oil_ratio_grid[i, j, top_k]
                             * gas_formation_volume_factor_grid[i, j, top_k]
                             / max(oil_formation_volume_factor_grid[i, j, top_k], 1e-30)
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -1327,6 +1344,7 @@ def assemble_flux_contributions(
                             / max(
                                 water_formation_volume_factor_grid[i, j, top_k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -1441,6 +1459,7 @@ def apply_updates(
     cell_size_y: float,
     time_step_in_days: float,
     cfl_threshold: float,
+    bbl_to_ft3: float,
     dtype: npt.DTypeLike,
 ) -> typing.Tuple[
     ThreeDimensionalGrid,
@@ -1574,11 +1593,13 @@ def apply_updates(
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_oil_fvf
+                    * bbl_to_ft3
                 )
                 current_alpha_rsw = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_water_fvf
+                    * bbl_to_ft3
                 )
 
                 # PVT alpha factors at old pressure
@@ -1596,11 +1617,13 @@ def apply_updates(
                     old_solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_old_gas_fvf
                     / safe_old_oil_fvf
+                    * bbl_to_ft3
                 )
                 old_alpha_rsw = (
                     old_gas_solubility_in_water_grid[i, j, k]
                     * safe_old_gas_fvf
                     / safe_old_water_fvf
+                    * bbl_to_ft3
                 )
 
                 old_water_saturation = old_water_saturation_grid[i, j, k]

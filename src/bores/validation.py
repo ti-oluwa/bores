@@ -403,29 +403,29 @@ def _validate_porosity(
     if n_negative == 0 and n_above_one == 0:
         active_porosity = porosity_grid[porosity_grid > 0.0]
         if active_porosity.size > 0:
-            porosity_mean = float(np.mean(active_porosity))
-            porosity_p10 = float(np.percentile(active_porosity, 10))
-            porosity_p90 = float(np.percentile(active_porosity, 90))
-            porosity_max = float(np.max(active_porosity))
+            mean_porosity = float(np.mean(active_porosity))
+            p10_porosity = float(np.percentile(active_porosity, 10))
+            p90_porosity = float(np.percentile(active_porosity, 90))
+            max_porosity = float(np.max(active_porosity))
         else:
-            porosity_mean = porosity_p10 = porosity_p90 = porosity_max = 0.0
+            mean_porosity = p10_porosity = p90_porosity = max_porosity = 0.0
 
         report.info(
             check,
-            f"Porosity valid. Mean φ = {porosity_mean:.4f}  "
-            f"P10/P90 = {porosity_p10:.4f}/{porosity_p90:.4f}  "
+            f"Porosity valid. Mean φ = {mean_porosity:.4f}  "
+            f"P10/P90 = {p10_porosity:.4f}/{p90_porosity:.4f}  "
             f"Zero-porosity cells: {n_zero}/{total_cells}.",
         )
-        if porosity_max > 0.5:
+        if max_porosity > 0.5:
             report.warn(
                 check,
-                f"Maximum porosity {porosity_max:.4f} exceeds 0.5. Unusual for conventional reservoirs.",
+                f"Maximum porosity {max_porosity:.4f} exceeds 0.5. Unusual for conventional reservoirs.",
                 "Verify units and data source. Acceptable for vuggy carbonates.",
             )
-        if porosity_max < 0.01:
+        if max_porosity < 0.01:
             report.warn(
                 check,
-                f"Maximum porosity {porosity_max:.4f}. Check whether values are in percent rather than fraction.",
+                f"Maximum porosity {max_porosity:.4f}. Check whether values are in percent rather than fraction.",
             )
 
 
@@ -665,15 +665,15 @@ def _validate_pressure_gradient(
         report.info(check, "Single-layer model. Vertical gradient check skipped.")
         return
 
-    pressure_top = float(np.mean(pressure_grid[:, :, 0]))
-    pressure_bottom = float(np.mean(pressure_grid[:, :, nz - 1]))
+    top_pressure = float(np.mean(pressure_grid[:, :, 0]))
+    bottom_pressure = float(np.mean(pressure_grid[:, :, nz - 1]))
     total_thickness = float(np.sum(thickness_grid[0, 0, :]))
 
     if total_thickness <= 0.0:
         report.warn(check, "Total reservoir thickness ≤ 0 ft. Gradient check skipped.")
         return
 
-    vertical_gradient = abs(pressure_bottom - pressure_top) / total_thickness
+    vertical_gradient = abs(bottom_pressure - top_pressure) / total_thickness
     if vertical_gradient > 0.55:
         report.warn(
             check,
@@ -995,18 +995,22 @@ def _validate_fluid_contacts(model: ReservoirModel, report: ValidationReport) ->
         report.info(check, "No free gas saturation. GOC contact check skipped.")
         return
 
-    total_gas = float(np.sum(gas_saturation))
-    total_oil = float(np.sum(oil_saturation))
-    total_water = float(np.sum(water_saturation))
+    total_gas_saturation = float(np.sum(gas_saturation))
+    total_oil_saturation = float(np.sum(oil_saturation))
+    total_water_saturation = float(np.sum(water_saturation))
 
-    if total_gas < 1e-9 or total_oil < 1e-9:
+    if total_gas_saturation < 1e-9 or total_oil_saturation < 1e-9:
         return
 
-    gas_depth_centroid = float(np.sum(gas_saturation * depth_grid)) / total_gas
-    oil_depth_centroid = float(np.sum(oil_saturation * depth_grid)) / total_oil
+    gas_depth_centroid = (
+        float(np.sum(gas_saturation * depth_grid)) / total_gas_saturation
+    )
+    oil_depth_centroid = (
+        float(np.sum(oil_saturation * depth_grid)) / total_oil_saturation
+    )
     water_depth_centroid = (
-        float(np.sum(water_saturation * depth_grid)) / total_water
-        if total_water > 1e-9
+        float(np.sum(water_saturation * depth_grid)) / total_water_saturation
+        if total_water_saturation > 1e-9
         else None
     )
 
@@ -1182,19 +1186,24 @@ def _validate_transmissibility(model: ReservoirModel, report: ValidationReport) 
         report.warn(check, f"Transmissibility computation failed: {exc}")
         return
 
-    all_transmissibilities = np.concatenate(
-        [
-            face_transmissibilities.x.ravel(),
-            face_transmissibilities.y.ravel(),
-            face_transmissibilities.z.ravel(),
-        ]
-    )
+    nx, ny, nz = model.grid_shape
+
+    # Each padded array is (nx+2, ny+2, nz+2).
+    # Only extract the regions actually written by the transmissibility kernel:
+    #   Tx: indices [0..nx,   1..ny,   1..nz  ] = west boundary + interior + east boundary
+    #   Ty: indices [1..nx,   0..ny,   1..nz  ] = north boundary + interior + south boundary
+    #   Tz: indices [1..nx,   1..ny,   0..nz  ] = top boundary + interior + bottom boundary
+    tx = face_transmissibilities.x[: nx + 1, 1 : ny + 1, 1 : nz + 1]
+    ty = face_transmissibilities.y[1 : nx + 1, : ny + 1, 1 : nz + 1]
+    tz = face_transmissibilities.z[1 : nx + 1, 1 : ny + 1, : nz + 1]
+
+    all_transmissibilities = np.concatenate([tx.ravel(), ty.ravel(), tz.ravel()])
     positive_transmissibilities = all_transmissibilities[all_transmissibilities > 0.0]
 
     if positive_transmissibilities.size == 0:
         report.error(
             check,
-            "All face transmissibilities are zero - no inter-cell flow is possible.",
+            "All face transmissibilities are zero. No inter-cell flow is possible.",
         )
         return
 
@@ -1212,8 +1221,8 @@ def _validate_transmissibility(model: ReservoirModel, report: ValidationReport) 
     if condition_proxy > 1e12:
         report.warn(
             check,
-            f"Transmissibility range [{transmissibility_min:.2e}, {transmissibility_max:.2e}] mD·ft - "
-            f"condition proxy {condition_proxy:.1e} > 10¹².",
+            f"Transmissibility range [{transmissibility_min:.2e}, {transmissibility_max:.2e}] mD·ft. "
+            f"Condition proxy {condition_proxy:.1e} > 10¹².",
             "Highly ill-conditioned transmissibility field may cause iterative solver difficulties. "
             "Consider scaling or using ILU preconditioning.",
         )
@@ -1261,18 +1270,18 @@ def _validate_pore_volume_distribution(
         return
 
     total_pore_volume = float(np.sum(active_pore_volumes))
-    pore_volume_min = float(np.min(active_pore_volumes))
-    pore_volume_max = float(np.max(active_pore_volumes))
-    pore_volume_median = float(np.median(active_pore_volumes))
+    min_pore_volume = float(np.min(active_pore_volumes))
+    max_pore_volume = float(np.max(active_pore_volumes))
+    median_pore_volume = float(np.median(active_pore_volumes))
 
     report.info(
         check,
-        f"Total pore volume: {total_pore_volume:.3e} ft³  min: {pore_volume_min:.3e}  "
-        f"median: {pore_volume_median:.3e}  max: {pore_volume_max:.3e}.",
+        f"Total pore volume: {total_pore_volume:.3e} ft³  min: {min_pore_volume:.3e}  "
+        f"median: {median_pore_volume:.3e}  max: {max_pore_volume:.3e}.",
     )
 
     pore_volume_ratio = (
-        pore_volume_max / pore_volume_min if pore_volume_min > 0.0 else float("inf")
+        max_pore_volume / min_pore_volume if min_pore_volume > 0.0 else float("inf")
     )
     if pore_volume_ratio > 1e6:
         report.warn(

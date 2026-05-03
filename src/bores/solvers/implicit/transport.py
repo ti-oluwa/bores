@@ -236,6 +236,7 @@ def _compute_saturation_residuals(
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
     Compute the mass-based residual vector R(S) for the implicit saturation equations.
@@ -372,11 +373,13 @@ def _compute_saturation_residuals(
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_oil_fvf
+                    * bbl_to_ft3
                 )
                 current_alpha_gas_solubility_in_water = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_water_fvf
+                    * bbl_to_ft3
                 )
 
                 safe_old_oil_fvf = old_oil_formation_volume_factor_grid[i, j, k]
@@ -393,11 +396,13 @@ def _compute_saturation_residuals(
                     old_solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_old_gas_fvf
                     / safe_old_oil_fvf
+                    * bbl_to_ft3
                 )
                 old_alpha_gas_solubility_in_water = (
                     old_gas_solubility_in_water_grid[i, j, k]
                     * safe_old_gas_fvf
                     / safe_old_water_fvf
+                    * bbl_to_ft3
                 )
 
                 # Current Newton-iterate saturations
@@ -489,6 +494,7 @@ def _compute_saturation_residuals(
                             solution_gas_to_oil_ratio_grid[east_i, j, k]
                             * gas_formation_volume_factor_grid[east_i, j, k]
                             / max(oil_formation_volume_factor_grid[east_i, j, k], 1e-30)
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -500,6 +506,7 @@ def _compute_saturation_residuals(
                             / max(
                                 water_formation_volume_factor_grid[east_i, j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -588,6 +595,7 @@ def _compute_saturation_residuals(
                             solution_gas_to_oil_ratio_grid[west_i, j, k]
                             * gas_formation_volume_factor_grid[west_i, j, k]
                             / max(oil_formation_volume_factor_grid[west_i, j, k], 1e-30)
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -599,6 +607,7 @@ def _compute_saturation_residuals(
                             / max(
                                 water_formation_volume_factor_grid[west_i, j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -689,6 +698,7 @@ def _compute_saturation_residuals(
                             / max(
                                 oil_formation_volume_factor_grid[i, south_j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -700,6 +710,7 @@ def _compute_saturation_residuals(
                             / max(
                                 water_formation_volume_factor_grid[i, south_j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -790,6 +801,7 @@ def _compute_saturation_residuals(
                             / max(
                                 oil_formation_volume_factor_grid[i, north_j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -801,6 +813,7 @@ def _compute_saturation_residuals(
                             / max(
                                 water_formation_volume_factor_grid[i, north_j, k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -891,6 +904,7 @@ def _compute_saturation_residuals(
                             / max(
                                 oil_formation_volume_factor_grid[i, j, bottom_k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -903,6 +917,7 @@ def _compute_saturation_residuals(
                                 water_formation_volume_factor_grid[i, j, bottom_k],
                                 1e-30,
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -991,6 +1006,7 @@ def _compute_saturation_residuals(
                             solution_gas_to_oil_ratio_grid[i, j, top_k]
                             * gas_formation_volume_factor_grid[i, j, top_k]
                             / max(oil_formation_volume_factor_grid[i, j, top_k], 1e-30)
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -1002,6 +1018,7 @@ def _compute_saturation_residuals(
                             / max(
                                 water_formation_volume_factor_grid[i, j, top_k], 1e-30
                             )
+                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -1189,6 +1206,7 @@ def _compute_residuals(
     pressure_boundaries: ThreeDimensionalGrid,
     flux_boundaries: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
     Compute the mass-based residual from pre-computed saturation-dependent properties.
@@ -1278,6 +1296,7 @@ def _compute_residuals(
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        bbl_to_ft3=bbl_to_ft3,
     )
 
 
@@ -1317,6 +1336,7 @@ def compute_residuals(
     net_oil_well_mass_rate_grid: ThreeDimensionalGrid,
     net_gas_well_mass_rate_grid: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
     Compute the full mass-based residual, rebuilding saturation-dependent properties first.
@@ -1401,6 +1421,7 @@ def compute_residuals(
         net_oil_well_mass_rate_grid=net_oil_well_mass_rate_grid,
         net_gas_well_mass_rate_grid=net_gas_well_mass_rate_grid,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        bbl_to_ft3=bbl_to_ft3,
     )
 
 
@@ -1443,6 +1464,7 @@ def assemble_numerical_jacobian(
     net_oil_well_mass_rate_grid: ThreeDimensionalGrid,
     net_gas_well_mass_rate_grid: ThreeDimensionalGrid,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
 ) -> coo_matrix:
     """
     Assemble the mass-based saturation Jacobian using column-wise forward finite differences.
@@ -1531,6 +1553,7 @@ def assemble_numerical_jacobian(
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        bbl_to_ft3=bbl_to_ft3,
     )
 
     for cell_idx in range(total_cell_count):
@@ -1855,6 +1878,7 @@ def assemble_flux_contributions(
     net_to_gross_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Assemble the inter-cell flux and accumulation parts of the mass-based saturation Jacobian.
@@ -1992,11 +2016,13 @@ def assemble_flux_contributions(
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf_i
                     / safe_oil_fvf_i
+                    * bbl_to_ft3
                 )
                 alpha_gas_solubility_in_water_i = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf_i
                     / safe_water_fvf_i
+                    * bbl_to_ft3
                 )
 
                 # Water accumulation diagonal: dR_w/dSw = water_density * phi*V/dt
@@ -2204,11 +2230,13 @@ def assemble_flux_contributions(
                         solution_gas_to_oil_ratio_grid[ni, nj, nk]
                         * safe_gas_fvf_n
                         / safe_oil_fvf_n
+                        * bbl_to_ft3
                     )
                     alpha_gas_solubility_in_water_n = (
                         gas_solubility_in_water_grid[ni, nj, nk]
                         * safe_gas_fvf_n
                         / safe_water_fvf_n
+                        * bbl_to_ft3
                     )
 
                     # Arithmetic-mean alpha and density for face mass-weighting
@@ -2524,6 +2552,7 @@ def assemble_well_contributions(
     injection_bhps: BottomHolePressures[float, ThreeDimensions],
     production_bhps: BottomHolePressures[float, ThreeDimensions],
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Assemble well contributions to the mass-based saturation Jacobian.
@@ -2555,12 +2584,12 @@ def assemble_well_contributions(
 
     def _alpha_rs(i: int, j: int, k: int) -> float:
         bg = max(gas_formation_volume_factor_grid[i, j, k], 1e-30)
-        bo = max(oil_formation_volume_factor_grid[i, j, k], 1e-30)
+        bo = max(oil_formation_volume_factor_grid[i, j, k], 1e-30) * bbl_to_ft3
         return solution_gas_to_oil_ratio_grid[i, j, k] * bg / bo
 
     def _alpha_rsw(i: int, j: int, k: int) -> float:
         bg = max(gas_formation_volume_factor_grid[i, j, k], 1e-30)
-        bw = max(water_formation_volume_factor_grid[i, j, k], 1e-30)
+        bw = max(water_formation_volume_factor_grid[i, j, k], 1e-30) * bbl_to_ft3
         return gas_solubility_in_water_grid[i, j, k] * bg / bw
 
     def _eff(dkr_dSw, dkr_dSo, dkr_dSg, i, j, k):
@@ -2584,7 +2613,6 @@ def assemble_well_contributions(
                 mu_w = float(water_viscosity_grid[i, j, k])
                 inv_mu_w = 1.0 / mu_w if mu_w > 0.0 else 0.0
                 rho_w = float(water_density_grid[i, j, k])
-                alpha_rsw = _alpha_rsw(i, j, k)
                 dkrw_dSw_eff, dkrw_dSg_eff = _eff(
                     dkrw_dSw_grid, dkrw_dSo_grid, dkrw_dSg_grid, i, j, k
                 )
@@ -2708,6 +2736,7 @@ def assemble_analytical_jacobian(
     time_step_in_days: float,
     config: Config,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
     wells_indices: WellsIndices,
     injection_bhps: typing.Optional[BottomHolePressures[float, ThreeDimensions]] = None,
     production_bhps: typing.Optional[
@@ -2826,6 +2855,7 @@ def assemble_analytical_jacobian(
         net_to_gross_grid=rock_properties.net_to_gross_grid,
         time_step_in_days=time_step_in_days,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        bbl_to_ft3=bbl_to_ft3,
     )
     system_size = 2 * total_cell_count
 
@@ -2862,6 +2892,7 @@ def assemble_analytical_jacobian(
         injection_bhps=injection_bhps,
         production_bhps=production_bhps,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        bbl_to_ft3=bbl_to_ft3,
     )
     all_rows = np.concatenate([flux_rows, well_rows])
     all_cols = np.concatenate([flux_cols, well_cols])
@@ -2914,6 +2945,7 @@ def assemble_jacobian(
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
     wells_indices: WellsIndices,
     injection_bhps: typing.Optional[BottomHolePressures[float, ThreeDimensions]] = None,
     production_bhps: typing.Optional[
@@ -2996,6 +3028,7 @@ def assemble_jacobian(
             time_step_in_days=time_step_in_days,
             config=config,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+            bbl_to_ft3=bbl_to_ft3,
             wells_indices=wells_indices,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
@@ -3040,6 +3073,7 @@ def assemble_jacobian(
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        bbl_to_ft3=bbl_to_ft3,
     )
 
 
@@ -3140,6 +3174,7 @@ def solve_transport(
     md_per_cp_to_ft2_per_psi_per_day = (
         c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
     )
+    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
 
     water_saturation_grid = old_water_saturation_grid.copy()
     oil_saturation_grid = old_oil_saturation_grid.copy()
@@ -3185,6 +3220,7 @@ def solve_transport(
         pressure_boundaries=pressure_boundaries,
         flux_boundaries=flux_boundaries,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        bbl_to_ft3=bbl_to_ft3,
     )
 
     convergence_history: typing.List[NewtonConvergenceInfo] = []
@@ -3257,6 +3293,7 @@ def solve_transport(
             pressure_boundaries=pressure_boundaries,
             flux_boundaries=flux_boundaries,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+            bbl_to_ft3=bbl_to_ft3,
         )
         residual_vector = interleave_residuals(water_residual, gas_residual)
         residual_norm = float(np.linalg.norm(residual_vector))
@@ -3348,6 +3385,7 @@ def solve_transport(
             pressure_boundaries=pressure_boundaries,
             flux_boundaries=flux_boundaries,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+            bbl_to_ft3=bbl_to_ft3,
             wells_indices=wells_indices,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
