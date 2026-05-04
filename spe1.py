@@ -626,9 +626,10 @@ def diagnostic(result: bores.StepResult) -> None:
     cell_so = fluid_properties.oil_saturation_grid[i, j, k]
     cell_sg = fluid_properties.gas_saturation_grid[i, j, k]
     cell_pb = fluid_properties.oil_bubble_point_pressure_grid[i, j, k]
+    cell_rs = result.fluid_properties.solution_gas_to_oil_ratio_grid[i, j, k]
 
     # Get producer BHP from rates
-    prod_bhp = result.rates.production_bhps.oil[i, j, k]
+    prod_bhp = result.rates.production_bhps.oil[i, j, k]  # type: ignore
 
     # Average reservoir pressure
     avg_p = fluid_properties.pressure_grid.mean()
@@ -637,7 +638,8 @@ def diagnostic(result: bores.StepResult) -> None:
         f"Day {result.time / 86400:.1f}: "
         f"P_cell={cell_pressure:.1f} P_avg={avg_p:.1f} "
         f"BHP={prod_bhp:.1f} Pb={cell_pb:.1f} "
-        f"So={cell_so:.3f} Sg={cell_sg:.3f}"
+        f"So={cell_so:.3f} Sg={cell_sg:.3f} "
+        f"Rs={cell_rs:.1f} (Pb Rs={1270.0})"
     )
 
 

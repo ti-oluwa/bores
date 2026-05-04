@@ -372,14 +372,12 @@ def _compute_saturation_residuals(
                 current_alpha_solution_gor = (
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf
-                    / safe_oil_fvf
-                    * bbl_to_ft3
+                    / (safe_oil_fvf * bbl_to_ft3)
                 )
                 current_alpha_gas_solubility_in_water = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf
-                    / safe_water_fvf
-                    * bbl_to_ft3
+                    / (safe_water_fvf * bbl_to_ft3)
                 )
 
                 safe_old_oil_fvf = old_oil_formation_volume_factor_grid[i, j, k]
@@ -395,14 +393,12 @@ def _compute_saturation_residuals(
                 old_alpha_solution_gor = (
                     old_solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_old_gas_fvf
-                    / safe_old_oil_fvf
-                    * bbl_to_ft3
+                    / (safe_old_oil_fvf * bbl_to_ft3)
                 )
                 old_alpha_gas_solubility_in_water = (
                     old_gas_solubility_in_water_grid[i, j, k]
                     * safe_old_gas_fvf
-                    / safe_old_water_fvf
-                    * bbl_to_ft3
+                    / (safe_old_water_fvf * bbl_to_ft3)
                 )
 
                 # Current Newton-iterate saturations
@@ -493,8 +489,13 @@ def _compute_saturation_residuals(
                         alpha_solution_gor_face = (
                             solution_gas_to_oil_ratio_grid[east_i, j, k]
                             * gas_formation_volume_factor_grid[east_i, j, k]
-                            / max(oil_formation_volume_factor_grid[east_i, j, k], 1e-30)
-                            * bbl_to_ft3
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[east_i, j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -503,10 +504,13 @@ def _compute_saturation_residuals(
                         alpha_gas_solubility_in_water_face = (
                             gas_solubility_in_water_grid[east_i, j, k]
                             * gas_formation_volume_factor_grid[east_i, j, k]
-                            / max(
-                                water_formation_volume_factor_grid[east_i, j, k], 1e-30
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[east_i, j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
                             )
-                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -594,8 +598,13 @@ def _compute_saturation_residuals(
                         alpha_solution_gor_face = (
                             solution_gas_to_oil_ratio_grid[west_i, j, k]
                             * gas_formation_volume_factor_grid[west_i, j, k]
-                            / max(oil_formation_volume_factor_grid[west_i, j, k], 1e-30)
-                            * bbl_to_ft3
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[west_i, j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -604,10 +613,13 @@ def _compute_saturation_residuals(
                         alpha_gas_solubility_in_water_face = (
                             gas_solubility_in_water_grid[west_i, j, k]
                             * gas_formation_volume_factor_grid[west_i, j, k]
-                            / max(
-                                water_formation_volume_factor_grid[west_i, j, k], 1e-30
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[west_i, j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
                             )
-                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -695,10 +707,13 @@ def _compute_saturation_residuals(
                         alpha_solution_gor_face = (
                             solution_gas_to_oil_ratio_grid[i, south_j, k]
                             * gas_formation_volume_factor_grid[i, south_j, k]
-                            / max(
-                                oil_formation_volume_factor_grid[i, south_j, k], 1e-30
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[i, south_j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
                             )
-                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -707,10 +722,13 @@ def _compute_saturation_residuals(
                         alpha_gas_solubility_in_water_face = (
                             gas_solubility_in_water_grid[i, south_j, k]
                             * gas_formation_volume_factor_grid[i, south_j, k]
-                            / max(
-                                water_formation_volume_factor_grid[i, south_j, k], 1e-30
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[i, south_j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
                             )
-                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -798,10 +816,13 @@ def _compute_saturation_residuals(
                         alpha_solution_gor_face = (
                             solution_gas_to_oil_ratio_grid[i, north_j, k]
                             * gas_formation_volume_factor_grid[i, north_j, k]
-                            / max(
-                                oil_formation_volume_factor_grid[i, north_j, k], 1e-30
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[i, north_j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
                             )
-                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -810,10 +831,13 @@ def _compute_saturation_residuals(
                         alpha_gas_solubility_in_water_face = (
                             gas_solubility_in_water_grid[i, north_j, k]
                             * gas_formation_volume_factor_grid[i, north_j, k]
-                            / max(
-                                water_formation_volume_factor_grid[i, north_j, k], 1e-30
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[i, north_j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
                             )
-                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -901,10 +925,13 @@ def _compute_saturation_residuals(
                         alpha_solution_gor_face = (
                             solution_gas_to_oil_ratio_grid[i, j, bottom_k]
                             * gas_formation_volume_factor_grid[i, j, bottom_k]
-                            / max(
-                                oil_formation_volume_factor_grid[i, j, bottom_k], 1e-30
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[i, j, bottom_k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
                             )
-                            * bbl_to_ft3
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -913,11 +940,13 @@ def _compute_saturation_residuals(
                         alpha_gas_solubility_in_water_face = (
                             gas_solubility_in_water_grid[i, j, bottom_k]
                             * gas_formation_volume_factor_grid[i, j, bottom_k]
-                            / max(
-                                water_formation_volume_factor_grid[i, j, bottom_k],
-                                1e-30,
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[i, j, bottom_k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
                             )
-                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -1015,10 +1044,13 @@ def _compute_saturation_residuals(
                         alpha_gas_solubility_in_water_face = (
                             gas_solubility_in_water_grid[i, j, top_k]
                             * gas_formation_volume_factor_grid[i, j, top_k]
-                            / max(
-                                water_formation_volume_factor_grid[i, j, top_k], 1e-30
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[i, j, top_k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
                             )
-                            * bbl_to_ft3
                         )
                     else:
                         alpha_gas_solubility_in_water_face = (
@@ -2015,14 +2047,12 @@ def assemble_flux_contributions(
                 alpha_solution_gor_i = (
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf_i
-                    / safe_oil_fvf_i
-                    * bbl_to_ft3
+                    / (safe_oil_fvf_i * bbl_to_ft3)
                 )
                 alpha_gas_solubility_in_water_i = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf_i
-                    / safe_water_fvf_i
-                    * bbl_to_ft3
+                    / (safe_water_fvf_i * bbl_to_ft3)
                 )
 
                 # Water accumulation diagonal: dR_w/dSw = water_density * phi*V/dt
@@ -2229,14 +2259,12 @@ def assemble_flux_contributions(
                     alpha_solution_gor_n = (
                         solution_gas_to_oil_ratio_grid[ni, nj, nk]
                         * safe_gas_fvf_n
-                        / safe_oil_fvf_n
-                        * bbl_to_ft3
+                        / (safe_oil_fvf_n * bbl_to_ft3)
                     )
                     alpha_gas_solubility_in_water_n = (
                         gas_solubility_in_water_grid[ni, nj, nk]
                         * safe_gas_fvf_n
-                        / safe_water_fvf_n
-                        * bbl_to_ft3
+                        / (safe_water_fvf_n * bbl_to_ft3)
                     )
 
                     # Arithmetic-mean alpha and density for face mass-weighting

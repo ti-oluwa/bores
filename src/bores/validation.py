@@ -743,7 +743,7 @@ def _validate_pvt_monotonicity(config: Config, report: ValidationReport) -> None
             if n_violations > 0:
                 report.warn(
                     check,
-                    f"PVT {label} ({phase_name}) is not strictly monotone increasing "
+                    f"PVT {label} ({phase_name}) is not strictly monotonically increasing "
                     f"({n_violations} decreasing step(s)).",
                     "Non-monotone tables cause interpolation artefacts. Smoothen or re-tabulate.",
                 )
@@ -753,7 +753,7 @@ def _validate_pvt_monotonicity(config: Config, report: ValidationReport) -> None
             if n_violations > 0:
                 report.warn(
                     check,
-                    f"PVT {label} ({phase_name}) is not strictly monotone decreasing "
+                    f"PVT {label} ({phase_name}) is not strictly monotonically decreasing "
                     f"({n_violations} increasing step(s)).",
                     "Non-monotone tables cause interpolation artefacts. Smoothen or re-tabulate.",
                 )
