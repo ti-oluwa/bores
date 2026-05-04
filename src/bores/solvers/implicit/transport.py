@@ -340,12 +340,12 @@ def _compute_saturation_residuals(
                 cell_pore_volume = cell_total_volume * cell_porosity
                 accumulation_coefficient = cell_pore_volume / time_step_in_days
 
-                # Current-pressure (frozen) densities
+                # Current-pressure densities
                 current_water_density = water_density_grid[i, j, k]
                 current_oil_density = oil_density_grid[i, j, k]
                 current_gas_density = gas_density_grid[i, j, k]
 
-                # Old-pressure densities (frozen at start-of-step)
+                # Old-pressure densities
                 old_water_density = old_water_density_grid[i, j, k]
                 old_oil_density = old_oil_density_grid[i, j, k]
                 old_gas_density = old_gas_density_grid[i, j, k]
@@ -358,7 +358,7 @@ def _compute_saturation_residuals(
                 if current_water_density < 1e-30:
                     current_water_density = 1e-30
 
-                # Alpha factors at current (new) pressure — frozen during Newton
+                # Alpha factors at current pressure
                 safe_oil_fvf = oil_formation_volume_factor_grid[i, j, k]
                 safe_water_fvf = water_formation_volume_factor_grid[i, j, k]
                 safe_gas_fvf = gas_formation_volume_factor_grid[i, j, k]
@@ -1034,8 +1034,12 @@ def _compute_saturation_residuals(
                         alpha_solution_gor_face = (
                             solution_gas_to_oil_ratio_grid[i, j, top_k]
                             * gas_formation_volume_factor_grid[i, j, top_k]
-                            / max(oil_formation_volume_factor_grid[i, j, top_k], 1e-30)
-                            * bbl_to_ft3
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[i, j, top_k], 1e-30
+                                )
+                                * bbl_to_ft3
+                            )
                         )
                     else:
                         alpha_solution_gor_face = cell_alpha_solution_gor
@@ -1112,16 +1116,9 @@ def _compute_saturation_residuals(
 
                 # Dissolved gas only applies to produced fluids (negative rates)
                 # Injected fluids are at surface conditions, so no dissolved gas
-                produced_oil_mass_rate = min(net_oil_mass_rate, 0.0)  # negative or zero
-                produced_water_mass_rate = min(
-                    net_water_mass_rate, 0.0
-                )  # negative or zero
-
-                net_gas_mass_rate = (
-                    net_gas_mass_rate
-                    + cell_alpha_solution_gor * produced_oil_mass_rate
-                    + cell_alpha_gas_solubility_in_water * produced_water_mass_rate
-                )
+                net_gas_mass_rate += cell_alpha_solution_gor * min(
+                    net_oil_mass_rate, 0.0
+                ) + cell_alpha_gas_solubility_in_water * min(net_water_mass_rate, 0.0)
 
                 water_residual[cell_idx] = (
                     water_accumulation - net_mass_water_flux - net_water_mass_rate
@@ -3422,7 +3419,8 @@ def solve_transport(
         )
 
         J_csr, residual_vector, column_scaling_vector = scale_linear_system(
-            jacobian_csr=jacobian.tocsr(), residual_vector=residual_vector
+            jacobian_csr=jacobian.tocsr(),
+            residual_vector=residual_vector,
         )
         saturation_change, _ = solve_linear_system(
             A_csr=J_csr,
@@ -3434,7 +3432,7 @@ def solve_transport(
             fallback_to_direct=True,
         )
         if column_scaling_vector is not None:
-            saturation_change = saturation_change * column_scaling_vector
+            saturation_change *= column_scaling_vector
 
         if logger.isEnabledFor(logging.DEBUG):
             linear_residual_norm = float(

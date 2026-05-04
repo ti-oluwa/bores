@@ -211,7 +211,7 @@ def solve_pressure(
             fallback_to_direct=True,
         )
         if column_scaling_vector is not None:
-            pressure_vector = pressure_vector * column_scaling_vector
+            pressure_vector *= column_scaling_vector
 
     except (SolverError, PreconditionerError) as exc:
         logger.error("Pressure solve failed at time step %d: %s", time_step, exc)

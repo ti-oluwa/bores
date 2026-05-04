@@ -590,7 +590,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="impes",
+    scheme="si",
     output_frequency=1,
     pressure_solver="direct",
     transport_solver="direct",
@@ -598,7 +598,7 @@ config = bores.Config(
     pvt_tables=pvt_tables,
     wells=wells,
     disable_capillary_effects=True,
-    # freeze_saturation_pressure=True,
+    freeze_saturation_pressure=True,
     maximum_gas_saturation_change=0.05,
     maximum_oil_saturation_change=0.05,
     maximum_water_saturation_change=0.05,
@@ -619,32 +619,36 @@ run.validate()
 
 
 def diagnostic(result: bores.StepResult) -> None:
-    producer_cell = (9, 9, 2)
-    i, j, k = producer_cell
-    fluid_properties = result.fluid_properties
-    cell_pressure = fluid_properties.pressure_grid[i, j, k]
-    cell_so = fluid_properties.oil_saturation_grid[i, j, k]
-    cell_sg = fluid_properties.gas_saturation_grid[i, j, k]
-    cell_pb = fluid_properties.oil_bubble_point_pressure_grid[i, j, k]
-    cell_rs = result.fluid_properties.solution_gas_to_oil_ratio_grid[i, j, k]
+    fp = result.fluid_properties
 
-    # Get producer BHP from rates
-    prod_bhp = result.rates.production_bhps.oil[i, j, k]  # type: ignore
+    for label, (i, j, k) in [
+        ("INJ", (0, 0, 0)),
+        ("MID", (5, 5, 1)),
+        ("PROD", (9, 9, 2)),
+    ]:
+        p = fp.pressure_grid[i, j, k]
+        sg = fp.gas_saturation_grid[i, j, k]
+        so = fp.oil_saturation_grid[i, j, k]
+        pb = fp.oil_bubble_point_pressure_grid[i, j, k]
+        rs = fp.solution_gas_to_oil_ratio_grid[i, j, k]
+        bg = fp.gas_formation_volume_factor_grid[i, j, k]
+        bo = fp.oil_formation_volume_factor_grid[i, j, k]
+        rhog = fp.gas_density_grid[i, j, k]
+        rhoo = fp.oil_effective_density_grid[i, j, k]
+        alpha = rs * bg / (bo * 5.614583)
+        eff_rho = rhog - rhoo * alpha
 
-    # Average reservoir pressure
-    avg_p = fluid_properties.pressure_grid.mean()
+        inj_rate = result.rates.injection_rates.gas[i, j, k] if result.rates else 0
 
-    print(
-        f"Day {result.time / 86400:.1f}: "
-        f"P_cell={cell_pressure:.1f} P_avg={avg_p:.1f} "
-        f"BHP={prod_bhp:.1f} Pb={cell_pb:.1f} "
-        f"So={cell_so:.3f} Sg={cell_sg:.3f} "
-        f"Rs={cell_rs:.1f} (Pb Rs={1270.0})"
-    )
+        print(
+            f"  {label}({i},{j},{k}): P={p:.0f} Pb={pb:.0f} Rs={rs:.1f} "
+            f"So={so:.3f} Sg={sg:.4f} alpha={alpha:.4f} "
+            f"eff_rho={eff_rho:.3f} inj={inj_rate:.3e}"
+        )
 
 
 # Run and monitor the simulation and collect states
-states = list(bores.monitor(run, on_step_accepted=diagnostic))
+states = list(bores.monitor(run, on_step_rejected=diagnostic))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(

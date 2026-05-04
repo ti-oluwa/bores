@@ -1722,10 +1722,12 @@ def apply_updates(
                 # are negative — their ratio is still the correct positive Sg.
                 new_free_gas_mass = (
                     new_total_gas_mass
-                    - current_oil_density
-                    * current_alpha_rs
-                    * (1.0 - new_water_saturation)
-                    - current_water_density * current_alpha_rsw * new_water_saturation
+                    - (
+                        current_oil_density
+                        * current_alpha_rs
+                        * (1.0 - new_water_saturation)
+                    )
+                    - (current_water_density * current_alpha_rsw * new_water_saturation)
                 )
                 effective_gas_density = (
                     current_gas_density - current_oil_density * current_alpha_rs
