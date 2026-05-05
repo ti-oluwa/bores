@@ -661,7 +661,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="si",
+        scheme="impes",
         output_frequency=1,
         pressure_solver="direct",
         transport_solver="direct",
@@ -670,12 +670,12 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         wells=wells,
         disable_capillary_effects=True,
         # freeze_saturation_pressure=True,
-        maximum_gas_saturation_change=0.05,
-        maximum_oil_saturation_change=0.05,
-        maximum_water_saturation_change=0.05,
-        maximum_newton_saturation_change=0.05,
+        # maximum_gas_saturation_change=0.05,
+        # maximum_oil_saturation_change=0.05,
+        # maximum_water_saturation_change=0.05,
+        # maximum_newton_saturation_change=0.05,
         maximum_pressure_change=300.0,
-        cfl_threshold=0.8,
+        cfl_threshold=0.3,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
     return (wells,)
@@ -1133,7 +1133,7 @@ def _(bores, states, viz, wells):
 
     property = "gas-sat"
     figures = []
-    timesteps = [250]
+    timesteps = [450]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

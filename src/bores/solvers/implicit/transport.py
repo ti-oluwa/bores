@@ -2065,6 +2065,7 @@ def assemble_flux_contributions(
                 gas_accumulation_diagonal = (
                     gas_density_i - oil_density_i * alpha_solution_gor_i
                 ) * accumulation_coefficient
+
                 # The diagonal must remain positive for solver stability; if dissolved-gas
                 # term dominates (near/above bubble point) we floor at a small positive value
                 # proportional to the water accumulation term so the scaling stays consistent

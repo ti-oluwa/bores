@@ -1454,7 +1454,7 @@ def assemble_flux_contributions(
     )
 
 
-@numba.njit(parallel=True, cache=True)
+# @numba.njit(parallel=True, cache=True)
 def apply_updates(
     updated_water_saturation_grid: ThreeDimensionalGrid,
     updated_oil_saturation_grid: ThreeDimensionalGrid,
@@ -1698,6 +1698,7 @@ def apply_updates(
                     + old_oil_density * old_alpha_rs * old_oil_saturation
                     + old_water_density * old_alpha_rsw * old_water_saturation
                 )
+
                 # Only oil and water produced contain dissolved gas
                 # Injected oil or water is assumed to be gas free
                 well_gas_mass_rate = (
@@ -1720,25 +1721,16 @@ def apply_updates(
                 #
                 # Above bubble point rho_o*alpha > rho_g so both num and denom
                 # are negative — their ratio is still the correct positive Sg.
-                new_free_gas_mass = (
-                    new_total_gas_mass
-                    - (
-                        current_oil_density
-                        * current_alpha_rs
-                        * (1.0 - new_water_saturation)
-                    )
-                    - (current_water_density * current_alpha_rsw * new_water_saturation)
-                )
-                effective_gas_density = (
-                    current_gas_density - current_oil_density * current_alpha_rs
-                )
+                max_dissolved_gas_mass = (
+                    current_oil_density
+                    * current_alpha_rs
+                    * (1.0 - new_water_saturation)
+                ) + (current_water_density * current_alpha_rsw * new_water_saturation)
+                new_free_gas_mass = new_total_gas_mass - max_dissolved_gas_mass
 
-                if abs(effective_gas_density) < 1e-20:
-                    new_gas_saturation = 0.0
-                else:
-                    new_gas_saturation = new_free_gas_mass / effective_gas_density
-
+                new_gas_saturation = new_free_gas_mass / current_gas_density
                 if new_gas_saturation < 0.0:
+                    print((i, j, k), new_gas_saturation, new_free_gas_mass)
                     new_gas_saturation = 0.0
                 if new_gas_saturation > 1.0 - new_water_saturation:
                     new_gas_saturation = 1.0 - new_water_saturation

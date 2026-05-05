@@ -590,7 +590,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="si",
+    scheme="impes",
     output_frequency=1,
     pressure_solver="direct",
     transport_solver="direct",
@@ -599,12 +599,12 @@ config = bores.Config(
     wells=wells,
     disable_capillary_effects=True,
     freeze_saturation_pressure=True,
-    maximum_gas_saturation_change=0.05,
-    maximum_oil_saturation_change=0.05,
-    maximum_water_saturation_change=0.05,
-    maximum_newton_saturation_change=0.05,
+    # maximum_gas_saturation_change=0.05,
+    # maximum_oil_saturation_change=0.05,
+    # maximum_water_saturation_change=0.05,
+    # maximum_newton_saturation_change=0.05,
     maximum_pressure_change=300.0,
-    cfl_threshold=0.6,
+    cfl_threshold=0.3,
     # jacobian_assembly_method="numerical",
 )
 
@@ -623,7 +623,7 @@ def diagnostic(result: bores.StepResult) -> None:
 
     for label, (i, j, k) in [
         ("INJ", (0, 0, 0)),
-        ("MID", (5, 5, 1)),
+        # ("MID", (5, 5, 1)),
         ("PROD", (9, 9, 2)),
     ]:
         p = fp.pressure_grid[i, j, k]
@@ -639,7 +639,6 @@ def diagnostic(result: bores.StepResult) -> None:
         eff_rho = rhog - rhoo * alpha
 
         inj_rate = result.rates.injection_rates.gas[i, j, k] if result.rates else 0
-
         print(
             f"  {label}({i},{j},{k}): P={p:.0f} Pb={pb:.0f} Rs={rs:.1f} "
             f"So={so:.3f} Sg={sg:.4f} alpha={alpha:.4f} "
@@ -648,7 +647,7 @@ def diagnostic(result: bores.StepResult) -> None:
 
 
 # Run and monitor the simulation and collect states
-states = list(bores.monitor(run, on_step_rejected=diagnostic))
+states = list(bores.monitor(run, on_step_accepted=diagnostic))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
