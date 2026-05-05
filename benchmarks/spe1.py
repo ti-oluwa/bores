@@ -1133,7 +1133,7 @@ def _(bores, states, viz, wells):
 
     property = "gas-sat"
     figures = []
-    timesteps = [450]
+    timesteps = [163]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

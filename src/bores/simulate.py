@@ -515,13 +515,13 @@ def _run_impes_step(
     logger.debug("Pressure evolution completed.")
 
     # Copy before PVT updates
-    old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
-    old_gas_solubility_in_water_grid = (
-        fluid_properties.gas_solubility_in_water_grid.copy()
-    )
-    old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
-    old_gas_fvf_grid = fluid_properties.gas_formation_volume_factor_grid.copy()
-    old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
+    # old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
+    # old_gas_solubility_in_water_grid = (
+    #     fluid_properties.gas_solubility_in_water_grid.copy()
+    # )
+    # old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
+    # old_gas_fvf_grid = fluid_properties.gas_formation_volume_factor_grid.copy()
+    # old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
     old_water_density_grid = fluid_properties.water_density_grid.copy()
     old_oil_density_grid = fluid_properties.oil_effective_density_grid.copy()
     old_gas_density_grid = fluid_properties.gas_density_grid.copy()
@@ -596,11 +596,6 @@ def _run_impes_step(
         old_water_density_grid=old_water_density_grid,
         old_oil_density_grid=old_oil_density_grid,
         old_gas_density_grid=old_gas_density_grid,
-        old_solution_gas_to_oil_ratio_grid=old_solution_gor_grid,
-        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
-        old_gas_formation_volume_factor_grid=old_gas_fvf_grid,
-        old_oil_formation_volume_factor_grid=old_oil_fvf_grid,
-        old_water_formation_volume_factor_grid=old_water_fvf_grid,
         relative_mobility_grids=relative_mobility_grids,
         capillary_pressure_grids=capillary_pressure_grids,
         face_transmissibilities=face_transmissibilities,

@@ -553,7 +553,7 @@ def check_zero_flow_initialization(
     )
 
     # Compute per-phase net fluxes using the same kernel as the explicit saturation solver.
-    net_water_mass_flux_grid, net_oil_mass_flux_grid, net_gas_mass_flux_grid = (
+    net_water_mass_flux_grid, net_oil_mass_flux_grid, net_free_gas_mass_flux_grid, _ = (
         assemble_flux_contributions(
             pressure_grid=pressure_grid,
             cell_count_x=cell_count_x,
@@ -572,17 +572,23 @@ def check_zero_flow_initialization(
             oil_density_grid=oil_density_grid,
             water_density_grid=water_density_grid,
             gas_density_grid=gas_density_grid,
-            solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
-            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
-            gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
-            oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
-            water_formation_volume_factor_grid=water_formation_volume_factor_grid,
             elevation_grid=elevation_grid,
             gravitational_constant=gravitational_constant,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-            bbl_to_ft3=bbl_to_ft3,
             dtype=dtype,
         )
+    )
+
+    dissolved_gas_mass_flux_grid = (
+        solution_gas_to_oil_ratio_grid
+        * gas_formation_volume_factor_grid
+        / np.maximum(oil_formation_volume_factor_grid * bbl_to_ft3, 1e-30)
+        * net_oil_mass_flux_grid
+    ) + (
+        gas_solubility_in_water_grid
+        * gas_formation_volume_factor_grid
+        / np.maximum(water_formation_volume_factor_grid * bbl_to_ft3, 1e-30)
+        * net_water_mass_flux_grid
     )
 
     water_saturation_grid = fluid_properties.water_saturation_grid
@@ -602,18 +608,23 @@ def check_zero_flow_initialization(
         + water_density_grid * water_saturation_grid
         + gas_density_grid * gas_saturation_grid
     )
-    total_mass_grid = total_density_grid * pore_volume_grid
+    maximum_total_mass_grid = total_density_grid * pore_volume_grid
 
     # Total absolute flux per cell (lbm/day)
     net_total_mass_flux_grid = (
-        np.abs(net_water_mass_flux_grid)
-        + np.abs(net_oil_mass_flux_grid)
-        + np.abs(net_gas_mass_flux_grid)
+        net_water_mass_flux_grid
+        + net_oil_mass_flux_grid
+        + net_free_gas_mass_flux_grid
+        + dissolved_gas_mass_flux_grid
     )
-    safe_total_mass_grid = np.where(total_mass_grid > 0.0, total_mass_grid, np.inf)
-    relative_mass_flux_grid = net_total_mass_flux_grid / safe_total_mass_grid  # day⁻¹
+    safe_maximum_total_mass_grid = np.where(
+        maximum_total_mass_grid > 0.0, maximum_total_mass_grid, np.inf
+    )
+    relative_mass_flux_grid = (
+        net_total_mass_flux_grid / safe_maximum_total_mass_grid
+    )  # day⁻¹
 
-    # Identify active cells (non-zero porosity)
+    # Identify active cells (i.e with non-zero porosity)
     active_mask = rock_properties.porosity_grid > 0.0
     cells_checked = int(np.sum(active_mask))
 
@@ -662,7 +673,9 @@ def check_zero_flow_initialization(
             pore_volume = float(pore_volume_grid[vi, vj, vk])
             net_water_flux = float(net_water_mass_flux_grid[vi, vj, vk])
             net_oil_flux = float(net_oil_mass_flux_grid[vi, vj, vk])
-            net_gas_flux = float(net_gas_mass_flux_grid[vi, vj, vk])
+            net_gas_flux = float(net_free_gas_mass_flux_grid[vi, vj, vk]) + float(
+                dissolved_gas_mass_flux_grid[vi, vj, vk]
+            )
             net_total_flux = abs(net_water_flux) + abs(net_oil_flux) + abs(net_gas_flux)
             relative_flux = float(relative_mass_flux_grid[vi, vj, vk])
             violations.append(
