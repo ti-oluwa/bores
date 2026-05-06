@@ -569,11 +569,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     )
 
     rock_fluid_tables = bores.RockFluidTables(
-        relative_permeability_table=bores.ThreePhaseRelPermTable(
-            oil_water_table=oil_water_table,
-            gas_oil_table=gas_oil_table,
-            mixing_rule="eclipse_rule",
-        )
+        relative_permeability_table=gas_oil_table
     )
 
 
@@ -674,7 +670,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         # maximum_oil_saturation_change=0.05,
         # maximum_water_saturation_change=0.05,
         # maximum_newton_saturation_change=0.05,
-        maximum_pressure_change=300.0,
+        maximum_pressure_change=500.0,
         cfl_threshold=0.3,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
@@ -1133,7 +1129,7 @@ def _(bores, states, viz, wells):
 
     property = "gas-sat"
     figures = []
-    timesteps = [163]
+    timesteps = [465]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

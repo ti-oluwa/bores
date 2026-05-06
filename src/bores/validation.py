@@ -244,7 +244,7 @@ def validate(
         config,
         report,
         cell_dimension=cell_dimension,
-        override_tolerance=zero_flow_tolerance,
+        tolerance=zero_flow_tolerance,
     )
     _validate_wells(config, model, report)
     _validate_fluid_contacts(model, report)
@@ -787,7 +787,7 @@ def _validate_zero_flow(
     report: ValidationReport,
     *,
     cell_dimension: typing.Tuple[float, float],
-    override_tolerance: typing.Optional[float],
+    tolerance: typing.Optional[float],
 ) -> None:
     """
     Check that the initial state satisfies gravitational and capillary equilibrium.
@@ -802,12 +802,11 @@ def _validate_zero_flow(
     :param config: Simulation config.
     :param report: Report to append issues to.
     :param cell_dimension: Physical cell dimensions (dx, dy) in feet.
-    :param override_tolerance: User-supplied tolerance override, or None for automatic selection.
+    :param tolerance: User-supplied tolerance override, or None for automatic selection.
     """
     check = "zero_flow_equilibrium"
 
-    if override_tolerance is not None:
-        tolerance = override_tolerance
+    if tolerance is not None:
         tolerance_source = "user-specified"
     else:
         tolerance = _recommend_zero_flow_tolerance(cell_dimension)

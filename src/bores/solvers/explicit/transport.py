@@ -1129,38 +1129,6 @@ def apply_updates(
     """
     Apply mass-based saturation updates using explicit forward Euler.
 
-    The update sequence for each cell is:
-
-    1. **Water** - advance water mass, divide by new water density to get `Sw_new`:
-
-           M_w_old = old_water_density * Sw_old
-           M_w_new = M_w_old + (dt/phi*V) * (net_water_mass_flux + cell_water_density * q_w_vol)
-           Sw_new  = M_w_new / current_water_density
-
-       The well water rate `q_w_vol` is volumetric (ft³/day); it is converted
-       to a mass rate by multiplying by the cell water density.
-
-    2. **Gas (total mass)** - advance total gas mass (free + dissolved):
-
-           M_g_old = old_gas_density*Sg_old + old_oil_density*alpha_Rs_old*So_old + old_water_density*alpha_Rsw_old*Sw_old
-           M_g_new = M_g_old + (dt/phi*V) * (net_free_gas_mass_flux + well_gas_mass_rate)
-
-       The well mass gas rate includes solution gas carried in produced/injected
-       oil and water:
-
-           well_gas_mass_rate = cell_gas_density*q_g_vol + cel_oil_densityl*alpha_Rs_cell*q_o_vol
-                                + cell_water_density*alpha_Rsw_cell*q_w_vol
-
-    3. **Oil saturation (derived)** - `So_new = 1 - Sw_new - Sg_new`.
-
-    4. **Free gas** - recover `Sg_new` from the new total gas mass minus the
-       dissolved portion in the new oil and water:
-
-           current_gas_density * Sg_new = M_g_new
-                                - current_oil_density * alpha_Rs_new * So_new
-                                - current_water_density * alpha_Rsw_new * Sw_new
-           Sg_new = max(0, above) / current_gas_density
-
     Saturations are clamped to [0, 1] and a residual volume balance correction
     is applied to oil (any remaining tiny gap from `Sw + So + Sg != 1` is
     absorbed by `So`).
@@ -1296,11 +1264,6 @@ def apply_updates(
                     new_water_saturation /= total_saturation
                     new_oil_saturation /= total_saturation
                     new_gas_saturation /= total_saturation
-                elif total_saturation < 1.0:
-                    # Gap absorbed by oil (most compressible / least constrained phase)
-                    new_oil_saturation += 1.0 - total_saturation
-                    if new_oil_saturation < 0.0:
-                        new_oil_saturation = 0.0
 
                 updated_water_saturation_grid[i, j, k] = new_water_saturation
                 updated_oil_saturation_grid[i, j, k] = new_oil_saturation

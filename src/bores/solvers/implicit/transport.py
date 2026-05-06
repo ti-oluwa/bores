@@ -3020,7 +3020,7 @@ def assemble_jacobian(
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
     :return: Jacobian as a `(2N x 2N)` COO sparse matrix.
     """
-    if config.jacobian_assembly_method == "analytical":
+    if config.saturation_jacobian_assembly_method == "analytical":
         return assemble_analytical_jacobian(
             total_cell_count=total_cell_count,
             cell_count_x=cell_count_x,

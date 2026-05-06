@@ -49,31 +49,8 @@ class Config(
     pvt_tables: typing.Optional[PVTTables] = None
     """PVT tables for fluid property lookups during the simulation."""
 
-    pressure_convergence_tolerance: float = attrs.field(
-        default=1e-6, validator=attrs.validators.le(1e-2)
-    )
-    """Relative convergence tolerance for pressure iterative solvers (default is 1e-6)."""
-
-    transport_convergence_tolerance: float = attrs.field(
-        default=1e-4, validator=attrs.validators.le(1e-2)
-    )
-    """Relative convergence tolerance for saturation iterative solvers (default is 1e-4). Transport matrix tend to be more well conditioned."""
-
-    maximum_solver_iterations: int = attrs.field(
-        default=250,
-        validator=attrs.validators.and_(
-            attrs.validators.ge(1),  # type: ignore[arg-type]
-            attrs.validators.le(500),  # type: ignore[arg-type]
-        ),
-    )
-    """
-    Maximum number of iterations allowed per time step for all iterative solvers.
-    
-    Capped at 500 to prevent excessive computation time in case of non-convergence.
-    If the solver does not converge within this limit, the matrix is most likely
-    ill-conditioned or the problem setup needs to be reviewed. Use a stronger
-    preconditioner, try another solver, or adjust simulation parameters accordingly.
-    """
+    constants: Constants = attrs.field(factory=Constants)
+    """Physical and conversion constants used in the simulation."""
 
     output_frequency: int = attrs.field(default=1, validator=attrs.validators.ge(1))
     """Frequency at which model states are yielded/outputted during the simulation."""
@@ -107,24 +84,58 @@ class Config(
     miscibility_model: MiscibilityModel = "immiscible"
     """Miscibility model: 'immiscible', 'todd-longstaff'"""
 
-    cfl_threshold: float = 0.7
-    """
-    Maximum allowable transport CFL number for the 'explicit' evolution scheme to ensure numerical stability.
-
-    Typically kept below 1.0 to prevent instability in explicit transport updates.
-
-    Lowering this value increases stability but may require smaller time steps.
-    Raising them can improve performance but risks instability. Use with caution and monitor simulation behavior.
-    """
-
-    constants: Constants = attrs.field(factory=Constants)
-    """Physical and conversion constants used in the simulation."""
-
     warn_well_anomalies: bool = True
     """Whether to warn about anomalous flow rates during the simulation."""
 
+    normalize_saturations: bool = False
+    """
+    Whether to normalize saturations so that `So + Sw + Sg = 1.0` after each timestep.
+
+    When True (default), the simulator rescales all three phase saturations at the end
+    of each saturation update so their sum is exactly 1.0. This corrects small
+    numerical drift from the explicit transport solve and maintains strict pore-volume
+    conservation. The normalization uses safe division to avoid issues in cells with
+    near-zero total saturation.
+
+    Set to False only when debugging saturation solver mass balance, since the raw
+    (unnormalized) values reveal how much drift the transport step actually produces.
+    For production simulations, always leave this enabled.
+    """
     log_interval: int = attrs.field(default=5, validator=attrs.validators.ge(0))
     """Interval (in time steps) at which to log simulation progress."""
+
+    freeze_saturation_pressure: bool = False
+    """
+    If True, keeps oil bubble point pressure (Pb) constant at its initial value throughout the simulation.
+
+    You would sometimes want this set to True, if you are not modelling complex conditions like 
+    miscible injection, Waterflooding, etc., to adhere to standard black-oil model assumptions.
+
+    This is appropriate for:
+    - Natural depletion with no compositional changes
+    - Waterflooding where oil composition remains constant
+    - Simplified black-oil models without compositional tracking
+
+    If False (default), Pb is recomputed each timestep based on current solution GOR.
+
+    **Properties affected when Pb is frozen:**
+    - Bubble point pressure (Pb) - directly frozen
+    - Solution GOR (Rs) - computed using frozen Pb as reference
+    - Oil FVF (Bo) - uses frozen Pb for undersaturated calculations
+    - Oil compressibility (Co) - switches at frozen Pb
+    - Oil viscosity (μo) - indirectly through Rs
+    - Oil density (ρo) - indirectly through Rs and Bo
+    """
+    phase_appearance_tolerance: float = attrs.field(
+        default=1e-6, validator=attrs.validators.ge(0)
+    )
+    """
+    Tolerance for determining phase appearance/disappearance based on saturation levels.
+
+    Used to avoid numerical issues when a phase's saturation approaches zero. This helps
+    maintain stability in relative permeability and mobility calculations by treating phases
+    with saturations below this threshold as absent from the system.
+    """
 
     pressure_solver: typing.Union[SolverStr, typing.Iterable[SolverStr]] = "bicgstab"
     """Pressure system solver(s) (can be a list of solver to use in sequence)."""
@@ -138,144 +149,42 @@ class Config(
     transport_preconditioner: typing.Optional[PreconditionerStr] = "ilu"
     """Preconditioner to use for transport system solvers."""
 
-    phase_appearance_tolerance: float = attrs.field(
-        default=1e-6, validator=attrs.validators.ge(0)
+    pressure_convergence_tolerance: float = attrs.field(
+        default=1e-6, validator=attrs.validators.le(1e-2)
+    )
+    """Relative convergence tolerance for pressure iterative solvers (default is 1e-6)."""
+
+    transport_convergence_tolerance: float = attrs.field(
+        default=1e-4, validator=attrs.validators.le(1e-2)
+    )
+    """Relative convergence tolerance for saturation iterative solvers (default is 1e-4). Transport matrix tend to be more well conditioned."""
+
+    maximum_solver_iterations: int = attrs.field(
+        default=250,
+        validator=attrs.validators.and_(
+            attrs.validators.ge(1),  # type: ignore[arg-type]
+            attrs.validators.le(500),  # type: ignore[arg-type]
+        ),
     )
     """
-    Tolerance for determining phase appearance/disappearance based on saturation levels.
-
-    Used to avoid numerical issues when a phase's saturation approaches zero. This helps
-    maintain stability in relative permeability and mobility calculations by treating phases
-    with saturations below this threshold as absent from the system.
+    Maximum number of iterations allowed per time step for all iterative solvers.
+    
+    Capped at 500 to prevent excessive computation time in case of non-convergence.
+    If the solver does not converge within this limit, the matrix is most likely
+    ill-conditioned or the problem setup needs to be reviewed. Use a stronger
+    preconditioner, try another solver, or adjust simulation parameters accordingly.
     """
 
-    residual_oil_drainage_ratio_water_flood: float = attrs.field(
-        default=0.6, validator=attrs.validators.ge(0)
-    )
-    """Ratio to compute oil drainage residual from imbibition value during water flooding."""
+    use_nonlinear_pressure_solve: bool = False
 
-    residual_oil_drainage_ratio_gas_flood: float = attrs.field(
-        default=0.6, validator=attrs.validators.ge(0)
-    )
-    """Ratio to compute oil drainage residual from imbibition value during gas flooding."""
-
-    residual_gas_drainage_ratio: float = attrs.field(
-        default=0.5, validator=attrs.validators.ge(0)
-    )
-    """Ratio to compute gas drainage residual from imbibition value."""
-
-    maximum_oil_saturation_change: float = attrs.field(
-        default=0.6, validator=attrs.validators.ge(0)
-    )
+    cfl_threshold: float = 0.7
     """
-    Maximum allowable oil saturation change (absolute, fractional) per time step.
+    Maximum allowable transport CFL number for the 'explicit' evolution scheme to ensure numerical stability.
 
-    Controls time step size by limiting saturation variations to prevent numerical
-    instabilities and maintain material balance accuracy. When exceeded, the time
-    step is reduced or rejected.
-    """
+    Typically kept below 1.0 to prevent instability in explicit transport updates.
 
-    maximum_water_saturation_change: float = attrs.field(
-        default=0.6, validator=attrs.validators.ge(0)
-    )
-    """
-    Maximum allowable water saturation change (absolute, fractional) per time step.
-
-    Controls time step size by limiting saturation variations to prevent numerical
-    instabilities and maintain material balance accuracy. When exceeded, the time
-    step is reduced or rejected.
-    """
-
-    maximum_gas_saturation_change: float = attrs.field(
-        default=0.5, validator=attrs.validators.ge(0)
-    )
-    """
-    Maximum allowable gas saturation change (absolute, fractional) per time step.
-
-    Controls time step size by limiting saturation variations to prevent numerical
-    instabilities and maintain material balance accuracy. When exceeded, the time
-    step is reduced or rejected.
-    """
-
-    saturation_change_violation_tolerance: float = attrs.field(
-        default=5e-2, validator=attrs.validators.ge(0)
-    )
-
-    maximum_pressure_change: float = attrs.field(
-        default=1000.0, validator=attrs.validators.ge(0)
-    )
-    """
-    Maximum allowable pressure change (in psi) per time step.
-
-    Controls time step size by limiting pressure variations to maintain numerical stability
-    and physical accuracy. When exceeded, the time step is reduced or rejected.
-
-    Default: 500 psi (~35 bar). This is suitable for most field-scale simulations with typical
-    reservoir pressures of 1000-5000 psi.
-
-    Adjust based on simulation characteristics:
-
-    **Tighten to 50-75 psi when:**
-    - Simulating high-rate wells with large near-wellbore pressure gradients
-    - Reservoir pressure is low (<1000 psi) to maintain relative accuracy
-    - Using highly compressible fluids (gas reservoirs)
-    - Fine-grid simulations (<10m cells) where local variations are significant
-    - Observing pressure oscillations or convergence issues
-
-    **Relax to 150-300 psi when:**
-    - Depletion studies with slow, uniform pressure decline
-    - Field-scale models (>100m cells) where averaging reduces local variations
-    - Reservoir pressure is high (>5000 psi) making relative changes small
-    - Simulation is stable and material balance errors are acceptable
-    - Computational efficiency is critical and accuracy requirements are relaxed
-
-    **Guidelines by reservoir pressure:**
-    - Low pressure (<1000 psi): 25-50 psi (2.5-5% relative change)
-    - Moderate pressure (1000-3000 psi): 50-100 psi (2-5% relative change)
-    - High pressure (3000-6000 psi): 100-200 psi (2-4% relative change)
-    - Very high pressure (>6000 psi): 150-300 psi (2-5% relative change)
-
-    Note: Larger changes can cause density/viscosity jumps and well control issues.
-    """
-
-    minimum_injector_gas_saturation: typing.Optional[float] = attrs.field(
-        default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
-    )
-    """
-    Minimum gas saturation enforced in active gas injector wellblocks after
-    each pressure solve and rate computation.
-
-    When gas is injected into a cell with zero initial gas saturation, the
-    in-situ relative permeability to gas (krg) is zero, which prevents the
-    injected gas from being transported to neighbouring cells in the saturation
-    solve. This parameter seeds a small but non-zero gas saturation in those
-    cells so that krg > 0 and transport can proceed.
-
-    The value should be above `phase_appearance_tolerance` and `residual_gas_saturation` to guarantee that
-    the relative permeability model returns a non-zero krg. Setting too large a value
-    introduces an artificial initial gas saturation that may affect early-time
-    results and MBE. Set to `None` to disable gas saturation seeding entirely,
-    which is appropriate when the initial gas saturation is already non-zero in
-    injector cells.
-    """
-
-    minimum_injector_water_saturation: typing.Optional[float] = attrs.field(
-        default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
-    )
-    """
-    Minimum water saturation enforced in active water injector wellblocks after
-    each pressure solve and rate computation.
-
-    Analogous to `minimum_injector_gas_saturation` but for water injectors.
-    In practice, connate water saturation is almost always non-zero so this
-    seeding is rarely needed for water injection. However, in synthetic models
-    or edge cases where initial water saturation is exactly zero in injector
-    cells, this parameter prevents krw from being zero in the transport step.
-
-    The value should be above `phase_appearance_tolerance` and `irreducible_water_saturation` to guarantee that
-    the relative permeability model returns a non-zero krw. Set to `None`
-    to disable water saturation seeding, which is the recommended setting for
-    most realistic models where connate water is already present.
+    Lowering this value increases stability but may require smaller time steps.
+    Raising them can improve performance but risks instability. Use with caution and monitor simulation behavior.
     """
 
     maximum_newton_iterations: int = attrs.field(
@@ -285,10 +194,10 @@ class Config(
             attrs.validators.le(50),  # type: ignore[arg-type]
         ),
     )
-    """Maximum Newton-Raphson iterations for implicit solvers."""
+    """Maximum Newton-Raphson non-linear iterations for implicit solvers."""
 
     newton_tolerance: float = attrs.field(
-        default=1e-6, validator=attrs.validators.le(1e-2)
+        default=1e-5, validator=attrs.validators.le(1e-2)
     )
     """Relative residual tolerance for Newton convergence in implicit solvers."""
 
@@ -299,7 +208,7 @@ class Config(
             attrs.validators.le(10),  # type: ignore[arg-type]
         ),
     )
-    """Maximum line search bisections per Newton step."""
+    """Maximum line search cuts/bisections per Newton step."""
 
     maximum_newton_saturation_change: float = attrs.field(
         default=0.05,
@@ -311,16 +220,6 @@ class Config(
     """
     Maximum per-cell saturation change per Newton iteration. Damps the Newton
     update to prevent upwind direction flipping that causes limit-cycle oscillation.
-    """
-
-    newton_saturation_change_tolerance: float = attrs.field(
-        default=1e-4,
-        validator=attrs.validators.le(1e-2),
-    )
-    """
-    Saturation change tolerance for dual convergence check. If the maximum
-    saturation change per iteration falls below this and the relative residual
-    is below 1e-3, Newton is declared converged.
     """
 
     newton_stagnation_patience: int = attrs.field(
@@ -394,6 +293,120 @@ class Config(
     - Increase this value (e.g., 1e-6) for more lenient weak problem detection
     """
 
+    maximum_pressure_change: float = attrs.field(
+        default=1000.0, validator=attrs.validators.ge(0)
+    )
+    """
+    Maximum allowable pressure change (in psi) per time step.
+
+    Controls time step size by limiting pressure variations to maintain numerical stability
+    and physical accuracy. When exceeded, the time step is reduced or rejected.
+
+    Default: 500 psi (~35 bar). This is suitable for most field-scale simulations with typical
+    reservoir pressures of 1000-5000 psi.
+
+    Adjust based on simulation characteristics:
+
+    **Tighten to 50-75 psi when:**
+    - Simulating high-rate wells with large near-wellbore pressure gradients
+    - Reservoir pressure is low (<1000 psi) to maintain relative accuracy
+    - Using highly compressible fluids (gas reservoirs)
+    - Fine-grid simulations (<10m cells) where local variations are significant
+    - Observing pressure oscillations or convergence issues
+
+    **Relax to 150-300 psi when:**
+    - Depletion studies with slow, uniform pressure decline
+    - Field-scale models (>100m cells) where averaging reduces local variations
+    - Reservoir pressure is high (>5000 psi) making relative changes small
+    - Simulation is stable and material balance errors are acceptable
+    - Computational efficiency is critical and accuracy requirements are relaxed
+
+    **Guidelines by reservoir pressure:**
+    - Low pressure (<1000 psi): 25-50 psi (2.5-5% relative change)
+    - Moderate pressure (1000-3000 psi): 50-100 psi (2-5% relative change)
+    - High pressure (3000-6000 psi): 100-200 psi (2-4% relative change)
+    - Very high pressure (>6000 psi): 150-300 psi (2-5% relative change)
+
+    Note: Larger changes can cause density/viscosity jumps and well control issues.
+    """
+
+    maximum_oil_saturation_change: float = attrs.field(
+        default=0.6, validator=attrs.validators.ge(0)
+    )
+    """
+    Maximum allowable oil saturation change (absolute, fractional) per time step.
+
+    Controls time step size by limiting saturation variations to prevent numerical
+    instabilities and maintain material balance accuracy. When exceeded, the time
+    step is reduced or rejected.
+    """
+
+    maximum_water_saturation_change: float = attrs.field(
+        default=0.6, validator=attrs.validators.ge(0)
+    )
+    """
+    Maximum allowable water saturation change (absolute, fractional) per time step.
+
+    Controls time step size by limiting saturation variations to prevent numerical
+    instabilities and maintain material balance accuracy. When exceeded, the time
+    step is reduced or rejected.
+    """
+
+    maximum_gas_saturation_change: float = attrs.field(
+        default=0.5, validator=attrs.validators.ge(0)
+    )
+    """
+    Maximum allowable gas saturation change (absolute, fractional) per time step.
+
+    Controls time step size by limiting saturation variations to prevent numerical
+    instabilities and maintain material balance accuracy. When exceeded, the time
+    step is reduced or rejected.
+    """
+
+    saturation_change_violation_tolerance: float = attrs.field(
+        default=5e-2, validator=attrs.validators.ge(0)
+    )
+
+    minimum_injector_gas_saturation: typing.Optional[float] = attrs.field(
+        default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
+    )
+    """
+    Minimum gas saturation enforced in active gas injector wellblocks after
+    each pressure solve and rate computation.
+
+    When gas is injected into a cell with zero initial gas saturation, the
+    in-situ relative permeability to gas (krg) is zero, which prevents the
+    injected gas from being transported to neighbouring cells in the saturation
+    solve. This parameter seeds a small but non-zero gas saturation in those
+    cells so that krg > 0 and transport can proceed.
+
+    The value should be above `phase_appearance_tolerance` and `residual_gas_saturation` to guarantee that
+    the relative permeability model returns a non-zero krg. Setting too large a value
+    introduces an artificial initial gas saturation that may affect early-time
+    results and MBE. Set to `None` to disable gas saturation seeding entirely,
+    which is appropriate when the initial gas saturation is already non-zero in
+    injector cells.
+    """
+
+    minimum_injector_water_saturation: typing.Optional[float] = attrs.field(
+        default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
+    )
+    """
+    Minimum water saturation enforced in active water injector wellblocks after
+    each pressure solve and rate computation.
+
+    Analogous to `minimum_injector_gas_saturation` but for water injectors.
+    In practice, connate water saturation is almost always non-zero so this
+    seeding is rarely needed for water injection. However, in synthetic models
+    or edge cases where initial water saturation is exactly zero in injector
+    cells, this parameter prevents krw from being zero in the transport step.
+
+    The value should be above `phase_appearance_tolerance` and `irreducible_water_saturation` to guarantee that
+    the relative permeability model returns a non-zero krw. Set to `None`
+    to disable water saturation seeding, which is the recommended setting for
+    most realistic models where connate water is already present.
+    """
+
     pressure_outer_convergence_tolerance: float = attrs.field(
         default=1e-3,
         validator=attrs.validators.and_(
@@ -447,7 +460,9 @@ class Config(
     involves sharp saturation fronts where small inter-iterate drift can compound.
     """
 
-    jacobian_assembly_method: typing.Literal["numerical", "analytical"] = "analytical"
+    saturation_jacobian_assembly_method: typing.Literal["numerical", "analytical"] = (
+        "analytical"
+    )
     """
     Method used to assemble the Jacobian matrix in the implicit saturation
     Newton loop.
@@ -477,44 +492,6 @@ class Config(
     high-rate gas injection).
     """
 
-    normalize_saturations: bool = False
-    """
-    Whether to normalize saturations so that `So + Sw + Sg = 1.0` after each timestep.
-
-    When True (default), the simulator rescales all three phase saturations at the end
-    of each saturation update so their sum is exactly 1.0. This corrects small
-    numerical drift from the explicit transport solve and maintains strict pore-volume
-    conservation. The normalization uses safe division to avoid issues in cells with
-    near-zero total saturation.
-
-    Set to False only when debugging saturation solver mass balance, since the raw
-    (unnormalized) values reveal how much drift the transport step actually produces.
-    For production simulations, always leave this enabled.
-    """
-
-    freeze_saturation_pressure: bool = False
-    """
-    If True, keeps oil bubble point pressure (Pb) constant at its initial value throughout the simulation.
-
-    You would sometimes want this set to True, if you are not modelling complex conditions like 
-    miscible injection, Waterflooding, etc., to adhere to standard black-oil model assumptions.
-
-    This is appropriate for:
-    - Natural depletion with no compositional changes
-    - Waterflooding where oil composition remains constant
-    - Simplified black-oil models without compositional tracking
-
-    If False (default), Pb is recomputed each timestep based on current solution GOR.
-
-    **Properties affected when Pb is frozen:**
-    - Bubble point pressure (Pb) - directly frozen
-    - Solution GOR (Rs) - computed using frozen Pb as reference
-    - Oil FVF (Bo) - uses frozen Pb for undersaturated calculations
-    - Oil compressibility (Co) - switches at frozen Pb
-    - Oil viscosity (μo) - indirectly through Rs
-    - Oil density (ρo) - indirectly through Rs and Bo
-    """
-
     enable_hysteresis: bool = False
     """
     Enable saturation hysteresis tracking for residual saturations.
@@ -538,6 +515,21 @@ class Config(
     physical effect and incurs unnecessary computation.
     """
 
+    residual_oil_drainage_ratio_water_flood: float = attrs.field(
+        default=0.6, validator=attrs.validators.ge(0)
+    )
+    """Ratio to compute oil drainage residual from imbibition value during water flooding."""
+
+    residual_oil_drainage_ratio_gas_flood: float = attrs.field(
+        default=0.6, validator=attrs.validators.ge(0)
+    )
+    """Ratio to compute oil drainage residual from imbibition value during gas flooding."""
+
+    residual_gas_drainage_ratio: float = attrs.field(
+        default=0.5, validator=attrs.validators.ge(0)
+    )
+    """Ratio to compute gas drainage residual from imbibition value."""
+
     capture_timer_state: bool = True
     """
     Whether to capture and include the timer state in the yielded model states during simulation monitoring.
@@ -546,28 +538,6 @@ class Config(
     This allows for more informative logging and analysis of simulation progress.
     When False, the timer state is not included in the yielded states, which may reduce memory usage if the timer state is 
     large or if many states are captured.
-    """
-
-    check_zero_flow_initialization: bool = True
-    """
-    Whether to validate the initial state for zero-flow (deadlock) violations.
-
-    When True (default), the simulator checks the initial state before yielding it for
-    cells where the sum of inter-cell flows is zero, which can indicate phase deadlock
-    or spurious initial flux conditions. The check reports violations but does not stop
-    the simulation. When False, the validation is skipped.
-    """
-
-    zero_flow_relative_flux_tolerance: float = attrs.field(
-        default=1e-5,
-        validator=attrs.validators.gt(0),
-    )
-    """
-    Relative flux tolerance for zero-flow initialization check.
-
-    When `check_zero_flow_initialization` is True, this parameter defines the threshold for
-    identifying zero-flow conditions. If the maximum absolute inter-cell flux in a cell is less than
-    this fraction of the average flux across the domain, the cell is flagged for potential deadlock.
     """
 
     _lock: threading.Lock = attrs.field(

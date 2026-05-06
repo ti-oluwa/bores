@@ -51,7 +51,11 @@ from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTDataSet, PVTTables
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDimensions
-from bores.updates import update_fluid_properties, update_residual_saturation_grids
+from bores.updates import (
+    apply_solution_gas_updates,
+    update_fluid_properties,
+    update_residual_saturation_grids,
+)
 from bores.validation import ValidationReport, validate
 from bores.wells.base import Wells
 from bores.wells.indices import WellsIndices, build_wells_indices, update_wells_indices
@@ -395,8 +399,6 @@ def _run_impes_step(
     :return: `StepResult` containing updated fluid properties, rock properties, and rates.
     """
     initial_fluid_properties = fluid_properties
-
-    # Build boundary metadata and get the initial ghost-cell maps.
     metadata = build_boundary_metadata(
         fluid_properties=fluid_properties,
         rock_properties=rock_properties,
@@ -432,7 +434,25 @@ def _run_impes_step(
         well_rates = None
 
     logger.debug("Solving pressure implicitly...")
-    pressure_result = implicit.solve_pressure(
+    solve_pressure = (
+        implicit.solve_pressure_nonlinear
+        if config.use_nonlinear_pressure_solve
+        else implicit.solve_pressure
+    )
+    kwds = (
+        dict(
+            relperm_grids=relperm_grids,
+            wells=wells,
+            miscibility_model=miscibility_model,
+            pvt_tables=config.pvt_tables,
+            freeze_saturation_pressure=config.freeze_saturation_pressure,
+            rates=well_rates if has_open_wells else None,
+            wells_indices=wells_indices,
+        )
+        if config.use_nonlinear_pressure_solve
+        else dict(rates=well_rates if has_open_wells else None)
+    )
+    pressure_result = solve_pressure(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
         elevation_grid=elevation_grid,
@@ -443,10 +463,10 @@ def _run_impes_step(
         relative_mobility_grids=relative_mobility_grids,
         capillary_pressure_grids=capillary_pressure_grids,
         face_transmissibilities=face_transmissibilities,
-        config=config,
-        flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
-        rates=well_rates if has_open_wells else None,
+        flux_boundaries=flux_boundaries,
+        config=config,
+        **kwds,  # type: ignore
         dtype=dtype,
     )
     if not pressure_result.success:
@@ -515,13 +535,12 @@ def _run_impes_step(
     logger.debug("Pressure evolution completed.")
 
     # Copy before PVT updates
-    # old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
-    # old_gas_solubility_in_water_grid = (
-    #     fluid_properties.gas_solubility_in_water_grid.copy()
-    # )
-    # old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
-    # old_gas_fvf_grid = fluid_properties.gas_formation_volume_factor_grid.copy()
-    # old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
+    old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
+    old_gas_solubility_in_water_grid = (
+        fluid_properties.gas_solubility_in_water_grid.copy()
+    )
+    old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
+    old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
     old_water_density_grid = fluid_properties.water_density_grid.copy()
     old_oil_density_grid = fluid_properties.oil_effective_density_grid.copy()
     old_gas_density_grid = fluid_properties.gas_density_grid.copy()
@@ -708,6 +727,16 @@ def _run_impes_step(
             ),
         )
 
+    # Flash reconciliation: correct saturations and Rs/Rsw for
+    # liberation/dissolution driven by the pressure change in this step
+    fluid_properties = apply_solution_gas_updates(
+        fluid_properties=fluid_properties,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gor_grid,
+        old_oil_formation_volume_factor_grid=old_oil_fvf_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_water_formation_volume_factor_grid=old_water_fvf_grid,
+    )
+
     if config.normalize_saturations:
         normalize_saturations(
             oil_saturation_grid=fluid_properties.oil_saturation_grid,
@@ -869,7 +898,25 @@ def _run_sequential_implicit_step(
         well_rates = None
 
     logger.debug("Solving pressure implicitly...")
-    pressure_result = implicit.solve_pressure(
+    solve_pressure = (
+        implicit.solve_pressure_nonlinear
+        if config.use_nonlinear_pressure_solve
+        else implicit.solve_pressure
+    )
+    kwds = (
+        dict(
+            relperm_grids=relperm_grids,
+            wells=wells,
+            miscibility_model=miscibility_model,
+            pvt_tables=config.pvt_tables,
+            freeze_saturation_pressure=config.freeze_saturation_pressure,
+            rates=well_rates if has_open_wells else None,
+            wells_indices=wells_indices,
+        )
+        if config.use_nonlinear_pressure_solve
+        else dict(rates=well_rates if has_open_wells else None)
+    )
+    pressure_result = solve_pressure(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
         elevation_grid=elevation_grid,
@@ -880,10 +927,10 @@ def _run_sequential_implicit_step(
         relative_mobility_grids=relative_mobility_grids,
         capillary_pressure_grids=capillary_pressure_grids,
         face_transmissibilities=face_transmissibilities,
-        config=config,
-        flux_boundaries=flux_boundaries,
         pressure_boundaries=pressure_boundaries,
-        rates=well_rates if has_open_wells else None,
+        flux_boundaries=flux_boundaries,
+        config=config,
+        **kwds,  # type: ignore
         dtype=dtype,
     )
     if not pressure_result.success:
@@ -1278,6 +1325,11 @@ def _run_full_sequential_implicit_step(
     maximum_newton_iterations = config.maximum_newton_iterations
     maximum_outer_iterations = config.maximum_outer_iterations
     initial_fluid_properties = fluid_properties
+    solve_pressure = (
+        implicit.solve_pressure_nonlinear
+        if config.use_nonlinear_pressure_solve
+        else implicit.solve_pressure
+    )
 
     logger.debug(
         "Outer iteration tolerances: saturation (absolute): %d:.2e, pressure (relative): %d:.2e",
@@ -1360,7 +1412,38 @@ def _run_full_sequential_implicit_step(
         logger.debug(
             "Solving pressure implicitly for outer iteration saturation solve..."
         )
-        pressure_result = implicit.solve_pressure(
+        # pressure_result = implicit.solve_pressure(
+        #     cell_dimension=cell_dimension,
+        #     thickness_grid=thickness_grid,
+        #     elevation_grid=elevation_grid,
+        #     time_step=time_step,
+        #     time_step_size=time_step_size,
+        #     rock_properties=rock_properties,
+        #     fluid_properties=iter_fluid_properties,
+        #     relative_mobility_grids=iter_relative_mobility_grids,
+        #     capillary_pressure_grids=iter_capillary_pressure_grids,
+        #     face_transmissibilities=face_transmissibilities,
+        #     config=config,
+        #     flux_boundaries=flux_boundaries,
+        #     pressure_boundaries=pressure_boundaries,
+        #     rates=well_rates if has_open_wells else None,
+        #     dtype=dtype,
+        # )
+
+        kwds = (
+            dict(
+                relperm_grids=iter_relperm_grids,
+                wells=wells,
+                miscibility_model=miscibility_model,
+                pvt_tables=config.pvt_tables,
+                freeze_saturation_pressure=config.freeze_saturation_pressure,
+                rates=well_rates if has_open_wells else None,
+                wells_indices=wells_indices,
+            )
+            if config.use_nonlinear_pressure_solve
+            else dict(rates=well_rates if has_open_wells else None)
+        )
+        pressure_result = solve_pressure(
             cell_dimension=cell_dimension,
             thickness_grid=thickness_grid,
             elevation_grid=elevation_grid,
@@ -1371,13 +1454,12 @@ def _run_full_sequential_implicit_step(
             relative_mobility_grids=iter_relative_mobility_grids,
             capillary_pressure_grids=iter_capillary_pressure_grids,
             face_transmissibilities=face_transmissibilities,
-            config=config,
-            flux_boundaries=flux_boundaries,
             pressure_boundaries=pressure_boundaries,
-            rates=well_rates if has_open_wells else None,
+            flux_boundaries=flux_boundaries,
+            config=config,
+            **kwds,  # type: ignore
             dtype=dtype,
         )
-
         if not pressure_result.success:
             logger.warning(
                 f"Implicit pressure solve failed at outer iteration "
@@ -2152,51 +2234,6 @@ def run(
                 minimum_injector_gas_saturation=config.minimum_injector_gas_saturation,
                 inplace=True,
             )
-
-        if config.check_zero_flow_initialization:
-            logger.debug("Checking initial state for zero-flow violations...")
-            zero_flow_check = check_zero_flow_initialization(
-                fluid_properties=fluid_properties,
-                rock_properties=rock_properties,
-                face_transmissibilities=face_transmissibilities,
-                elevation_grid=elevation_grid,
-                config=config,
-                cell_dimension=cell_dimension,
-                thickness_grid=thickness_grid,
-                relative_tolerance=config.zero_flow_relative_flux_tolerance,
-                max_reported_violations=10,
-                dtype=dtype,
-            )
-            if zero_flow_check.passed:
-                logger.info(
-                    "Zero-Flow initialization check passed! Max relative flux = %.3e day⁻¹ (tolerance = %.3e day⁻¹). "
-                    "Checked %d active cells.",
-                    zero_flow_check.max_relative_flux,
-                    zero_flow_check.relative_tolerance,
-                    zero_flow_check.cells_checked,
-                )
-            else:
-                logger.warning(
-                    "Zero-Flow initialization check failed! %d of %d active cells exceed tolerance %.3e day⁻¹. "
-                    "Max relative flux = %.3e day⁻¹ at cell %s. "
-                    "Check pressure/saturation/density/capillary-pressure consistency.",
-                    zero_flow_check.violation_count,
-                    zero_flow_check.cells_checked,
-                    zero_flow_check.relative_tolerance,
-                    zero_flow_check.max_relative_flux,
-                    zero_flow_check.worst_cell,
-                )
-                for violation in zero_flow_check.violations:
-                    logger.warning(
-                        "  Cell %s: relative_flux=%.3e day⁻¹  "
-                        "(qw=%.3e, qo=%.3e, qg=%.3e lbm/day, PV=%.3e ft³)",
-                        violation.cell,
-                        violation.relative_flux,
-                        violation.net_water_flux,
-                        violation.net_oil_flux,
-                        violation.net_gas_flux,
-                        violation.pore_volume,
-                    )
 
         logger.debug("Building initial rock-fluid property grids...")
         relperm_grids, relative_mobility_grids, capillary_pressure_grids = (

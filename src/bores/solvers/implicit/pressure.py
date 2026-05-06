@@ -11,8 +11,9 @@ from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
 from bores.errors import PreconditionerError, SolverError
-from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
+from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids, RelPermGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
+from bores.grids.rock_fluid import build_three_phase_relative_mobilities_grids
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
     Solution,
@@ -20,9 +21,13 @@ from bores.solvers.base import (
     solve_linear_system,
     to_1D_index,
 )
-from bores.solvers.rates import WellRates
+from bores.solvers.rates import WellRates, compute_well_rates
+from bores.tables.pvt import PVTTables
 from bores.transmissibility import FaceTransmissibilities
-from bores.types import ThreeDimensionalGrid, ThreeDimensions
+from bores.types import MiscibilityModel, ThreeDimensionalGrid, ThreeDimensions
+from bores.updates import update_fluid_properties
+from bores.wells.base import Wells
+from bores.wells.indices import WellsIndices
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +241,327 @@ def solve_pressure(
         success=True,
         scheme="implicit",
         message=f"Implicit pressure evolution for time step {time_step} successful.",
+    )
+
+
+def solve_pressure_nonlinear(
+    cell_dimension: typing.Tuple[float, float],
+    thickness_grid: ThreeDimensionalGrid,
+    elevation_grid: ThreeDimensionalGrid,
+    time_step: int,
+    time_step_size: float,
+    rock_properties: RockProperties[ThreeDimensions],
+    fluid_properties: FluidProperties[ThreeDimensions],
+    relperm_grids: RelPermGrids[ThreeDimensions],
+    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
+    capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
+    face_transmissibilities: FaceTransmissibilities,
+    pressure_boundaries: ThreeDimensionalGrid,
+    flux_boundaries: ThreeDimensionalGrid,
+    config: Config,
+    wells: Wells[ThreeDimensions],
+    wells_indices: WellsIndices,
+    miscibility_model: MiscibilityModel = "immiscible",
+    pvt_tables: typing.Optional[PVTTables] = None,
+    freeze_saturation_pressure: bool = False,
+    rates: typing.Optional[WellRates] = None,
+    dtype: npt.DTypeLike = np.float64,
+) -> Solution[ImplicitPressureSolution, None]:
+    """
+    Solve the nonlinear pressure equation using a Newton outer iteration loop.
+
+    This is more robust than the single-pass Picard solve in `solve_pressure` for cases with:
+
+    - Fast gas liberation or dissolution (large ΔRs per step).
+    - High gas compressibility causing strong pressure-mobility coupling.
+    - Near-critical fluids where Bo, Rs, and μo are highly nonlinear in pressure.
+
+    The linear sub-problem at each iterate is identical to the one assembled by
+    `solve_pressure`, so all existing scaling, solver, and preconditioner
+    settings apply.
+
+    :param cell_dimension: Tuple of (cell_size_x, cell_size_y) in feet.
+    :param thickness_grid: Cell thickness grid (ft).
+    :param elevation_grid: Cell elevation grid (ft).
+    :param time_step: Current time step number (for logging/debugging).
+    :param time_step_size: Time step size in seconds.
+    :param rock_properties: Rock properties.
+    :param fluid_properties: Fluid properties at the start of the time step.
+        Saturations are held fixed throughout the Newton loop; only pressure
+        and PVT-derived quantities are updated.
+    :param relative_mobility_grids: Initial relative mobility grids (updated
+        inside the loop as viscosities change with pressure).
+    :param capillary_pressure_grids: Capillary pressure grids (held fixed;
+        capillary pressure depends on saturation, which is not updated here).
+    :param face_transmissibilities: Precomputed geometric face transmissibilities.
+    :param pressure_boundaries: Dirichlet boundary pressures (psi).
+    :param flux_boundaries: Neumann boundary fluxes (ft³/day).
+    :param config: Simulation configuration.
+    :param wells: Wells object, required to recompute well rates at each iterate.
+    :param miscibility_model: Miscibility model forwarded to `update_fluid_properties`.
+    :param pvt_tables: PVT tables forwarded to `update_fluid_properties`.
+    :param freeze_saturation_pressure: Forwarded to `update_fluid_properties`.
+    :param rates: Initial well-rate contributions (diagonal and RHS vectors).
+        Updated each iteration when `wells` and `wells_indices` are provided.
+    :param wells_indices: Well index cache required to recompute `rates`
+        inside the loop. Ignored when `wells` is `None`.
+    :param dtype: Numpy dtype for all arrays.
+    :return: `Solution[ImplicitPressureSolution]` with the converged (or
+        best-available) pressure grid and the maximum pressure change relative
+        to the *start-of-step* pressure (not the last iterate delta).
+    """
+    cell_size_x, cell_size_y = cell_dimension
+    md_per_cp = c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
+    gravitational_constant = (
+        c.ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE
+        / c.GRAVITATIONAL_CONSTANT_LBM_FT_PER_LBF_S2
+    )
+    time_step_size_in_days = time_step_size * c.DAYS_PER_SECOND
+
+    current_pressure_grid = fluid_properties.pressure_grid
+    porosity_grid = rock_properties.porosity_grid
+    net_to_gross_grid = rock_properties.net_to_gross_grid
+    rock_compressibility = rock_properties.compressibility
+    cell_count_x, cell_count_y, cell_count_z = current_pressure_grid.shape
+    cell_count = cell_count_x * cell_count_y * cell_count_z
+    diagonal_indices = np.arange(cell_count, dtype=np.int32)
+
+    iter_fluid_properties = fluid_properties
+    iter_relative_mobility_grids = relative_mobility_grids
+    iter_rates = rates
+    has_open_wells = rates is not None
+
+    maximum_iterations = config.maximum_newton_iterations
+    newton_tolerance = config.newton_tolerance
+    linear_tolerance = config.pressure_convergence_tolerance
+    converged = False
+    previous_pressure_grid = current_pressure_grid.copy()
+
+    for iteration in range(maximum_iterations):
+        water_compressibility_grid = iter_fluid_properties.water_compressibility_grid
+        oil_compressibility_grid = iter_fluid_properties.oil_compressibility_grid
+        gas_compressibility_grid = iter_fluid_properties.gas_compressibility_grid
+
+        water_saturation_grid = iter_fluid_properties.water_saturation_grid
+        oil_saturation_grid = iter_fluid_properties.oil_saturation_grid
+        gas_saturation_grid = iter_fluid_properties.gas_saturation_grid
+        current_pressure_grid = iter_fluid_properties.pressure_grid
+
+        oil_density_grid = iter_fluid_properties.oil_effective_density_grid
+        water_density_grid = iter_fluid_properties.water_density_grid
+        gas_density_grid = iter_fluid_properties.gas_density_grid
+        oil_water_capillary_pressure_grid, gas_oil_capillary_pressure_grid = (
+            capillary_pressure_grids
+        )
+        (
+            water_relative_mobility_grid,
+            oil_relative_mobility_grid,
+            gas_relative_mobility_grid,
+        ) = iter_relative_mobility_grids
+
+        total_fluid_compressibility_grid = build_total_fluid_compressibility_grid(
+            oil_saturation_grid=oil_saturation_grid,
+            oil_compressibility_grid=oil_compressibility_grid,
+            water_saturation_grid=water_saturation_grid,
+            water_compressibility_grid=water_compressibility_grid,
+            gas_saturation_grid=gas_saturation_grid,
+            gas_compressibility_grid=gas_compressibility_grid,
+        )
+        total_compressibility_grid = np.add(
+            total_fluid_compressibility_grid, rock_compressibility, dtype=dtype
+        )
+
+        diagonal_values, rhs_values = compute_accumulation_contributions(
+            cell_count_x=cell_count_x,
+            cell_count_y=cell_count_y,
+            cell_count_z=cell_count_z,
+            thickness_grid=thickness_grid,
+            porosity_grid=porosity_grid,
+            net_to_gross_grid=net_to_gross_grid,
+            total_compressibility_grid=total_compressibility_grid,
+            current_pressure_grid=current_pressure_grid,  # always old-time level
+            cell_size_x=cell_size_x,
+            cell_size_y=cell_size_y,
+            time_step_size_in_days=time_step_size_in_days,
+            dtype=dtype,
+        )
+        (
+            sparse_rows,
+            sparse_cols,
+            sparse_off_diagonal,
+            diagonal_additions,
+            rhs_additions,
+        ) = assemble_flux_contributions(
+            cell_count_x=cell_count_x,
+            cell_count_y=cell_count_y,
+            cell_count_z=cell_count_z,
+            pressure_boundaries=pressure_boundaries,
+            flux_boundaries=flux_boundaries,
+            water_relative_mobility_grid=water_relative_mobility_grid,
+            oil_relative_mobility_grid=oil_relative_mobility_grid,
+            gas_relative_mobility_grid=gas_relative_mobility_grid,
+            face_transmissibilities_x=face_transmissibilities.x,
+            face_transmissibilities_y=face_transmissibilities.y,
+            face_transmissibilities_z=face_transmissibilities.z,
+            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+            oil_density_grid=oil_density_grid,
+            water_density_grid=water_density_grid,
+            gas_density_grid=gas_density_grid,
+            elevation_grid=elevation_grid,
+            gravitational_constant=gravitational_constant,
+            md_per_cp_to_ft2_per_psi_per_day=md_per_cp,
+            dtype=dtype,
+        )
+
+        well_rhs_additions = iter_rates.rhs_contributions if has_open_wells else 0  # type: ignore
+        well_diagional_additions = (
+            iter_rates.diagonal_contributions if has_open_wells else 0  # type: ignore
+        )
+
+        diagonal = diagonal_values + diagonal_additions + well_diagional_additions
+        residual_vector = rhs_values + rhs_additions + well_rhs_additions
+        jacobian = coo_matrix(
+            (
+                np.concatenate([diagonal, sparse_off_diagonal]),
+                (
+                    np.concatenate([diagonal_indices, sparse_rows]),
+                    np.concatenate([diagonal_indices, sparse_cols]),
+                ),
+            ),
+            shape=(cell_count, cell_count),
+            dtype=dtype,
+        )
+
+        try:
+            J_csr, residual_vector, column_scaling_vector = scale_linear_system(
+                jacobian_csr=jacobian.tocsr(),
+                residual_vector=residual_vector,
+                methods="diagonal",
+            )
+            pressure_vector, _ = solve_linear_system(
+                A_csr=J_csr,
+                b=residual_vector,
+                rtol=linear_tolerance,
+                maximum_iterations=config.maximum_solver_iterations,
+                solver=config.pressure_solver,
+                preconditioner=config.pressure_preconditioner,
+                fallback_to_direct=True,
+            )
+            if column_scaling_vector is not None:
+                pressure_vector *= column_scaling_vector
+        except (SolverError, PreconditionerError) as exc:
+            logger.error(
+                "Newton pressure sub-solve failed at iteration %d, time step %d: %s",
+                iteration + 1,
+                time_step,
+                exc,
+            )
+            return Solution(
+                value=ImplicitPressureSolution(
+                    pressure_grid=current_pressure_grid.astype(dtype, copy=False),
+                    maximum_pressure_change=0.0,
+                ),
+                success=False,
+                scheme="implicit",
+                message=str(exc),
+            )
+
+        new_pressure_grid = pressure_vector.reshape(current_pressure_grid.shape).astype(
+            dtype, copy=False
+        )
+        if iteration > 0:  # First delta is meaningless (old-time vs. first iterate)
+            # Use RMS tolerance
+            delta = new_pressure_grid - previous_pressure_grid
+            reference_pressure = max(np.sqrt(np.mean(new_pressure_grid**2)), 1.0)
+            rms_absolute_tolerance = np.sqrt(np.mean(delta**2))
+            relative_tolerance = rms_absolute_tolerance / reference_pressure
+
+            converged = relative_tolerance < newton_tolerance
+            logger.debug(
+                "Newton pressure iteration %d/%d: max Δp = %.6f psi (tol = %.6e)",
+                iteration + 1,
+                maximum_iterations,
+                relative_tolerance,
+                newton_tolerance,
+            )
+
+            iter_fluid_properties = attrs.evolve(
+                iter_fluid_properties, pressure_grid=new_pressure_grid
+            )
+            if converged:
+                logger.debug(
+                    "Newton pressure loop converged after %d iteration(s) at time step %d.",
+                    iteration + 1,
+                    time_step,
+                )
+                break
+
+        previous_pressure_grid = new_pressure_grid
+
+        # Re-evaluate PVT, mobilities, and well rates at new pressure iterate
+        iter_fluid_properties = update_fluid_properties(
+            fluid_properties=iter_fluid_properties,
+            wells=wells,
+            miscibility_model=miscibility_model,
+            pvt_tables=pvt_tables,
+            freeze_saturation_pressure=freeze_saturation_pressure,
+        )
+
+        (
+            water_relative_mobility,
+            oil_relative_mobility,
+            gas_relative_mobility,
+        ) = build_three_phase_relative_mobilities_grids(
+            oil_relative_permeability_grid=relperm_grids.kro,
+            water_relative_permeability_grid=relperm_grids.krw,
+            gas_relative_permeability_grid=relperm_grids.krg,
+            water_viscosity_grid=iter_fluid_properties.water_viscosity_grid,
+            oil_viscosity_grid=iter_fluid_properties.oil_effective_viscosity_grid,
+            gas_viscosity_grid=iter_fluid_properties.gas_viscosity_grid,
+        )
+        iter_relative_mobility_grids = RelativeMobilityGrids(
+            oil_relative_mobility=oil_relative_mobility,
+            water_relative_mobility=water_relative_mobility,
+            gas_relative_mobility=gas_relative_mobility,
+        )
+
+        if has_open_wells:
+            iter_rates = compute_well_rates(
+                fluid_properties=iter_fluid_properties,
+                water_relative_mobility_grid=water_relative_mobility,
+                oil_relative_mobility_grid=oil_relative_mobility,
+                gas_relative_mobility_grid=gas_relative_mobility,
+                wells=wells,  # type: ignore
+                time=time_step_size,
+                config=config,
+                wells_indices=wells_indices,  # type: ignore
+                dtype=dtype,
+            )
+
+    if not converged:
+        logger.warning(
+            "Newton pressure loop did not converge after %d iteration(s) at time step %d. "
+            "Proceeding with last iterate.",
+            maximum_iterations,
+            time_step,
+        )
+
+    final_pressure_grid = iter_fluid_properties.pressure_grid
+    maximum_pressure_change = float(
+        np.max(np.abs(final_pressure_grid - current_pressure_grid))
+    )
+    return Solution(
+        value=ImplicitPressureSolution(
+            pressure_grid=final_pressure_grid,
+            maximum_pressure_change=maximum_pressure_change,
+        ),
+        success=True,
+        scheme="implicit",
+        message=(
+            f"Nonlinear Newton pressure solve {'converged' if converged else 'reached max iterations'} "
+            f"at time step {time_step}."
+        ),
     )
 
 

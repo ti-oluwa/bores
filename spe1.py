@@ -590,7 +590,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="si",
+    scheme="impes",
     output_frequency=1,
     pressure_solver="direct",
     transport_solver="direct",
@@ -605,6 +605,7 @@ config = bores.Config(
     # maximum_newton_saturation_change=0.05,
     maximum_pressure_change=300.0,
     cfl_threshold=0.3,
+    use_nonlinear_pressure_solve=True,
     # jacobian_assembly_method="numerical",
 )
 
