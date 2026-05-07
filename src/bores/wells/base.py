@@ -232,9 +232,9 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         temperature: float,
         well_index: float,
         fluid: WellFluidT,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
@@ -250,7 +250,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param phase_mobility: The relative mobility of the fluid phase being produced or injected.
         :param well_index: The well index (md*ft).
         :param fluid: The fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor of the fluid (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor of the fluid (bbl/STB or ft³/SCF).
         :param allocation_fraction: Fraction of target rate to allocate to this cell (for multi-cell wells).
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
@@ -265,7 +265,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
             phase_mobility=phase_mobility,
             well_index=well_index,
             fluid=fluid,
-            formation_volume_factor=formation_volume_factor,
+            phase_fvf=phase_fvf,
             allocation_fraction=allocation_fraction,
             is_active=self.is_open,
             use_pseudo_pressure=use_pseudo_pressure,
@@ -280,9 +280,9 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         temperature: float,
         well_index: float,
         fluid: WellFluidT,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
@@ -298,7 +298,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param phase_mobility: The relative mobility of the fluid phase being produced or injected.
         :param well_index: The well index (md*ft).
         :param fluid: The fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor of the fluid (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor of the fluid (bbl/STB or ft³/SCF).
         :param allocation_fraction: Fraction of target rate to allocate to this cell (for multi-cell wells).
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
@@ -313,7 +313,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
             phase_mobility=phase_mobility,
             well_index=well_index,
             fluid=fluid,
-            formation_volume_factor=formation_volume_factor,
+            phase_fvf=phase_fvf,
             allocation_fraction=allocation_fraction,
             is_active=self.is_open,
             use_pseudo_pressure=use_pseudo_pressure,
@@ -328,9 +328,9 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         temperature: float,
         well_index: float,
         fluid: WellFluidT,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
@@ -347,7 +347,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param phase_mobility: The relative mobility of the fluid phase being produced or injected.
         :param well_index: The well index (md*ft).
         :param fluid: The fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor of the fluid (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor of the fluid (bbl/STB or ft³/SCF).
         :param allocation_fraction: Fraction of target rate to allocate to this cell (for multi-cell wells).
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹).
@@ -363,7 +363,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
             phase_mobility=phase_mobility,
             well_index=well_index,
             fluid=fluid,
-            formation_volume_factor=formation_volume_factor,
+            phase_fvf=phase_fvf,
             allocation_fraction=allocation_fraction,
             is_active=self.is_open,
             use_pseudo_pressure=use_pseudo_pressure,
@@ -449,9 +449,9 @@ class InjectionWell(Well[Coordinates, InjectedFluid]):
         temperature: float,
         well_index: float,
         fluid: InjectedFluid,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         use_pseudo_pressure: bool = False,
         fluid_compressibility: typing.Optional[float] = None,
@@ -469,7 +469,7 @@ class InjectionWell(Well[Coordinates, InjectedFluid]):
         :param fluid: The fluid being injected into the well. If None, uses the well's injected_fluid property.
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells (default is False).
         :param fluid_compressibility: Compressibility of the fluid (psi⁻¹). For slightly compressible fluids, this can be used to adjust the flow rate calculation.
-        :param formation_volume_factor: The formation volume factor of the fluid (bbl/STB or ft³/SCF).
+        :param phase_fvf: The formation volume factor of the fluid (bbl/STB or ft³/SCF).
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :return: The flow rate (bbl/day or ft³/day)
         """
@@ -480,7 +480,7 @@ class InjectionWell(Well[Coordinates, InjectedFluid]):
             phase_mobility=phase_mobility,
             well_index=well_index,
             fluid=fluid,
-            formation_volume_factor=formation_volume_factor,
+            phase_fvf=phase_fvf,
             allocation_fraction=allocation_fraction,
             use_pseudo_pressure=use_pseudo_pressure,
             fluid_compressibility=fluid_compressibility,

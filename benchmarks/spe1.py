@@ -1127,7 +1127,7 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "gas-sat"
+    property = "oil-sat"
     figures = []
     timesteps = [465]
     for timestep in timesteps:

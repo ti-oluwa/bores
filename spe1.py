@@ -513,11 +513,7 @@ oil_water_table = bores.TwoPhaseRelPermTable(
 )
 
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.ThreePhaseRelPermTable(
-        oil_water_table=oil_water_table,
-        gas_oil_table=gas_oil_table,
-        mixing_rule="eclipse_rule",
-    )
+    relative_permeability_table=gas_oil_table
 )
 
 # Wells
@@ -590,7 +586,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="impes",
+    scheme="si",
     output_frequency=1,
     pressure_solver="direct",
     transport_solver="direct",
@@ -604,9 +600,8 @@ config = bores.Config(
     # maximum_water_saturation_change=0.05,
     # maximum_newton_saturation_change=0.05,
     maximum_pressure_change=300.0,
-    cfl_threshold=0.3,
+    cfl_threshold=0.9,
     use_nonlinear_pressure_solve=True,
-    # jacobian_assembly_method="numerical",
 )
 
 run = bores.Run(

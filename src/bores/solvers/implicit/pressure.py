@@ -244,7 +244,7 @@ def solve_pressure(
     )
 
 
-def solve_pressure_nonlinear(
+def solve_nonlinear_pressure(
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,

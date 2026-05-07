@@ -66,7 +66,7 @@ class ControlInfo:
 def _disallow_flow(
     fluid: typing.Optional[WellFluid],
     is_active: bool,
-    phase_mobility: typing.Optional[float] = None,
+    phase_mobility: float,
     minimum_mobility: float = 1e-18,
 ) -> bool:
     """
@@ -82,7 +82,7 @@ def _disallow_flow(
     """
     return (
         fluid is None
-        or (phase_mobility is not None and phase_mobility < minimum_mobility)
+        or phase_mobility < minimum_mobility
         or not is_active
     )
 
@@ -95,7 +95,7 @@ def _compute_required_bhp(
     temperature: float,
     phase_mobility: float,
     use_pseudo_pressure: bool,
-    formation_volume_factor: float,
+    phase_fvf: float,
     fluid_compressibility: typing.Optional[float],
     incompressibility_threshold: float = 1e-6,
     pvt_tables: typing.Optional[PVTTables] = None,
@@ -140,7 +140,7 @@ def _compute_required_bhp(
             average_compressibility_factor=avg_z_factor,
             use_pseudo_pressure=use_pp,
             pseudo_pressure_table=pp_table,
-            formation_volume_factor=formation_volume_factor,
+            formation_volume_factor=phase_fvf,
             gas_viscosity=phase_viscosity,
         )
     # For oil/water
@@ -338,9 +338,9 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -355,10 +355,9 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         :param temperature: The reservoir temperature at the well location (°F).
         :param phase_viscosity: The viscosity of the fluid phase.
         :param phase_mobility: The relative mobility of the fluid phase.
-            Not so relevant for rate controlled injection wells
         :param well_index: The well index (md*ft).
         :param fluid: The fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor (bbl/STB or ft³/SCF).
         :param allocation_fraction: Fraction of target rate to allocate to this cell (for multi-cell wells).
             For rate controls, cell_rate = target_rate x allocation_fraction.
             Typically allocation_fraction = cell_WI / total_well_WI.
@@ -377,9 +376,9 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluid,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -399,10 +398,10 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         :param pressure: Reservoir pressure at well location (psi)
         :param temperature: Reservoir temperature (°F)
         :param phase_viscosity: The viscosity of the fluid phase.
-        :param phase_mobility: Phase mobility (1/cP). Not so relevant for rate controlled injection wells
+        :param phase_mobility: Phase mobility (1/cP).
         :param well_index: Well index (md*ft)
         :param fluid: Fluid being produced/injected
-        :param formation_volume_factor: Formation volume factor
+        :param phase_fvf: Formation volume factor
         :param allocation_fraction: Fraction of target rate to allocate to this cell (for multi-cell wells).
             For rate controls, cell_rate = target_rate x allocation_fraction.
             Default is 1.0 (single-cell well or no allocation needed).
@@ -420,9 +419,9 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -450,7 +449,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
         :param phase_mobility: Relative mobility of the fluid phase (cP⁻¹).
         :param well_index: Well index (md·ft).
         :param fluid: Fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor (bbl/STB or ft³/SCF).
         :param allocation_fraction: Fraction of total well rate allocated to this
             cell (= cell_WI / total_WI for multi-cell wells).  Default 1.0.
         :param is_active: Whether the well is currently open.
@@ -467,7 +466,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
             temperature=temperature,
             well_index=well_index,
             fluid=fluid,
-            formation_volume_factor=formation_volume_factor,
+            phase_fvf=phase_fvf,
             phase_viscosity=phase_viscosity,
             phase_mobility=phase_mobility,
             allocation_fraction=allocation_fraction,
@@ -482,7 +481,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
             temperature=temperature,
             well_index=well_index,
             fluid=fluid,
-            formation_volume_factor=formation_volume_factor,
+            phase_fvf=phase_fvf,
             phase_viscosity=phase_viscosity,
             phase_mobility=phase_mobility,
             allocation_fraction=allocation_fraction,
@@ -545,9 +544,9 @@ class BHPControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -562,10 +561,10 @@ class BHPControl(WellControl[WellFluidTcon]):
 
         :param pressure: Reservoir pressure at the well location (psi).
         :param temperature: Reservoir temperature at the well location (°F).
-        :param phase_mobility: Relative mobility of the fluid phase. Required for BHP control.
+        :param phase_mobility: Relative mobility of the fluid phase.
         :param well_index: Well index (md*ft).
         :param fluid: Fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor (bbl/STB or ft³/SCF).
         :param allocation_fraction: Ignored for BHP control (rate naturally allocates proportionally to WI).
         :param is_active: Whether the well is active/open.
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells.
@@ -573,11 +572,6 @@ class BHPControl(WellControl[WellFluidTcon]):
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :return: Flow rate in (bbl/day or ft³/day).
         """
-        if phase_mobility is None:
-            raise ValidationError(
-                "Phase mobility is required for bottom hole pressure (BHP) control"
-            )
-
         if _disallow_flow(
             fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
@@ -618,7 +612,7 @@ class BHPControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pp,
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
-                formation_volume_factor=formation_volume_factor,
+                formation_volume_factor=phase_fvf,
                 gas_viscosity=phase_viscosity,
             )
         else:
@@ -649,9 +643,9 @@ class BHPControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluid,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -664,10 +658,10 @@ class BHPControl(WellControl[WellFluidTcon]):
 
         :param pressure: Reservoir pressure at well location (psi)
         :param temperature: Reservoir temperature (°F)
-        :param phase_mobility: Phase mobility (1/cP). Required for BHP control.
+        :param phase_mobility: Phase mobility (1/cP).
         :param well_index: Well index (md*ft)
         :param fluid: Fluid being produced/injected
-        :param formation_volume_factor: Formation volume factor
+        :param phase_fvf: Formation volume factor
         :param allocation_fraction: Ignored for BHP control (BHP is same for all cells).
         :param is_active: Whether well is active
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas
@@ -675,18 +669,12 @@ class BHPControl(WellControl[WellFluidTcon]):
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :return: Effective bottom-hole pressure (psi)
         """
-        if phase_mobility is None:
-            raise ValidationError(
-                "Phase mobility is required for bottom hole pressure (BHP) control"
-            )
-
+        bhp = self.bhp
         if _disallow_flow(
             fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
-            # Return reservoir pressure (no driving force)
-            return pressure
+            return bhp
 
-        bhp = self.bhp
         if self.clamp is not None:
             is_clamped, clamped_bhp = self.clamp.clamp_bhp(bhp, pressure)
             if is_clamped:
@@ -703,9 +691,9 @@ class BHPControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -735,7 +723,7 @@ class BHPControl(WellControl[WellFluidTcon]):
             Required - raises `ValidationError` if `None`.
         :param well_index: Well index (md·ft).
         :param fluid: Fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor (bbl/STB or ft³/SCF).
         :param allocation_fraction: Ignored for BHP control (Darcy allocation is
             implicit in the well index).
         :param is_active: Whether the well is currently open.
@@ -745,17 +733,11 @@ class BHPControl(WellControl[WellFluidTcon]):
         :return: `ControlInfo` with the Darcy rate and effective BHP.
         :raises ValidationError: If `phase_mobility` is `None`.
         """
-        if phase_mobility is None:
-            raise ValidationError(
-                "Phase mobility is required for bottom hole pressure (BHP) control"
-            )
-
+        bhp = self.bhp
         if _disallow_flow(
             fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
-            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=True)
-
-        bhp = self.bhp
+            return ControlInfo(rate=0.0, bhp=bhp, is_bhp_control=True)
 
         # Apply BHP clamp before computing rate so the two are consistent.
         effective_bhp = bhp
@@ -800,7 +782,7 @@ class BHPControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pp,
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
-                formation_volume_factor=formation_volume_factor,
+                formation_volume_factor=phase_fvf,
                 gas_viscosity=phase_viscosity,
             )
         else:
@@ -892,9 +874,9 @@ class RateControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -910,7 +892,7 @@ class RateControl(WellControl[WellFluidTcon]):
         :param phase_mobility: Relative mobility of the fluid phase. Leave as `None` to operate in strict rate mode.
         :param well_index: Well index (md*ft).
         :param fluid: Fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor (bbl/STB or ft³/SCF).
         :param allocation_fraction: Fraction of target rate to allocate to this cell (for multi-cell wells).
             This parameter allocates the well's total target rate proportionally across perforated cells.
             Typically allocation_fraction = cell_WI / total_well_WI.
@@ -928,12 +910,11 @@ class RateControl(WellControl[WellFluidTcon]):
 
         # Apply allocation to target rate
         target_rate = (
-            self.target_rate * allocation_fraction * formation_volume_factor
+            self.target_rate * allocation_fraction * phase_fvf
         )  # Convert to reservoir rate and allocate to cell
 
-        # If phase mobility is None, then the rate control is strict rate mode so no BHP checks. Else,
         # Check if achieving target rate would violate minimum bottom hole pressure constraint
-        if phase_mobility is not None and self.bhp_limit is not None:
+        if self.bhp_limit is not None:
             bhp_limit = self.bhp_limit
             is_production = target_rate < 0.0  # Negative rate indicates production
             try:
@@ -947,7 +928,7 @@ class RateControl(WellControl[WellFluidTcon]):
                     use_pseudo_pressure=use_pseudo_pressure,
                     fluid_compressibility=fluid_compressibility,
                     incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
-                    formation_volume_factor=formation_volume_factor,
+                    phase_fvf=phase_fvf,
                     pvt_tables=pvt_tables,
                     phase_viscosity=phase_viscosity,
                 )
@@ -991,9 +972,9 @@ class RateControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluid,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -1009,7 +990,7 @@ class RateControl(WellControl[WellFluidTcon]):
         :param phase_mobility: Phase mobility (1/cP). This is required to get the effective BHP for specified rate.
         :param well_index: Well index (md*ft)
         :param fluid: Fluid being produced/injected
-        :param formation_volume_factor: Formation volume factor
+        :param phase_fvf: Formation volume factor
         :param allocation_fraction: Fraction of target rate to allocate to this cell.
         :param is_active: Whether well is active
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas
@@ -1017,19 +998,14 @@ class RateControl(WellControl[WellFluidTcon]):
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :return: Effective bottom-hole pressure (psi)
         """
-        if phase_mobility is None:
-            raise ValidationError(
-                "Phase mobility is required to get the effective bottom hole pressure (BHP) for the rate control."
-            )
-
         if _disallow_flow(
             fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
-            return pressure
+            return self.bhp_limit or pressure
 
         # Apply allocation to target rate and convert to reservoir rate
         target_rate_reservoir = (
-            self.target_rate * allocation_fraction * formation_volume_factor
+            self.target_rate * allocation_fraction * phase_fvf
         )
         # Compute required BHP for target rate
         try:
@@ -1041,7 +1017,7 @@ class RateControl(WellControl[WellFluidTcon]):
                 temperature=temperature,
                 phase_mobility=phase_mobility,
                 use_pseudo_pressure=use_pseudo_pressure,
-                formation_volume_factor=formation_volume_factor,
+                phase_fvf=phase_fvf,
                 fluid_compressibility=fluid_compressibility,
                 incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
                 pvt_tables=pvt_tables,
@@ -1051,7 +1027,7 @@ class RateControl(WellControl[WellFluidTcon]):
             logger.warning(
                 f"Cannot compute required BHP: {exc}. Using reservoir pressure."
             )
-            bhp = pressure
+            bhp = self.bhp_limit or pressure
             if self.clamp is not None:
                 is_clamped, clamped_bhp = self.clamp.clamp_bhp(bhp, pressure)
                 if is_clamped:
@@ -1060,11 +1036,10 @@ class RateControl(WellControl[WellFluidTcon]):
 
         # Check BHP constraint - cap required_bhp at bhp_limit so the reported
         # BHP never exceeds (injection) or goes below (production) the declared limit.
-        bhp = required_bhp
         bhp_limit = self.bhp_limit
-        if bhp_limit is not None:
+        bhp = required_bhp
+        if bhp_limit is not  None:
             is_production = target_rate_reservoir < 0.0
-
             if is_production:
                 # Production: BHP must be >= bhp_limit
                 if required_bhp < bhp_limit:
@@ -1098,9 +1073,9 @@ class RateControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -1140,7 +1115,7 @@ class RateControl(WellControl[WellFluidTcon]):
             Pass `None` for strict rate mode (no BHP feasibility check).
         :param well_index: Well index (md·ft).
         :param fluid: Fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor (bbl/STB or ft³/SCF).
         :param allocation_fraction: Fraction of total well rate allocated to this
             cell (= cell_WI / total_WI for multi-cell wells). Default 1.0.
         :param is_active: Whether the well is currently open.
@@ -1154,28 +1129,12 @@ class RateControl(WellControl[WellFluidTcon]):
         if _disallow_flow(
             fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
-            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=0.0, bhp=self.bhp_limit or pressure, is_bhp_control=True)
 
         # Allocated reservoir rate
-        target_rate = self.target_rate * allocation_fraction * formation_volume_factor
-
-        # Strict rate mode: no mobility provided hence skip BHP feasibility check.
-        # BHP is indeterminate in strict mode - return reservoir pressure as a
-        # conservative sentinel (zero drawdown).
-        if phase_mobility is None:
-            final_rate = target_rate
-            if self.clamp is not None:
-                is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
-                if is_clamped:
-                    logger.debug(
-                        f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
-                        f"(constant rate control - strict mode, pressure={pressure:.3f} psi)"
-                    )
-                    final_rate = clamped_rate
-            return ControlInfo(rate=final_rate, bhp=pressure, is_bhp_control=False)
+        target_rate = self.target_rate * allocation_fraction * phase_fvf
 
         # Constrained mode: solve for required BHP once.
-        bhp_limit = self.bhp_limit
         is_production = target_rate < 0.0
 
         try:
@@ -1189,7 +1148,7 @@ class RateControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=fluid_compressibility,
                 incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
-                formation_volume_factor=formation_volume_factor,
+                phase_fvf=phase_fvf,
                 pvt_tables=pvt_tables,
                 phase_viscosity=phase_viscosity,
             )
@@ -1198,13 +1157,15 @@ class RateControl(WellControl[WellFluidTcon]):
                 f"Failed to compute required BHP for target rate {target_rate:.6f}: {exc}. "
                 "Returning shut-in state (rate=0, bhp=reservoir pressure)."
             )
-            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=0.0, bhp=self.bhp_limit or pressure, is_bhp_control=False)
 
         logger.debug(
             f"Required BHP: {required_bhp:.6f} psi, Reservoir pressure: {pressure:.6f} psi, "
             f"Fluid phase: {fluid.phase}"
         )
 
+        effective_bhp = required_bhp
+        bhp_limit = self.bhp_limit
         if bhp_limit is not None:
             if is_production:
                 can_achieve_rate = required_bhp >= bhp_limit
@@ -1217,12 +1178,10 @@ class RateControl(WellControl[WellFluidTcon]):
                     f"BHP limit {bhp_limit:.3f} psi (required BHP: {required_bhp:.3f} psi, "
                     f"reservoir pressure: {pressure:.3f} psi). Returning shut-in state."
                 )
-                return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
+                return ControlInfo(rate=0.0, bhp=bhp_limit, is_bhp_control=True)
 
-        # Cap the reported BHP at bhp_limit so it never exceeds the declared
-        # constraint even when the solve lands exactly on the boundary.
-        effective_bhp = required_bhp
-        if bhp_limit is not None:
+            # Cap the reported BHP at bhp_limit so it never exceeds the declared
+            # constraint even when the solve lands exactly on the boundary.
             if is_production:
                 effective_bhp = max(required_bhp, bhp_limit)
             else:
@@ -1343,9 +1302,9 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -1365,7 +1324,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         :param phase_mobility: Relative mobility of the fluid phase.
         :param well_index: Well index (md*ft).
         :param fluid: Fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor (bbl/STB or ft³/SCF).
         :param allocation_fraction: Fraction of target rate to allocate (applies in rate mode only).
         :param is_active: Whether the well is active/open.
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas wells.
@@ -1379,23 +1338,10 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             return 0.0
 
         # Apply allocation to target rate (for rate mode) and convert to reservoir rate
-        target_rate = self.target_rate * allocation_fraction * formation_volume_factor
+        target_rate = self.target_rate * allocation_fraction * phase_fvf
         is_production = target_rate < 0.0  # Negative rate indicates production
         bhp_limit = self.bhp_limit
         incompressibility_threshold = c.FLUID_INCOMPRESSIBILITY_THRESHOLD
-
-        # If no mobility provided, skip BHP feasibility check, return rate directly.
-        if phase_mobility is None:
-            final_rate = target_rate
-            if self.clamp is not None:
-                is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
-                if is_clamped:
-                    logger.debug(
-                        f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
-                        f"(adaptive control - strict rate mode, pressure={pressure:.3f} psi)"
-                    )
-                    final_rate = clamped_rate
-            return final_rate
 
         # Compute required BHP to achieve target rate
         in_rate_mode = False
@@ -1410,7 +1356,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 phase_mobility=phase_mobility,
                 use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=fluid_compressibility,
-                formation_volume_factor=formation_volume_factor,
+                phase_fvf=phase_fvf,
                 incompressibility_threshold=incompressibility_threshold,
                 pvt_tables=pvt_tables,
                 phase_viscosity=phase_viscosity,
@@ -1487,7 +1433,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pp,
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
-                formation_volume_factor=formation_volume_factor,
+                formation_volume_factor=phase_fvf,
                 gas_viscosity=phase_viscosity,
             )
         else:
@@ -1518,9 +1464,9 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluid,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -1536,7 +1482,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         :param phase_mobility: Phase mobility (1/cP)
         :param well_index: Well index (md*ft)
         :param fluid: Fluid being produced/injected
-        :param formation_volume_factor: Formation volume factor
+        :param phase_fvf: Formation volume factor
         :param allocation_fraction: Fraction of target rate to allocate (applies in rate mode only).
         :param is_active: Whether well is active
         :param use_pseudo_pressure: Whether to use pseudo-pressure for gas
@@ -1544,21 +1490,16 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :return: Effective bottom-hole pressure (psi)
         """
-        if phase_mobility is None:
-            raise ValidationError(
-                "Phase mobility is required to get the effective bottom hole pressure (BHP) for the control."
-            )
-
+        bhp_limit = self.bhp_limit
         if _disallow_flow(
             fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
-            return pressure
+            return bhp_limit
 
         # Apply allocation to target rate (for rate mode)
         target_rate_reservoir = (
-            self.target_rate * allocation_fraction * formation_volume_factor
+            self.target_rate * allocation_fraction * phase_fvf
         )
-        bhp_limit = self.bhp_limit
 
         # Try to compute required BHP for target rate
         try:
@@ -1571,7 +1512,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 phase_viscosity=phase_viscosity,
                 phase_mobility=phase_mobility,
                 use_pseudo_pressure=use_pseudo_pressure,
-                formation_volume_factor=formation_volume_factor,
+                phase_fvf=phase_fvf,
                 fluid_compressibility=fluid_compressibility,
                 incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
                 pvt_tables=pvt_tables,
@@ -1579,6 +1520,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         except (ValueError, ZeroDivisionError, ComputationError) as exc:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("Cannot achieve rate mode: %s. Using BHP mode.", exc)
+            
             # BHP mode fallback - report bhp_limit, clamped if necessary
             bhp = bhp_limit
             if self.clamp is not None:
@@ -1629,9 +1571,9 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -1676,7 +1618,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             Pass `None` for strict rate mode (no BHP feasibility check).
         :param well_index: Well index (md·ft).
         :param fluid: Fluid being produced or injected.
-        :param formation_volume_factor: Formation volume factor (bbl/STB or ft³/SCF).
+        :param phase_fvf: Formation volume factor (bbl/STB or ft³/SCF).
         :param allocation_fraction: Fraction of total well rate allocated to this
             cell (= cell_WI / total_WI for multi-cell wells). Default 1.0.
         :param is_active: Whether the well is currently open.
@@ -1688,33 +1630,19 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             required BHP (capped at `bhp_limit`) when in rate mode.
             Reservoir pressure is used as the BHP sentinel in strict rate mode.
         """
+        bhp_limit = self.bhp_limit
         if _disallow_flow(
             fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
-            return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
+            return ControlInfo(rate=0.0, bhp=bhp_limit, is_bhp_control=False)
 
-        target_rate = self.target_rate * allocation_fraction * formation_volume_factor
+        target_rate = self.target_rate * allocation_fraction * phase_fvf
         is_production = target_rate < 0.0
-        bhp_limit = self.bhp_limit
         incompressibility_threshold = c.FLUID_INCOMPRESSIBILITY_THRESHOLD
-
-        # Strict rate mode - no mobility, skip feasibility check.
-        if phase_mobility is None:
-            final_rate = target_rate
-            if self.clamp is not None:
-                is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
-                if is_clamped:
-                    logger.debug(
-                        f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
-                        f"(adaptive control - strict rate mode, pressure={pressure:.3f} psi)"
-                    )
-                    final_rate = clamped_rate
-            # No mobility so we cannot back-solve for BHP; use reservoir pressure.
-            return ControlInfo(rate=final_rate, bhp=pressure, is_bhp_control=False)
 
         # Attempt to solve for the BHP required to deliver the target rate.
         bhp_solve_failed = False
-        required_bhp: float = bhp_limit  # safe default if solve fails
+        required_bhp = bhp_limit  # safe default if solve fails
 
         try:
             required_bhp = _compute_required_bhp(
@@ -1726,7 +1654,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 phase_mobility=phase_mobility,
                 use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=fluid_compressibility,
-                formation_volume_factor=formation_volume_factor,
+                phase_fvf=phase_fvf,
                 incompressibility_threshold=incompressibility_threshold,
                 pvt_tables=pvt_tables,
                 phase_viscosity=phase_viscosity,
@@ -1834,7 +1762,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pp,
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
-                formation_volume_factor=formation_volume_factor,
+                formation_volume_factor=phase_fvf,
                 gas_viscosity=phase_viscosity,
             )
         else:
@@ -1996,7 +1924,7 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
             phase_viscosity=controlling_phase_viscosity,
             well_index=well_index,
             fluid=controlling_fluid,
-            formation_volume_factor=controlling_phase_fvf,
+            phase_fvf=controlling_phase_fvf,
             allocation_fraction=allocation_fraction,
             is_active=True,
             use_pseudo_pressure=use_pseudo_pressure,
@@ -2010,9 +1938,9 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -2028,7 +1956,7 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
         :param temperature: Reservoir cell temperature (°F).
         :param well_index: Well index for this perforation (mD·ft).
         :param fluid: Fluid being produced (any phase).
-        :param formation_volume_factor: FVF of `fluid` (bbl/STB or ft³/SCF).
+        :param phase_fvf: FVF of `fluid` (bbl/STB or ft³/SCF).
         :param shared_bhp: BHP returned by `compute_bhp` for this perforation.
             *Must be computed before calling this method.*
         :param phase_viscosity: Viscosity of `fluid` (cP). Required for gas pseudo-pressure path.
@@ -2042,9 +1970,6 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
         :param pvt_tables: PVT look-up tables.
         :return: Flow rate (bbl/day for liquids, ft³/day for gas). Negative for production.
         """
-        if phase_mobility is None:
-            raise ValidationError("`phase_mobility` is required to compute flow rate")
-
         if shared_bhp is None:
             raise ValidationError("`shared_bhp` is required to compute flow rate")
 
@@ -2084,7 +2009,7 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pp,
                 pseudo_pressure_table=pp_table,
                 average_compressibility_factor=avg_z_factor,
-                formation_volume_factor=formation_volume_factor,
+                formation_volume_factor=phase_fvf,
                 gas_viscosity=phase_viscosity,
             )
         else:
@@ -2113,9 +2038,9 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluid,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,
@@ -2143,9 +2068,9 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
         temperature: float,
         well_index: float,
         fluid: WellFluidTcon,
-        formation_volume_factor: float,
+        phase_fvf: float,
+        phase_mobility: float,
         phase_viscosity: typing.Optional[float] = None,
-        phase_mobility: typing.Optional[float] = None,
         allocation_fraction: float = 1.0,
         is_active: bool = True,
         use_pseudo_pressure: bool = False,

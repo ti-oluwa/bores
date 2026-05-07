@@ -78,6 +78,11 @@ def solve_transport(
     old_water_density_grid: ThreeDimensionalGrid,
     old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     face_transmissibilities: FaceTransmissibilities,
@@ -135,12 +140,20 @@ def solve_transport(
     :return: `Solution` containing updated saturations.
     """
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
+    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
     porosity_grid = rock_properties.porosity_grid
     net_to_gross_grid = rock_properties.net_to_gross_grid
 
     current_water_density_grid = fluid_properties.water_density_grid
     current_oil_density_grid = fluid_properties.oil_effective_density_grid
     current_gas_density_grid = fluid_properties.gas_density_grid
+    solution_gas_to_oil_ratio_grid = fluid_properties.solution_gas_to_oil_ratio_grid
+    gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
+    gas_formation_volume_factor_grid = fluid_properties.gas_formation_volume_factor_grid
+    oil_formation_volume_factor_grid = fluid_properties.oil_formation_volume_factor_grid
+    water_formation_volume_factor_grid = (
+        fluid_properties.water_formation_volume_factor_grid
+    )
 
     pressure_grid = fluid_properties.pressure_grid
     current_water_saturation_grid = fluid_properties.water_saturation_grid
@@ -169,8 +182,7 @@ def solve_transport(
 
     (
         net_water_mass_flux_grid,
-        net_oil_mass_flux_grid,
-        net_free_gas_mass_flux_grid,
+        net_total_gass_mass_flux_grid,
         net_volumetric_outflow_grid,
     ) = assemble_flux_contributions(
         pressure_grid=pressure_grid,
@@ -190,9 +202,15 @@ def solve_transport(
         water_density_grid=current_water_density_grid,
         oil_density_grid=current_oil_density_grid,
         gas_density_grid=current_gas_density_grid,
+        solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
+        gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+        gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
+        oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
+        water_formation_volume_factor_grid=water_formation_volume_factor_grid,
         elevation_grid=elevation_grid,
         gravitational_constant=gravitational_constant,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+        bbl_to_ft3=bbl_to_ft3,
         dtype=dtype,
     )
 
@@ -225,8 +243,7 @@ def solve_transport(
         old_oil_saturation_grid=current_oil_saturation_grid,
         old_gas_saturation_grid=current_gas_saturation_grid,
         net_water_mass_flux_grid=net_water_mass_flux_grid,
-        net_oil_mass_flux_grid=net_oil_mass_flux_grid,
-        net_free_gas_mass_flux_grid=net_free_gas_mass_flux_grid,
+        net_total_gass_mass_flux_grid=net_total_gass_mass_flux_grid,
         net_volumetric_outflow_grid=net_volumetric_outflow_grid,
         net_water_well_rate_grid=net_water_well_rate_grid,
         net_oil_well_rate_grid=net_oil_well_rate_grid,
@@ -240,6 +257,16 @@ def solve_transport(
         current_water_density_grid=current_water_density_grid,
         current_oil_density_grid=current_oil_density_grid,
         current_gas_density_grid=current_gas_density_grid,
+        solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_grid,
+        gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+        gas_formation_volume_factor_grid=gas_formation_volume_factor_grid,
+        oil_formation_volume_factor_grid=oil_formation_volume_factor_grid,
+        water_formation_volume_factor_grid=water_formation_volume_factor_grid,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gas_to_oil_ratio_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_gas_formation_volume_factor_grid=old_gas_formation_volume_factor_grid,
+        old_oil_formation_volume_factor_grid=old_oil_formation_volume_factor_grid,
+        old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
@@ -250,6 +277,7 @@ def solve_transport(
         cell_size_y=cell_size_y,
         time_step_in_days=time_step_in_days,
         cfl_threshold=config.cfl_threshold,
+        bbl_to_ft3=bbl_to_ft3,
         dtype=dtype,
     )
 
@@ -584,19 +612,62 @@ def assemble_flux_contributions(
     water_density_grid: ThreeDimensionalGrid,
     oil_density_grid: ThreeDimensionalGrid,
     gas_density_grid: ThreeDimensionalGrid,
+    solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    water_formation_volume_factor_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
     gravitational_constant: float,
     md_per_cp_to_ft2_per_psi_per_day: float,
+    bbl_to_ft3: float,
     dtype: npt.DTypeLike,
-) -> typing.Tuple[
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-]:
+) -> typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid]:
     """
     Compute net mass fluxes into each cell from all six face neighbours, plus
     the total volumetric outflow per cell for the CFL check.
+
+    For water, the net mass flux into cell (i,j,k) is:
+
+        net_water_mass_flux[i,j,k] = sum_faces ( upwind_water_densitywind * F_w_face )
+
+    where `upwind_water_densitywind` is the water density at the upwind cell determined by
+    the water phase potential gradient, and `F_w_face` (ft³/day) is the
+    volumetric Darcy flux for water at that face.
+
+    For total gas (free + dissolved in oil + dissolved in water), the net mass
+    flux is:
+
+        net_total_gas_mass_flux[i,j,k] = sum_faces (
+            upwind_gas_densitywind * F_g_face
+            + upwind_oil_densitywind * alpha_Rs_upwind * F_o_face
+            + upwind_water_densitywind * alpha_Rsw_upwind * F_w_face
+        )
+
+    where:
+        `alpha_Rs  = Rs  * Bg / Bo`  (dimensionless, reservoir-condition gas
+                                      volume fraction dissolved in oil phase)
+        `alpha_Rsw = Rsw * Bg / Bw`  (same for water phase)
+        `Rs` [SCF/STB], `Bg` [bbl/SCF], `Bo` [bbl/STB] - so Rs*Bg/Bo is
+        dimensionless (reservoir-condition volume of dissolved gas per
+        reservoir-condition volume of oil).
+
+    The Rs and density values used in the face flux term are taken from the
+    upwind cell for each phase, consistent with the upwinding direction of
+    the phase mobility (i.e. the upwind Rs for oil is from the cell from
+    which oil flows).
+
+    Boundary faces follow the same convention as the volumetric solver:
+    Dirichlet boundaries use the interior cell's mobility (one-sided flux)
+    and the interior cell's density for the mass weighting. Neumann boundaries
+    supply a known total volumetric flux that is split by mobility fraction and
+    then density-weighted using the interior cell values.
+
+    The `net_volumetric_outflow_grid` returned here contains the total
+    volumetric outflow from each cell (ft³/day, always >= 0) for use in the
+    CFL stability check. It is computed from the sum of
+    `|min(0, F_w)| + |min(0, F_o)| + |min(0, F_g)|` across all faces plus
+    well outflows (well outflows are added in `apply_updates`).
 
     :param pressure_grid: Current oil pressure grid (psi).
     :param cell_count_x: Number of cells in x-direction.
@@ -616,21 +687,23 @@ def assemble_flux_contributions(
     :param water_density_grid: Water density at new pressure (lb/ft³).
     :param oil_density_grid: Oil effective density at new pressure (lb/ft³).
     :param gas_density_grid: Gas density at new pressure (lb/ft³).
+    :param solution_gas_to_oil_ratio_grid: Rs at new pressure (SCF/STB).
+    :param gas_solubility_in_water_grid: Rsw at new pressure (SCF/STB).
+    :param gas_formation_volume_factor_grid: Bg at new pressure (bbl/SCF).
+    :param oil_formation_volume_factor_grid: Bo at new pressure (bbl/STB).
+    :param water_formation_volume_factor_grid: Bw at new pressure (bbl/STB).
     :param elevation_grid: Cell elevation (ft).
     :param gravitational_constant: g/gc conversion factor (lbf/lbm).
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
     :param dtype: Numpy dtype for output arrays.
-    :return: Tuple of (`net_water_mass_flux_grid`, `net_oil_mass_flux_grid`, `net_free_gas_mass_flux_grid`,
+    :return: Tuple of (`net_water_mass_flux_grid`, `net_total_gass_mass_flux_grid`,
         `net_volumetric_outflow_grid`). Mass flux units are lbm/day; volumetric
         outflow units are ft³/day (always >= 0).
     """
     net_water_mass_flux_grid = np.zeros(
         (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
     )
-    net_oil_mass_flux_grid = np.zeros(
-        (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
-    )
-    net_free_gas_mass_flux_grid = np.zeros(
+    net_total_gass_mass_flux_grid = np.zeros(
         (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
     )
     # Total volumetric outflow per cell used for CFL checks
@@ -649,13 +722,35 @@ def assemble_flux_contributions(
                     cell_water_mobility + cell_oil_mobility + cell_gas_mobility
                 )
 
+                # Interior cell PVT values used for boundary mass weighting
                 cell_water_density = water_density_grid[i, j, k]
                 cell_oil_density = oil_density_grid[i, j, k]
                 cell_gas_density = gas_density_grid[i, j, k]
 
+                safe_oil_fvf = oil_formation_volume_factor_grid[i, j, k]
+                safe_water_fvf = water_formation_volume_factor_grid[i, j, k]
+                safe_gas_fvf = gas_formation_volume_factor_grid[i, j, k]
+                if safe_oil_fvf < 1e-30:
+                    safe_oil_fvf = 1e-30
+                if safe_water_fvf < 1e-30:
+                    safe_water_fvf = 1e-30
+                if safe_gas_fvf < 1e-30:
+                    safe_gas_fvf = 1e-30
+
+                # alpha_Rs and alpha_Rsw for interior cell (used in boundary faces)
+                cell_alpha_solution_gor = (
+                    solution_gas_to_oil_ratio_grid[i, j, k]
+                    * safe_gas_fvf
+                    / (safe_oil_fvf * bbl_to_ft3)
+                )
+                cell_alpha_gas_solubility_in_water = (
+                    gas_solubility_in_water_grid[i, j, k]
+                    * safe_gas_fvf
+                    / (safe_water_fvf * bbl_to_ft3)
+                )
+
                 net_water_mass_flux = 0.0
-                net_oil_mass_flux = 0.0
-                net_free_gas_mass_flux = 0.0
+                net_total_gas_mass_flux = 0.0
                 volumetric_outflow = 0.0
 
                 # EAST (i+1, j, k)
@@ -687,10 +782,47 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
+                    # Upwind Rs/Rsw for oil and water faces
+                    if oil_flux > 0.0:
+                        alpha_solution_gor_face = (
+                            solution_gas_to_oil_ratio_grid[east_i, j, k]
+                            * gas_formation_volume_factor_grid[east_i, j, k]
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[east_i, j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_solution_gor_face = cell_alpha_solution_gor
+
+                    if water_flux > 0.0:
+                        alpha_gas_solubility_in_water_face = (
+                            gas_solubility_in_water_grid[east_i, j, k]
+                            * gas_formation_volume_factor_grid[east_i, j, k]
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[east_i, j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_gas_solubility_in_water_face = (
+                            cell_alpha_gas_solubility_in_water
+                        )
 
                     net_water_mass_flux += upwind_water_density * water_flux
-                    net_free_gas_mass_flux += upwind_gas_density * gas_flux
-                    net_oil_mass_flux += upwind_oil_density * oil_flux
+                    net_total_gas_mass_flux += (
+                        upwind_gas_density * gas_flux
+                        + upwind_oil_density * alpha_solution_gor_face * oil_flux
+                        + upwind_water_density
+                        * alpha_gas_solubility_in_water_face
+                        * water_flux
+                    )
                     volumetric_outflow += abs(min(0.0, water_flux))
                     volumetric_outflow += abs(min(0.0, oil_flux))
                     volumetric_outflow += abs(min(0.0, gas_flux))
@@ -707,8 +839,13 @@ def assemble_flux_contributions(
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
                         net_water_mass_flux += cell_water_density * water_flux
-                        net_free_gas_mass_flux += cell_gas_density * gas_flux
-                        net_oil_mass_flux += cell_oil_density * oil_flux
+                        net_total_gas_mass_flux += (
+                            cell_gas_density * gas_flux
+                            + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                            + cell_water_density
+                            * cell_alpha_gas_solubility_in_water
+                            * water_flux
+                        )
                         volumetric_outflow += abs(min(0.0, water_flux))
                         volumetric_outflow += abs(min(0.0, oil_flux))
                         volumetric_outflow += abs(min(0.0, gas_flux))
@@ -722,8 +859,13 @@ def assemble_flux_contributions(
                             oil_flux = flux_boundary * oil_fraction
                             gas_flux = flux_boundary * gas_fraction
                             net_water_mass_flux += cell_water_density * water_flux
-                            net_free_gas_mass_flux += cell_gas_density * gas_flux
-                            net_oil_mass_flux += cell_oil_density * oil_flux
+                            net_total_gas_mass_flux += (
+                                cell_gas_density * gas_flux
+                                + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                                + cell_water_density
+                                * cell_alpha_gas_solubility_in_water
+                                * water_flux
+                            )
                             volumetric_outflow += abs(min(0.0, water_flux))
                             volumetric_outflow += abs(min(0.0, oil_flux))
                             volumetric_outflow += abs(min(0.0, gas_flux))
@@ -756,10 +898,46 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
+                    if oil_flux > 0.0:
+                        alpha_solution_gor_face = (
+                            solution_gas_to_oil_ratio_grid[west_i, j, k]
+                            * gas_formation_volume_factor_grid[west_i, j, k]
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[west_i, j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_solution_gor_face = cell_alpha_solution_gor
+
+                    if water_flux > 0.0:
+                        alpha_gas_solubility_in_water_face = (
+                            gas_solubility_in_water_grid[west_i, j, k]
+                            * gas_formation_volume_factor_grid[west_i, j, k]
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[west_i, j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_gas_solubility_in_water_face = (
+                            cell_alpha_gas_solubility_in_water
+                        )
 
                     net_water_mass_flux += upwind_water_density * water_flux
-                    net_free_gas_mass_flux += upwind_gas_density * gas_flux
-                    net_oil_mass_flux += upwind_oil_density * oil_flux
+                    net_total_gas_mass_flux += (
+                        upwind_gas_density * gas_flux
+                        + upwind_oil_density * alpha_solution_gor_face * oil_flux
+                        + upwind_water_density
+                        * alpha_gas_solubility_in_water_face
+                        * water_flux
+                    )
                     volumetric_outflow += abs(min(0.0, water_flux))
                     volumetric_outflow += abs(min(0.0, oil_flux))
                     volumetric_outflow += abs(min(0.0, gas_flux))
@@ -775,8 +953,13 @@ def assemble_flux_contributions(
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
                         net_water_mass_flux += cell_water_density * water_flux
-                        net_free_gas_mass_flux += cell_gas_density * gas_flux
-                        net_oil_mass_flux += cell_oil_density * oil_flux
+                        net_total_gas_mass_flux += (
+                            cell_gas_density * gas_flux
+                            + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                            + cell_water_density
+                            * cell_alpha_gas_solubility_in_water
+                            * water_flux
+                        )
                         volumetric_outflow += abs(min(0.0, water_flux))
                         volumetric_outflow += abs(min(0.0, oil_flux))
                         volumetric_outflow += abs(min(0.0, gas_flux))
@@ -790,8 +973,13 @@ def assemble_flux_contributions(
                             oil_flux = flux_boundary * oil_fraction
                             gas_flux = flux_boundary * gas_fraction
                             net_water_mass_flux += cell_water_density * water_flux
-                            net_free_gas_mass_flux += cell_gas_density * gas_flux
-                            net_oil_mass_flux += cell_oil_density * oil_flux
+                            net_total_gas_mass_flux += (
+                                cell_gas_density * gas_flux
+                                + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                                + cell_water_density
+                                * cell_alpha_gas_solubility_in_water
+                                * water_flux
+                            )
                             volumetric_outflow += abs(min(0.0, water_flux))
                             volumetric_outflow += abs(min(0.0, oil_flux))
                             volumetric_outflow += abs(min(0.0, gas_flux))
@@ -825,10 +1013,46 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
+                    if oil_flux > 0.0:
+                        alpha_solution_gor_face = (
+                            solution_gas_to_oil_ratio_grid[i, south_j, k]
+                            * gas_formation_volume_factor_grid[i, south_j, k]
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[i, south_j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_solution_gor_face = cell_alpha_solution_gor
+
+                    if water_flux > 0.0:
+                        alpha_gas_solubility_in_water_face = (
+                            gas_solubility_in_water_grid[i, south_j, k]
+                            * gas_formation_volume_factor_grid[i, south_j, k]
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[i, south_j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_gas_solubility_in_water_face = (
+                            cell_alpha_gas_solubility_in_water
+                        )
 
                     net_water_mass_flux += upwind_water_density * water_flux
-                    net_free_gas_mass_flux += upwind_gas_density * gas_flux
-                    net_oil_mass_flux += upwind_oil_density * oil_flux
+                    net_total_gas_mass_flux += (
+                        upwind_gas_density * gas_flux
+                        + upwind_oil_density * alpha_solution_gor_face * oil_flux
+                        + upwind_water_density
+                        * alpha_gas_solubility_in_water_face
+                        * water_flux
+                    )
                     volumetric_outflow += abs(min(0.0, water_flux))
                     volumetric_outflow += abs(min(0.0, oil_flux))
                     volumetric_outflow += abs(min(0.0, gas_flux))
@@ -845,8 +1069,13 @@ def assemble_flux_contributions(
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
                         net_water_mass_flux += cell_water_density * water_flux
-                        net_free_gas_mass_flux += cell_gas_density * gas_flux
-                        net_oil_mass_flux += cell_oil_density * oil_flux
+                        net_total_gas_mass_flux += (
+                            cell_gas_density * gas_flux
+                            + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                            + cell_water_density
+                            * cell_alpha_gas_solubility_in_water
+                            * water_flux
+                        )
                         volumetric_outflow += abs(min(0.0, water_flux))
                         volumetric_outflow += abs(min(0.0, oil_flux))
                         volumetric_outflow += abs(min(0.0, gas_flux))
@@ -860,8 +1089,13 @@ def assemble_flux_contributions(
                             oil_flux = flux_boundary * oil_fraction
                             gas_flux = flux_boundary * gas_fraction
                             net_water_mass_flux += cell_water_density * water_flux
-                            net_free_gas_mass_flux += cell_gas_density * gas_flux
-                            net_oil_mass_flux += cell_oil_density * oil_flux
+                            net_total_gas_mass_flux += (
+                                cell_gas_density * gas_flux
+                                + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                                + cell_water_density
+                                * cell_alpha_gas_solubility_in_water
+                                * water_flux
+                            )
                             volumetric_outflow += abs(min(0.0, water_flux))
                             volumetric_outflow += abs(min(0.0, oil_flux))
                             volumetric_outflow += abs(min(0.0, gas_flux))
@@ -894,10 +1128,46 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
+                    if oil_flux > 0.0:
+                        alpha_solution_gor_face = (
+                            solution_gas_to_oil_ratio_grid[i, north_j, k]
+                            * gas_formation_volume_factor_grid[i, north_j, k]
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[i, north_j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_solution_gor_face = cell_alpha_solution_gor
+
+                    if water_flux > 0.0:
+                        alpha_gas_solubility_in_water_face = (
+                            gas_solubility_in_water_grid[i, north_j, k]
+                            * gas_formation_volume_factor_grid[i, north_j, k]
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[i, north_j, k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_gas_solubility_in_water_face = (
+                            cell_alpha_gas_solubility_in_water
+                        )
 
                     net_water_mass_flux += upwind_water_density * water_flux
-                    net_free_gas_mass_flux += upwind_gas_density * gas_flux
-                    net_oil_mass_flux += upwind_oil_density * oil_flux
+                    net_total_gas_mass_flux += (
+                        upwind_gas_density * gas_flux
+                        + upwind_oil_density * alpha_solution_gor_face * oil_flux
+                        + upwind_water_density
+                        * alpha_gas_solubility_in_water_face
+                        * water_flux
+                    )
                     volumetric_outflow += abs(min(0.0, water_flux))
                     volumetric_outflow += abs(min(0.0, oil_flux))
                     volumetric_outflow += abs(min(0.0, gas_flux))
@@ -913,8 +1183,13 @@ def assemble_flux_contributions(
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
                         net_water_mass_flux += cell_water_density * water_flux
-                        net_free_gas_mass_flux += cell_gas_density * gas_flux
-                        net_oil_mass_flux += cell_oil_density * oil_flux
+                        net_total_gas_mass_flux += (
+                            cell_gas_density * gas_flux
+                            + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                            + cell_water_density
+                            * cell_alpha_gas_solubility_in_water
+                            * water_flux
+                        )
                         volumetric_outflow += abs(min(0.0, water_flux))
                         volumetric_outflow += abs(min(0.0, oil_flux))
                         volumetric_outflow += abs(min(0.0, gas_flux))
@@ -928,8 +1203,13 @@ def assemble_flux_contributions(
                             oil_flux = flux_boundary * oil_fraction
                             gas_flux = flux_boundary * gas_fraction
                             net_water_mass_flux += cell_water_density * water_flux
-                            net_free_gas_mass_flux += cell_gas_density * gas_flux
-                            net_oil_mass_flux += cell_oil_density * oil_flux
+                            net_total_gas_mass_flux += (
+                                cell_gas_density * gas_flux
+                                + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                                + cell_water_density
+                                * cell_alpha_gas_solubility_in_water
+                                * water_flux
+                            )
                             volumetric_outflow += abs(min(0.0, water_flux))
                             volumetric_outflow += abs(min(0.0, oil_flux))
                             volumetric_outflow += abs(min(0.0, gas_flux))
@@ -963,10 +1243,46 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
+                    if oil_flux > 0.0:
+                        alpha_solution_gor_face = (
+                            solution_gas_to_oil_ratio_grid[i, j, bottom_k]
+                            * gas_formation_volume_factor_grid[i, j, bottom_k]
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[i, j, bottom_k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_solution_gor_face = cell_alpha_solution_gor
+
+                    if water_flux > 0.0:
+                        alpha_gas_solubility_in_water_face = (
+                            gas_solubility_in_water_grid[i, j, bottom_k]
+                            * gas_formation_volume_factor_grid[i, j, bottom_k]
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[i, j, bottom_k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_gas_solubility_in_water_face = (
+                            cell_alpha_gas_solubility_in_water
+                        )
 
                     net_water_mass_flux += upwind_water_density * water_flux
-                    net_free_gas_mass_flux += upwind_gas_density * gas_flux
-                    net_oil_mass_flux += upwind_oil_density * oil_flux
+                    net_total_gas_mass_flux += (
+                        upwind_gas_density * gas_flux
+                        + upwind_oil_density * alpha_solution_gor_face * oil_flux
+                        + upwind_water_density
+                        * alpha_gas_solubility_in_water_face
+                        * water_flux
+                    )
                     volumetric_outflow += abs(min(0.0, water_flux))
                     volumetric_outflow += abs(min(0.0, oil_flux))
                     volumetric_outflow += abs(min(0.0, gas_flux))
@@ -983,8 +1299,13 @@ def assemble_flux_contributions(
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
                         net_water_mass_flux += cell_water_density * water_flux
-                        net_free_gas_mass_flux += cell_gas_density * gas_flux
-                        net_oil_mass_flux += cell_oil_density * oil_flux
+                        net_total_gas_mass_flux += (
+                            cell_gas_density * gas_flux
+                            + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                            + cell_water_density
+                            * cell_alpha_gas_solubility_in_water
+                            * water_flux
+                        )
                         volumetric_outflow += abs(min(0.0, water_flux))
                         volumetric_outflow += abs(min(0.0, oil_flux))
                         volumetric_outflow += abs(min(0.0, gas_flux))
@@ -998,8 +1319,13 @@ def assemble_flux_contributions(
                             oil_flux = flux_boundary * oil_fraction
                             gas_flux = flux_boundary * gas_fraction
                             net_water_mass_flux += cell_water_density * water_flux
-                            net_free_gas_mass_flux += cell_gas_density * gas_flux
-                            net_oil_mass_flux += cell_oil_density * oil_flux
+                            net_total_gas_mass_flux += (
+                                cell_gas_density * gas_flux
+                                + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                                + cell_water_density
+                                * cell_alpha_gas_solubility_in_water
+                                * water_flux
+                            )
                             volumetric_outflow += abs(min(0.0, water_flux))
                             volumetric_outflow += abs(min(0.0, oil_flux))
                             volumetric_outflow += abs(min(0.0, gas_flux))
@@ -1032,10 +1358,45 @@ def assemble_flux_contributions(
                         gravitational_constant=gravitational_constant,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
+                    if oil_flux > 0.0:
+                        alpha_solution_gor_face = (
+                            solution_gas_to_oil_ratio_grid[i, j, top_k]
+                            * gas_formation_volume_factor_grid[i, j, top_k]
+                            / (
+                                max(
+                                    oil_formation_volume_factor_grid[i, j, top_k], 1e-30
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_solution_gor_face = cell_alpha_solution_gor
+
+                    if water_flux > 0.0:
+                        alpha_gas_solubility_in_water_face = (
+                            gas_solubility_in_water_grid[i, j, top_k]
+                            * gas_formation_volume_factor_grid[i, j, top_k]
+                            / (
+                                max(
+                                    water_formation_volume_factor_grid[i, j, top_k],
+                                    1e-30,
+                                )
+                                * bbl_to_ft3
+                            )
+                        )
+                    else:
+                        alpha_gas_solubility_in_water_face = (
+                            cell_alpha_gas_solubility_in_water
+                        )
 
                     net_water_mass_flux += upwind_water_density * water_flux
-                    net_free_gas_mass_flux += upwind_gas_density * gas_flux
-                    net_oil_mass_flux += upwind_oil_density * oil_flux
+                    net_total_gas_mass_flux += (
+                        upwind_gas_density * gas_flux
+                        + upwind_oil_density * alpha_solution_gor_face * oil_flux
+                        + upwind_water_density
+                        * alpha_gas_solubility_in_water_face
+                        * water_flux
+                    )
                     volumetric_outflow += abs(min(0.0, water_flux))
                     volumetric_outflow += abs(min(0.0, oil_flux))
                     volumetric_outflow += abs(min(0.0, gas_flux))
@@ -1051,8 +1412,13 @@ def assemble_flux_contributions(
                         oil_flux = cell_oil_mobility * T * pressure_difference
                         gas_flux = cell_gas_mobility * T * pressure_difference
                         net_water_mass_flux += cell_water_density * water_flux
-                        net_free_gas_mass_flux += cell_gas_density * gas_flux
-                        net_oil_mass_flux += cell_oil_density * oil_flux
+                        net_total_gas_mass_flux += (
+                            cell_gas_density * gas_flux
+                            + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                            + cell_water_density
+                            * cell_alpha_gas_solubility_in_water
+                            * water_flux
+                        )
                         volumetric_outflow += abs(min(0.0, water_flux))
                         volumetric_outflow += abs(min(0.0, oil_flux))
                         volumetric_outflow += abs(min(0.0, gas_flux))
@@ -1066,21 +1432,24 @@ def assemble_flux_contributions(
                             oil_flux = flux_boundary * oil_fraction
                             gas_flux = flux_boundary * gas_fraction
                             net_water_mass_flux += cell_water_density * water_flux
-                            net_free_gas_mass_flux += cell_gas_density * gas_flux
-                            net_oil_mass_flux += cell_oil_density * oil_flux
+                            net_total_gas_mass_flux += (
+                                cell_gas_density * gas_flux
+                                + cell_oil_density * cell_alpha_solution_gor * oil_flux
+                                + cell_water_density
+                                * cell_alpha_gas_solubility_in_water
+                                * water_flux
+                            )
                             volumetric_outflow += abs(min(0.0, water_flux))
                             volumetric_outflow += abs(min(0.0, oil_flux))
                             volumetric_outflow += abs(min(0.0, gas_flux))
 
                 net_water_mass_flux_grid[i, j, k] = net_water_mass_flux
-                net_oil_mass_flux_grid[i, j, k] = net_oil_mass_flux
-                net_free_gas_mass_flux_grid[i, j, k] = net_free_gas_mass_flux
+                net_total_gass_mass_flux_grid[i, j, k] = net_total_gas_mass_flux
                 net_volumetric_outflow_grid[i, j, k] = volumetric_outflow
 
     return (
         net_water_mass_flux_grid,
-        net_oil_mass_flux_grid,
-        net_free_gas_mass_flux_grid,
+        net_total_gass_mass_flux_grid,
         net_volumetric_outflow_grid,
     )
 
@@ -1094,8 +1463,7 @@ def apply_updates(
     old_oil_saturation_grid: ThreeDimensionalGrid,
     old_gas_saturation_grid: ThreeDimensionalGrid,
     net_water_mass_flux_grid: ThreeDimensionalGrid,
-    net_oil_mass_flux_grid: ThreeDimensionalGrid,
-    net_free_gas_mass_flux_grid: ThreeDimensionalGrid,
+    net_total_gass_mass_flux_grid: ThreeDimensionalGrid,
     net_volumetric_outflow_grid: ThreeDimensionalGrid,
     net_water_well_rate_grid: ThreeDimensionalGrid,
     net_oil_well_rate_grid: ThreeDimensionalGrid,
@@ -1109,6 +1477,16 @@ def apply_updates(
     current_water_density_grid: ThreeDimensionalGrid,
     current_oil_density_grid: ThreeDimensionalGrid,
     current_gas_density_grid: ThreeDimensionalGrid,
+    solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    water_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
@@ -1119,6 +1497,7 @@ def apply_updates(
     cell_size_y: float,
     time_step_in_days: float,
     cfl_threshold: float,
+    bbl_to_ft3: float,
     dtype: npt.DTypeLike,
 ) -> typing.Tuple[
     ThreeDimensionalGrid,
@@ -1128,6 +1507,38 @@ def apply_updates(
 ]:
     """
     Apply mass-based saturation updates using explicit forward Euler.
+
+    The update sequence for each cell is:
+
+    1. **Water** - advance water mass, divide by new water density to get `Sw_new`:
+
+           M_w_old = old_water_density * Sw_old
+           M_w_new = M_w_old + (dt/phi*V) * (net_water_mass_flux + cell_water_density * q_w_vol)
+           Sw_new  = M_w_new / current_water_density
+
+       The well water rate `q_w_vol` is volumetric (ft³/day); it is converted
+       to a mass rate by multiplying by the cell water density.
+
+    2. **Gas (total mass)** - advance total gas mass (free + dissolved):
+
+           M_g_old = old_gas_density*Sg_old + old_oil_density*alpha_Rs_old*So_old + old_water_density*alpha_Rsw_old*Sw_old
+           M_g_new = M_g_old + (dt/phi*V) * (net_total_gas_mass_flux + well_gas_mass_rate)
+
+       The well mass gas rate includes solution gas carried in produced/injected
+       oil and water:
+
+           well_gas_mass_rate = cell_gas_density*q_g_vol + cel_oil_densityl*alpha_Rs_cell*q_o_vol
+                                + cell_water_density*alpha_Rsw_cell*q_w_vol
+
+    3. **Oil saturation (derived)** - `So_new = 1 - Sw_new - Sg_new`.
+
+    4. **Free gas** - recover `Sg_new` from the new total gas mass minus the
+       dissolved portion in the new oil and water:
+
+           current_gas_density * Sg_new = M_g_new
+                                - current_oil_density * alpha_Rs_new * So_new
+                                - current_water_density * alpha_Rsw_new * Sw_new
+           Sg_new = max(0, above) / current_gas_density
 
     Saturations are clamped to [0, 1] and a residual volume balance correction
     is applied to oil (any remaining tiny gap from `Sw + So + Sg != 1` is
@@ -1144,7 +1555,7 @@ def apply_updates(
     :param old_gas_saturation_grid: Gas saturation at start of time step.
     :param net_water_mass_flux_grid: Net mass water flux into each cell (lbm/day),
         from `assemble_flux_contributions`.
-    :param net_free_gas_mass_flux_grid: Net total gas mass flux into each cell
+    :param net_total_gass_mass_flux_grid: Net total gas mass flux into each cell
         (lbm/day), from `assemble_flux_contributions`.
     :param net_volumetric_outflow_grid: Total volumetric outflow from face fluxes
         only (ft³/day, >= 0), used for CFL check.
@@ -1205,6 +1616,50 @@ def apply_updates(
                     total_volumetric_outflow * time_step_in_days
                 ) / cell_pore_volume
 
+                # PVT alpha factors at new pressure
+                safe_oil_fvf = oil_formation_volume_factor_grid[i, j, k]
+                safe_water_fvf = water_formation_volume_factor_grid[i, j, k]
+                safe_gas_fvf = gas_formation_volume_factor_grid[i, j, k]
+                if safe_oil_fvf < 1e-30:
+                    safe_oil_fvf = 1e-30
+                if safe_water_fvf < 1e-30:
+                    safe_water_fvf = 1e-30
+                if safe_gas_fvf < 1e-30:
+                    safe_gas_fvf = 1e-30
+
+                current_alpha_rs = (
+                    solution_gas_to_oil_ratio_grid[i, j, k]
+                    * safe_gas_fvf
+                    / (safe_oil_fvf * bbl_to_ft3)
+                )
+                current_alpha_rsw = (
+                    gas_solubility_in_water_grid[i, j, k]
+                    * safe_gas_fvf
+                    / (safe_water_fvf * bbl_to_ft3)
+                )
+
+                # PVT alpha factors at old pressure
+                safe_old_oil_fvf = old_oil_formation_volume_factor_grid[i, j, k]
+                safe_old_water_fvf = old_water_formation_volume_factor_grid[i, j, k]
+                safe_old_gas_fvf = old_gas_formation_volume_factor_grid[i, j, k]
+                if safe_old_oil_fvf < 1e-30:
+                    safe_old_oil_fvf = 1e-30
+                if safe_old_water_fvf < 1e-30:
+                    safe_old_water_fvf = 1e-30
+                if safe_old_gas_fvf < 1e-30:
+                    safe_old_gas_fvf = 1e-30
+
+                old_alpha_rs = (
+                    old_solution_gas_to_oil_ratio_grid[i, j, k]
+                    * safe_old_gas_fvf
+                    / (safe_old_oil_fvf * bbl_to_ft3)
+                )
+                old_alpha_rsw = (
+                    old_gas_solubility_in_water_grid[i, j, k]
+                    * safe_old_gas_fvf
+                    / (safe_old_water_fvf * bbl_to_ft3)
+                )
+
                 old_water_saturation = old_water_saturation_grid[i, j, k]
                 old_oil_saturation = old_oil_saturation_grid[i, j, k]
                 old_gas_saturation = old_gas_saturation_grid[i, j, k]
@@ -1237,33 +1692,69 @@ def apply_updates(
                 if new_water_saturation > 1.0:
                     new_water_saturation = 1.0
 
-                # Oil mass update
-                old_oil_mass = old_oil_density * old_oil_saturation
-                new_oil_mass = old_oil_mass + dt_over_pv * (
-                    net_oil_mass_flux_grid[i, j, k]
-                    + net_oil_well_mass_rate_grid[i, j, k]
+                # Total gas mass update
+                old_total_gas_mass = (
+                    old_gas_density * old_gas_saturation
+                    + old_oil_density * old_alpha_rs * old_oil_saturation
+                    + old_water_density * old_alpha_rsw * old_water_saturation
                 )
-                new_oil_saturation = new_oil_mass / current_oil_density
+                # Only oil and water produced contain dissolved gas
+                # Injected oil or water is assumed to be gas free
+                well_gas_mass_rate = (
+                    net_gas_well_mass_rate_grid[i, j, k]
+                    + current_alpha_rs * min(net_oil_well_mass_rate_grid[i, j, k], 0.0)
+                    + current_alpha_rsw
+                    * min(net_water_well_mass_rate_grid[i, j, k], 0.0)
+                )
+                new_total_gas_mass = old_total_gas_mass + dt_over_pv * (
+                    net_total_gass_mass_flux_grid[i, j, k] + well_gas_mass_rate
+                )
+
+                # Compute free gas saturation using simultaneous solution
+                #
+                # Substituting So = 1 - Sw - Sg into the gas mass balance:
+                #   M_g = rho_g*Sg + rho_o*alpha*(1-Sw-Sg) + rho_w*alpha_w*Sw
+                #
+                # Rearranging for Sg:
+                #   Sg = (M_g - rho_o*alpha*(1-Sw) - rho_w*alpha_w*Sw)
+                #        / (rho_g - rho_o*alpha)
+                #
+                # Above bubble point rho_o*alpha > rho_g so both num and denom
+                # are negative — their ratio is still the correct positive Sg.
+                new_free_gas_mass = (
+                    new_total_gas_mass
+                    - current_oil_density
+                    * current_alpha_rs
+                    * (1.0 - new_water_saturation)
+                    - current_water_density * current_alpha_rsw * new_water_saturation
+                )
+                effective_gas_density = (
+                    current_gas_density - current_oil_density * current_alpha_rs
+                )
+
+                if abs(effective_gas_density) <= 0.0:
+                    new_gas_saturation = 0.0
+                else:
+                    new_gas_saturation = new_free_gas_mass / effective_gas_density
+
+                if new_gas_saturation < 0.0:
+                    new_gas_saturation = 0.0
+                if new_gas_saturation > 1.0 - new_water_saturation:
+                    new_gas_saturation = 1.0 - new_water_saturation
+
+                # Oil saturation from volume constraint
+                new_oil_saturation = 1.0 - new_water_saturation - new_gas_saturation
                 if new_oil_saturation < 0.0:
                     new_oil_saturation = 0.0
 
-                # Free gas update
-                old_free_gas_mass = old_gas_density * old_gas_saturation
-                new_free_gas_mass = old_free_gas_mass + dt_over_pv * (
-                    net_free_gas_mass_flux_grid[i, j, k]
-                    + net_gas_well_mass_rate_grid[i, j, k]
-                )
-                new_gas_saturation = new_free_gas_mass / current_gas_density
-                if new_gas_saturation < 0.0:
-                    new_gas_saturation = 0.0
-
+                # Absorb any sub-epsilon gap into oil
                 total_saturation = (
                     new_water_saturation + new_oil_saturation + new_gas_saturation
                 )
-                if total_saturation > 1.0:
-                    new_water_saturation /= total_saturation
-                    new_oil_saturation /= total_saturation
-                    new_gas_saturation /= total_saturation
+                if abs(total_saturation - 1.0) > 1e-12:
+                    new_oil_saturation += 1.0 - total_saturation
+                    if new_oil_saturation < 0.0:
+                        new_oil_saturation = 0.0
 
                 updated_water_saturation_grid[i, j, k] = new_water_saturation
                 updated_oil_saturation_grid[i, j, k] = new_oil_saturation

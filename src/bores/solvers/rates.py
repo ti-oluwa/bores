@@ -268,7 +268,7 @@ def compute_well_rates(
                 fluid=injected_fluid,
                 fluid_compressibility=phase_compressibility,
                 use_pseudo_pressure=use_pseudo_pressure,
-                formation_volume_factor=phase_fvf,
+                phase_fvf=phase_fvf,
                 allocation_fraction=allocation_fraction,
                 pvt_tables=None,
             )
@@ -450,7 +450,7 @@ def compute_well_rates(
                         temperature=cell_temperature,
                         well_index=well_index,
                         fluid=produced_fluid,
-                        formation_volume_factor=phase_fvf,
+                        phase_fvf=phase_fvf,
                         shared_bhp=shared_bhp,
                         phase_viscosity=phase_viscosity,
                         phase_mobility=phase_mobility,
@@ -471,7 +471,7 @@ def compute_well_rates(
                         fluid=produced_fluid,
                         fluid_compressibility=phase_compressibility,
                         use_pseudo_pressure=use_pseudo_pressure,
-                        formation_volume_factor=phase_fvf,
+                        phase_fvf=phase_fvf,
                         allocation_fraction=allocation_fraction,
                         pvt_tables=config.pvt_tables,
                     )

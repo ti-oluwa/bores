@@ -435,7 +435,7 @@ def _run_impes_step(
 
     logger.debug("Solving pressure implicitly...")
     solve_pressure = (
-        implicit.solve_pressure_nonlinear
+        implicit.solve_nonlinear_pressure
         if config.use_nonlinear_pressure_solve
         else implicit.solve_pressure
     )
@@ -541,6 +541,7 @@ def _run_impes_step(
     )
     old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
     old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
+    old_gas_fvf_grid = fluid_properties.gas_formation_volume_factor_grid.copy()
     old_water_density_grid = fluid_properties.water_density_grid.copy()
     old_oil_density_grid = fluid_properties.oil_effective_density_grid.copy()
     old_gas_density_grid = fluid_properties.gas_density_grid.copy()
@@ -615,6 +616,11 @@ def _run_impes_step(
         old_water_density_grid=old_water_density_grid,
         old_oil_density_grid=old_oil_density_grid,
         old_gas_density_grid=old_gas_density_grid,
+        old_solution_gas_to_oil_ratio_grid=old_solution_gor_grid,
+        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+        old_gas_formation_volume_factor_grid=old_gas_fvf_grid,
+        old_oil_formation_volume_factor_grid=old_oil_fvf_grid,
+        old_water_formation_volume_factor_grid=old_water_fvf_grid,
         relative_mobility_grids=relative_mobility_grids,
         capillary_pressure_grids=capillary_pressure_grids,
         face_transmissibilities=face_transmissibilities,
@@ -727,15 +733,15 @@ def _run_impes_step(
             ),
         )
 
-    # Flash reconciliation: correct saturations and Rs/Rsw for
-    # liberation/dissolution driven by the pressure change in this step
-    fluid_properties = apply_solution_gas_updates(
-        fluid_properties=fluid_properties,
-        old_solution_gas_to_oil_ratio_grid=old_solution_gor_grid,
-        old_oil_formation_volume_factor_grid=old_oil_fvf_grid,
-        old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
-        old_water_formation_volume_factor_grid=old_water_fvf_grid,
-    )
+    # # Flash reconciliation: correct saturations and Rs/Rsw for
+    # # liberation/dissolution driven by the pressure change in this step
+    # fluid_properties = apply_solution_gas_updates(
+    #     fluid_properties=fluid_properties,
+    #     old_solution_gas_to_oil_ratio_grid=old_solution_gor_grid,
+    #     old_oil_formation_volume_factor_grid=old_oil_fvf_grid,
+    #     old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
+    #     old_water_formation_volume_factor_grid=old_water_fvf_grid,
+    # )
 
     if config.normalize_saturations:
         normalize_saturations(
@@ -899,7 +905,7 @@ def _run_sequential_implicit_step(
 
     logger.debug("Solving pressure implicitly...")
     solve_pressure = (
-        implicit.solve_pressure_nonlinear
+        implicit.solve_nonlinear_pressure
         if config.use_nonlinear_pressure_solve
         else implicit.solve_pressure
     )
@@ -1320,21 +1326,13 @@ def _run_full_sequential_implicit_step(
     :param saturation_epsilon: Small value to keep saturations strictly between 0 and 1.
     :return: `StepResult` containing updated fluid properties, rock properties, and rates.
     """
-    saturation_tolerance = config.transport_outer_convergence_tolerance
-    pressure_tolerance = config.pressure_outer_convergence_tolerance
-    maximum_newton_iterations = config.maximum_newton_iterations
-    maximum_outer_iterations = config.maximum_outer_iterations
+    picard_tolerance = config.picard_tolerance
+    maximum_picard_iterations = config.maximum_picard_iterations
     initial_fluid_properties = fluid_properties
     solve_pressure = (
-        implicit.solve_pressure_nonlinear
+        implicit.solve_nonlinear_pressure
         if config.use_nonlinear_pressure_solve
         else implicit.solve_pressure
-    )
-
-    logger.debug(
-        "Outer iteration tolerances: saturation (absolute): %d:.2e, pressure (relative): %d:.2e",
-        saturation_tolerance,
-        pressure_tolerance,
     )
 
     previous_pressure_grid = fluid_properties.pressure_grid.copy()
@@ -1355,7 +1353,7 @@ def _run_full_sequential_implicit_step(
     iter_capillary_pressure_grids = capillary_pressure_grids
     iter_relperm_grids = relperm_grids
 
-    outer_converged = False
+    converged = False
     transport_result = None
     transport_solution = None
     maximum_pressure_change = None
@@ -1364,16 +1362,16 @@ def _run_full_sequential_implicit_step(
     maximum_gas_saturation_change = None
     well_rates = None
     has_open_wells = False
-    final_timer_kwargs: typing.Dict[str, typing.Any] = {}
+    timer_context: typing.Dict[str, typing.Any] = {}
 
     logger.debug(
         "Starting outer iteration loop (max %d iterations) at time step %d...",
-        maximum_outer_iterations,
+        maximum_picard_iterations,
         time_step,
     )
 
-    for iteration in range(maximum_outer_iterations):
-        logger.debug("Outer iteration %d/%d", iteration + 1, maximum_outer_iterations)
+    for iteration in range(maximum_picard_iterations):
+        logger.debug("Outer iteration %d/%d", iteration + 1, maximum_picard_iterations)
 
         metadata = build_boundary_metadata(
             fluid_properties=iter_fluid_properties,
@@ -1566,7 +1564,7 @@ def _run_full_sequential_implicit_step(
         logger.debug(
             "Solving transport implicitly (Newton-Raphson) for outer iteration %d/%d...",
             iteration + 1,
-            maximum_outer_iterations,
+            maximum_picard_iterations,
         )
         transport_result = implicit.solve_transport(
             cell_dimension=cell_dimension,
@@ -1698,8 +1696,7 @@ def _run_full_sequential_implicit_step(
             )
 
         newton_iterations = transport_solution.newton_iterations
-        newton_utilization = newton_iterations / maximum_newton_iterations
-        final_timer_kwargs = {
+        timer_context = {
             "maximum_pressure_change": maximum_pressure_change,
             "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
             "maximum_saturation_change": saturation_check.max_phase_saturation_change,
@@ -1707,98 +1704,69 @@ def _run_full_sequential_implicit_step(
             "newton_iterations": newton_iterations,
         }
 
-        if newton_utilization < 0.25:
-            logger.debug(
-                f"Newton converged in {newton_iterations} iterations "
-                f"(utilization {newton_utilization:.0%}), skipping further outer iterations."
-            )
-            outer_converged = True
-            break
-
-        total_saturation_change_from_bop = max(
-            float(
-                np.max(
-                    np.abs(
-                        iter_fluid_properties.water_saturation_grid
-                        - fluid_properties.water_saturation_grid
-                    )
-                )
-            ),
-            float(
-                np.max(
-                    np.abs(
-                        iter_fluid_properties.oil_saturation_grid
-                        - fluid_properties.oil_saturation_grid
-                    )
-                )
-            ),
-            float(
-                np.max(
-                    np.abs(
-                        iter_fluid_properties.gas_saturation_grid
-                        - fluid_properties.gas_saturation_grid
-                    )
-                )
-            ),
+        # Picard convergence check
+        pressure_delta = new_pressure_grid - previous_pressure_grid
+        pressure_rms_reference = max(float(np.sqrt(np.mean(new_pressure_grid**2))), 1.0)
+        pressure_rms_change = (
+            float(np.sqrt(np.mean(pressure_delta**2))) / pressure_rms_reference
         )
-        if total_saturation_change_from_bop < 0.1 * min(
-            config.maximum_oil_saturation_change,
-            config.maximum_water_saturation_change,
-            config.maximum_gas_saturation_change,
-        ):
-            logger.debug(
-                f"Total saturation change from start of timestep {total_saturation_change_from_bop:.3e} "
-                f"is small, skipping further outer iterations."
-            )
-            outer_converged = True
-            break
 
-        max_outer_saturation_change = max(
-            float(
-                np.max(
-                    np.abs(
+        water_saturation_rms_change = float(
+            np.sqrt(
+                np.mean(
+                    (
                         iter_fluid_properties.water_saturation_grid
                         - previous_water_saturation_grid
                     )
+                    ** 2
                 )
-            ),
-            float(
-                np.max(
-                    np.abs(
+            )
+        )
+        oil_saturation_rms_change = float(
+            np.sqrt(
+                np.mean(
+                    (
                         iter_fluid_properties.oil_saturation_grid
                         - previous_oil_saturation_grid
                     )
+                    ** 2
                 )
-            ),
-            float(
-                np.max(
-                    np.abs(
+            )
+        )
+        gas_saturation_rms_change = float(
+            np.sqrt(
+                np.mean(
+                    (
                         iter_fluid_properties.gas_saturation_grid
                         - previous_gas_saturation_grid
                     )
+                    ** 2
                 )
-            ),
+            )
         )
-        reference_pressure = max(float(np.mean(np.abs(new_pressure_grid))), 1.0)
-        relative_outer_pressure_change = (
-            float(np.max(np.abs(new_pressure_grid - previous_pressure_grid)))
-            / reference_pressure
+        maximum_saturation_rms_change = max(
+            water_saturation_rms_change,
+            oil_saturation_rms_change,
+            gas_saturation_rms_change,
         )
 
         logger.debug(
-            f"Outer iteration {iteration + 1} convergence - "
-            f"Δsat (absolute): {max_outer_saturation_change:.3e} (atol={saturation_tolerance:.3e}), "
-            f"ΔP (relative): {relative_outer_pressure_change:.3e} (rtol={pressure_tolerance:.3e})"
+            "Picard outer iteration %d/%d: RMS ΔP/P = %.3e, RMS ΔS = %.3e (tol = %.3e)",
+            iteration + 1,
+            config.maximum_picard_iterations,
+            pressure_rms_change,
+            maximum_saturation_rms_change,
+            picard_tolerance,
         )
 
         if (
-            max_outer_saturation_change < saturation_tolerance
-            and relative_outer_pressure_change < pressure_tolerance
+            pressure_rms_change < picard_tolerance
+            and maximum_saturation_rms_change < picard_tolerance
         ):
             logger.debug(
-                f"Outer iteration converged after {iteration + 1} iteration(s)."
+                "Picard outer loop converged after %d iteration(s).", iteration + 1
             )
-            outer_converged = True
+            converged = True
             break
 
         iter_fluid_properties = update_fluid_properties(
@@ -1826,9 +1794,9 @@ def _run_full_sequential_implicit_step(
         previous_oil_saturation_grid = iter_fluid_properties.oil_saturation_grid.copy()
         previous_gas_saturation_grid = iter_fluid_properties.gas_saturation_grid.copy()
 
-    if not outer_converged:
+    if not converged:
         logger.warning(
-            f"Outer iteration did not converge after {config.maximum_outer_iterations} "
+            f"Outer iteration did not converge after {maximum_picard_iterations} "
             f"iteration(s) at time step {time_step}. Proceeding with last solution."
         )
 
@@ -1863,7 +1831,7 @@ def _run_full_sequential_implicit_step(
         else None,
         time_step_size=time_step_size,
     )
-    final_timer_kwargs.update(
+    timer_context.update(
         {
             "absolute_oil_mbe": material_balance_errors.absolute_oil_mbe,
             "absolute_water_mbe": material_balance_errors.absolute_water_mbe,
@@ -1891,7 +1859,7 @@ def _run_full_sequential_implicit_step(
         maximum_water_saturation_change=maximum_water_saturation_change,
         maximum_gas_saturation_change=maximum_gas_saturation_change,
         material_balance_errors=material_balance_errors,
-        timer_context=final_timer_kwargs,
+        timer_context=timer_context,
     )
 
 
