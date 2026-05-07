@@ -12,7 +12,7 @@ from bores.correlations.core import (
 
 logging.basicConfig(level=logging.DEBUG)
 
-# bores.use_32bit_precision()
+bores.use_32bit_precision()
 
 # -------------------------------------------------------------------------
 # Grid geometry — SPE1 benchmark (Odeh, 1981, JPT)
@@ -513,7 +513,11 @@ oil_water_table = bores.TwoPhaseRelPermTable(
 )
 
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=gas_oil_table
+    relative_permeability_table=bores.ThreePhaseRelPermTable(
+        oil_water_table=oil_water_table,
+        gas_oil_table=gas_oil_table,
+        mixing_rule="eclipse_rule",
+    )
 )
 
 # Wells
@@ -600,8 +604,8 @@ config = bores.Config(
     # maximum_water_saturation_change=0.05,
     # maximum_newton_saturation_change=0.05,
     maximum_pressure_change=300.0,
-    cfl_threshold=0.9,
-    use_nonlinear_pressure_solve=True,
+    cfl_threshold=0.5,
+    # use_nonlinear_pressure_solve=True,
 )
 
 run = bores.Run(
@@ -630,9 +634,8 @@ def diagnostic(result: bores.StepResult) -> None:
         bg = fp.gas_formation_volume_factor_grid[i, j, k]
         bo = fp.oil_formation_volume_factor_grid[i, j, k]
         rhog = fp.gas_density_grid[i, j, k]
-        rhoo = fp.oil_effective_density_grid[i, j, k]
         alpha = rs * bg / (bo * 5.614583)
-        eff_rho = rhog - rhoo * alpha
+        eff_rho = rhog - rhog * alpha
 
         inj_rate = result.rates.injection_rates.gas[i, j, k] if result.rates else 0
         print(

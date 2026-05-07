@@ -51,11 +51,7 @@ from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTDataSet, PVTTables
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDimensions
-from bores.updates import (
-    apply_solution_gas_updates,
-    update_fluid_properties,
-    update_residual_saturation_grids,
-)
+from bores.updates import update_fluid_properties, update_residual_saturation_grids
 from bores.validation import ValidationReport, validate
 from bores.wells.base import Wells
 from bores.wells.indices import WellsIndices, build_wells_indices, update_wells_indices
@@ -732,16 +728,6 @@ def _run_impes_step(
                 dtype, copy=False
             ),
         )
-
-    # # Flash reconciliation: correct saturations and Rs/Rsw for
-    # # liberation/dissolution driven by the pressure change in this step
-    # fluid_properties = apply_solution_gas_updates(
-    #     fluid_properties=fluid_properties,
-    #     old_solution_gas_to_oil_ratio_grid=old_solution_gor_grid,
-    #     old_oil_formation_volume_factor_grid=old_oil_fvf_grid,
-    #     old_gas_solubility_in_water_grid=old_gas_solubility_in_water_grid,
-    #     old_water_formation_volume_factor_grid=old_water_fvf_grid,
-    # )
 
     if config.normalize_saturations:
         normalize_saturations(

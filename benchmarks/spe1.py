@@ -1111,7 +1111,7 @@ def _(bores, states, viz, wells):
     labels.add_well_labels(well_positions, well_names)
 
     shared_kwargs = dict(
-        plot_type="cell_blocks",
+        plot_type="volume",
         width=1200,
         height=720,
         # opacity=0.7,
@@ -1127,7 +1127,7 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "oil-sat"
+    property = "gas-sat"
     figures = []
     timesteps = [465]
     for timestep in timesteps:

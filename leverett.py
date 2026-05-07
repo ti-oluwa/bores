@@ -144,13 +144,13 @@ producer = bores.production_well(
     perforating_intervals=[((nx - 1, 0, 0), (nx - 1, 0, 0))],
     radius=0.25,  # ft
     control=bores.ProducerRateControl(
-        primary_phase=bores.FluidPhase.OIL,
-        primary_control=bores.AdaptiveRateControl(
+        controlling_phase=bores.FluidPhase.OIL,
+        control=bores.AdaptiveRateControl(
             target_rate=-10000.0,  # large negative (effectively BHP control)
             bhp_limit=1000.0,  # min BHP
             clamp=bores.ProductionClamp(),
         ),
-        secondary_clamp=bores.ProductionClamp(),
+        clamp=bores.ProductionClamp(),
     ),
     produced_fluids=[
         bores.ProducedFluid(
@@ -199,7 +199,6 @@ config = bores.Config(
     scheme="si",
     pressure_solver="direct",
     transport_solver="direct",
-    maximum_saturation_change=0.5,  # Control numerical diffusion
     disable_capillary_effects=True,  # Classic BL has no Pc
     normalize_saturations=True,
     maximum_pressure_change=500,
@@ -207,6 +206,7 @@ config = bores.Config(
     # minimum_injector_water_saturation=0.4,
     cfl_threshold=0.7,
     # use_pseudo_pressure=True,
+    # use_nonlinear_pressure_solve=True,
 )
 
 print("=" * 70)
@@ -223,7 +223,9 @@ print(f"Water viscosity: {water_viscosity} cP")
 print(f"Injection rate: {injector.control.target_rate} STB/D")
 print("=" * 70)
 
-states = list(bores.monitor(model, config))
+run = bores.Run(model, config)
+run.validate()
+states = list(bores.monitor(run))
 
 final = states[-1]
 print("\n" + "=" * 70)

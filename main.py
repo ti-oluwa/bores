@@ -160,6 +160,7 @@ config = bores.Config(
     # freeze_saturation_pressure=True,
     # disable_capillary_effects=True,
     cfl_threshold=0.5,
+    use_nonlinear_pressure_solve=True
 )
 
 run = bores.Run(model, config)
