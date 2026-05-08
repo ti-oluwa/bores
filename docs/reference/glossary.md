@@ -301,7 +301,7 @@
 ## BORES Framework Terms
 
 **Config**
-: The immutable configuration object (`bores.Config`) that holds all simulation parameters: timer, solver settings, convergence tolerances, well definitions, boundary conditions, rock-fluid tables, and physical controls. Because `Config` is frozen, modifications require creating a new instance using `copy()` or `with_updates()`.
+: The immutable configuration object (`bores.Config`) that holds all simulation parameters: timer, solver settings, convergence tolerances, well definitions, boundary conditions, rock-fluid tables, and physical controls. Because `Config` is frozen, modifications require creating a new instance using `copy()` or `update()`.
 
 **DataStore**
 : The abstract base class for all storage backends in BORES. Concrete implementations include `ZarrStore`, `HDF5Store`, `JSONStore`, and `YAMLStore`. Stores support `dump()`, `load()`, `append()`, and `entries()` operations and can be used as context managers for efficient persistent-handle access.

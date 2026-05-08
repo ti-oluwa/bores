@@ -5,6 +5,7 @@ import typing
 import numba
 import numpy as np
 import numpy.typing as npt
+from typing_extensions import NamedTuple
 
 from bores.correlations.core import compute_harmonic_mean
 from bores.precision import get_dtype
@@ -13,7 +14,7 @@ from bores.types import ThreeDimensionalGrid
 __all__ = ["FaceTransmissibilities", "build_face_transmissibilities"]
 
 
-class FaceTransmissibilities(typing.NamedTuple):
+class FaceTransmissibilities(NamedTuple):
     """
     Precomputed geometric face transmissibilities for all interior faces in x, y, z.
 
@@ -95,7 +96,7 @@ def _compute_face_transmissibilities(
     Ty = np.zeros((nx + 2, ny + 2, nz + 2), dtype=dtype)
     Tz = np.zeros((nx + 2, ny + 2, nz + 2), dtype=dtype)
 
-    for i in numba.prange(nx):  # type: ignore[attr-defined]
+    for i in numba.prange(nx):  # type: ignore
         for j in range(ny):
             for k in range(nz):
                 cell_thickness = thickness_grid[i, j, k]

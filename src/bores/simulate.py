@@ -569,19 +569,19 @@ def _run_impes_step(
         gas_relative_mobility=gas_relative_mobility_grid,
     )
 
-    # if has_open_wells:
-    #     logger.debug("Re-computing well rates after pressure solve for consistency...")
-    #     well_rates = compute_well_rates(
-    #         fluid_properties=fluid_properties,
-    #         water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
-    #         oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
-    #         gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
-    #         wells=wells,
-    #         time=time,
-    #         config=config,
-    #         wells_indices=wells_indices,
-    #         dtype=dtype,
-    #     )
+    if has_open_wells:
+        logger.debug("Re-computing well rates after pressure solve for consistency...")
+        well_rates = compute_well_rates(
+            fluid_properties=fluid_properties,
+            water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
+            oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
+            gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+            wells=wells,
+            time=time,
+            config=config,
+            wells_indices=wells_indices,
+            dtype=dtype,
+        )
 
     # Refresh boundary conditions after pressure update so that dynamic BCs (Robin,
     # Carter-Tracy) see the new interior pressures before saturation evolves.
@@ -1007,38 +1007,37 @@ def _run_sequential_implicit_step(
         freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
 
-    # # Partially update mobility grids (kr/μ) using updated viscosities
-    # (
-    #     water_relative_mobility_grid,
-    #     oil_relative_mobility_grid,
-    #     gas_relative_mobility_grid,
-    # ) = build_three_phase_relative_mobilities_grids(
-    #     oil_relative_permeability_grid=relperm_grids.kro,
-    #     water_relative_permeability_grid=relperm_grids.krw,
-    #     gas_relative_permeability_grid=relperm_grids.krg,
-    #     water_viscosity_grid=fluid_properties.water_viscosity_grid,
-    #     oil_viscosity_grid=fluid_properties.oil_effective_viscosity_grid,
-    #     gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
-    # )
-    # relative_mobility_grids = RelativeMobilityGrids(
-    #     oil_relative_mobility=oil_relative_mobility_grid,
-    #     water_relative_mobility=water_relative_mobility_grid,
-    #     gas_relative_mobility=gas_relative_mobility_grid,
-    # )
-
-    # if has_open_wells:
-    #     logger.debug("Re-computing well rates after pressure solve for consistency...")
-    #     well_rates = compute_well_rates(
-    #         fluid_properties=fluid_properties,
-    #         water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
-    #         oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
-    #         gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
-    #         wells=wells,
-    #         time=time,
-    #         config=config,
-    #         wells_indices=wells_indices,
-    #         dtype=dtype,
-    #     )
+    if has_open_wells:
+        # Partially update mobility grids (kr/μ) using updated viscosities
+        (
+            water_relative_mobility_grid,
+            oil_relative_mobility_grid,
+            gas_relative_mobility_grid,
+        ) = build_three_phase_relative_mobilities_grids(
+            oil_relative_permeability_grid=relperm_grids.kro,
+            water_relative_permeability_grid=relperm_grids.krw,
+            gas_relative_permeability_grid=relperm_grids.krg,
+            water_viscosity_grid=fluid_properties.water_viscosity_grid,
+            oil_viscosity_grid=fluid_properties.oil_effective_viscosity_grid,
+            gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
+        )
+        relative_mobility_grids = RelativeMobilityGrids(
+            oil_relative_mobility=oil_relative_mobility_grid,
+            water_relative_mobility=water_relative_mobility_grid,
+            gas_relative_mobility=gas_relative_mobility_grid,
+        )
+        logger.debug("Re-computing well rates after pressure solve for consistency...")
+        well_rates = compute_well_rates(
+            fluid_properties=fluid_properties,
+            water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
+            oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
+            gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+            wells=wells,
+            time=time,
+            config=config,
+            wells_indices=wells_indices,
+            dtype=dtype,
+        )
 
     # Refresh boundary conditions so the saturation solve sees post-pressure BC values.
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
@@ -1075,6 +1074,7 @@ def _run_sequential_implicit_step(
         pressure_boundaries=pressure_boundaries,
         wells_indices=wells_indices,
         rates=well_rates,
+        hysteresis_state=hysteresis_state,
         dtype=dtype,
     )
     transport_solution = transport_result.value
@@ -1549,6 +1549,7 @@ def _run_full_sequential_implicit_step(
             pressure_boundaries=pressure_boundaries,
             wells_indices=wells_indices,
             rates=well_rates,
+            hysteresis_state=hysteresis_state,
             dtype=dtype,
         )
         transport_solution = transport_result.value
@@ -1987,14 +1988,14 @@ class Run(StoreSerializable):
             pvt_tables = PVTTables.from_file(pvt_tables_path)
             if pvt_tables is None:
                 raise ValidationError("Failed to load `PVTTables` data from file.")
-            config = config.with_updates(pvt_tables=pvt_tables)
+            config = config.update(pvt_tables=pvt_tables)
 
         if pvt_data_path is not None:
             pvt_dataset = PVTDataSet.from_file(pvt_data_path)
             if pvt_dataset is None:
                 raise ValidationError("Failed to load `PVTDataSet` from file.")
             pvt_tables = PVTTables.from_dataset(pvt_dataset)
-            config = config.with_updates(pvt_tables=pvt_tables)
+            config = config.update(pvt_tables=pvt_tables)
 
         return cls(model=model, config=config)
 

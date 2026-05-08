@@ -692,7 +692,7 @@ class Constants(
     Physical constants and conversion factors used in reservoir simulations.
 
     All constants are stored in an internal dictionary and can be accessed via dot notation.
-    Constants can be modified at runtime if needed. Use __getattr__ for value access and
+    `Constants` can be modified at runtime if needed. Use __getattr__ for value access and
     __getitem__ for `Constant` object access.
     """
 
@@ -722,17 +722,17 @@ class Constants(
             if isinstance(value, (Constant, ConstantFactory)):
                 self._store[name] = value
             elif callable(value):
-                # Wrap callables in ConstantFactory objects
+                # Wrap callables in `ConstantFactory` objects
                 self._store[name] = ConstantFactory(factory=value)
             else:
-                # Wrap raw values in Constant objects
+                # Wrap raw values in `Constant` objects
                 self._store[name] = Constant(value=value)
 
     def __getattr__(self, name: str) -> typing.Any:
         """Get a constant's value using dot notation.
 
         :param name: Name of the constant
-        :return: Value of the constant (unwrapped from Constant object)
+        :return: Value of the constant (unwrapped from `Constant` object)
         :raises AttributeError: If the constant does not exist
         """
         if name.startswith("_"):
@@ -752,10 +752,10 @@ class Constants(
             ) from None
 
     def __getitem__(self, name: str) -> Constant:
-        """Get the Constant object (with metadata) using bracket notation.
+        """Get the `Constant` object (with metadata) using bracket notation.
 
         :param name: Name of the constant
-        :return: Constant object with value, description, and unit
+        :return: `Constant` object with value, description, and unit
         :raises KeyError: If the constant does not exist
         """
         return self._store[name]
@@ -763,10 +763,10 @@ class Constants(
     def __setattr__(self, name: str, value: typing.Union[typing.Any, Constant]) -> None:
         """Set a constant value using dot notation.
 
-        Accepts either a raw value (which will be wrapped in a Constant) or a Constant object.
+        Accepts either a raw value (which will be wrapped in a `Constant`) or a `Constant` object.
 
         :param name: Name of the constant
-        :param value: Value to set (raw value or Constant object)
+        :param value: Value to set (raw value or `Constant` object)
         """
         if name.startswith("_"):
             # Allow setting private attributes normally
@@ -791,7 +791,8 @@ class Constants(
             self._store[name] = Constant(value=value)
 
     def __delattr__(self, name: str) -> None:
-        """Delete a constant from the store.
+        """
+        Delete a constant from the store.
 
         :param name: Name of the constant to delete
         :raises AttributeError: If the constant does not exist
@@ -807,7 +808,8 @@ class Constants(
                 ) from None
 
     def __delitem__(self, name: str) -> None:
-        """Delete a constant using bracket notation.
+        """
+        Delete a constant using bracket notation.
 
         :param name: Name of the constant to delete
         :raises KeyError: If the constant does not exist
@@ -815,7 +817,8 @@ class Constants(
         del self._store[name]
 
     def __contains__(self, name: str) -> bool:
-        """Check if a constant exists.
+        """
+        Check if a constant exists.
 
         :param name: Name of the constant
         :return: True if the constant exists, False otherwise
@@ -823,35 +826,40 @@ class Constants(
         return name in self._store
 
     def __iter__(self) -> typing.Iterator[str]:
-        """Iterate over constant names.
+        """
+        Iterate over constant names.
 
         :return: Iterator over constant names
         """
         return iter(self._store)
 
     def keys(self) -> typing.KeysView[str]:
-        """Get all constant names.
+        """
+        Get all constant names.
 
         :return: View of all constant names
         """
         return self._store.keys()
 
     def values(self) -> typing.ValuesView[Constant]:
-        """Get all Constant objects.
+        """
+        Get all `Constant` objects.
 
         :return: View of all Constant objects
         """
         return self._store.values()
 
     def items(self) -> typing.ItemsView[str, Constant]:
-        """Get all constant name-Constant object pairs.
+        """
+        Get all constant name-`Constant` object pairs.
 
         :return: View of all constant name-Constant pairs
         """
         return self._store.items()
 
     def get(self, name: str, default: typing.Any = None) -> typing.Any:
-        """Get a constant's value with a default fallback.
+        """
+        Get a constant's value with a default fallback.
 
         :param name: Name of the constant
         :param default: Default value if constant doesn't exist
@@ -865,7 +873,8 @@ class Constants(
     def get_constant(
         self, name: str, default: typing.Optional[Constant] = None
     ) -> typing.Optional[Constant]:
-        """Get a `Constant` object with a default fallback.
+        """
+        Get a `Constant` object with a default fallback.
 
         :param name: Name of the constant
         :param default: Default `Constant` if constant doesn't exist
@@ -936,23 +945,24 @@ class ConstantsContext:
     """
 
     def __init__(self, constants: Constants) -> None:
-        """Initialize the context manager with a new Constants instance.
+        """
+        Initialize the context manager with a new `Constants` instance.
 
-        :param constants: New Constants instance to use within the context
+        :param constants: New `Constants` instance to use within the context
         """
         self._new_constants = constants
         self._token = None
 
     def __enter__(self) -> Constants:
-        """Enter the context, setting the new Constants instance.
+        """Enter the context, setting the new `Constants` instance.
 
-        :return: The new Constants instance
+        :return: The new `Constants` instance
         """
         self._token = _constants_context.set(self._new_constants)  # type: ignore[assignment]
         return self._new_constants
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
-        """Exit the context, restoring the previous Constants instance."""
+        """Exit the context, restoring the previous `Constants` instance."""
         if self._token is not None:
             _constants_context.reset(self._token)
 
@@ -968,14 +978,16 @@ class _ConstantsProxy:
 
     @property
     def _constants(self) -> Constants:
-        """Get the current context's `Constants` instance.
+        """
+        Get the current context's `Constants` instance.
 
         :return: Current `Constants` instance
         """
         return _constants_context.get()
 
     def __getattr__(self, name: str) -> typing.Any:
-        """Get a constant's value from the current context's `Constants` instance.
+        """
+        Get a constant's value from the current context's `Constants` instance.
 
         :param name: Name of the constant
         :return: Value of the constant
@@ -984,7 +996,8 @@ class _ConstantsProxy:
         return getattr(self._constants, name)
 
     def __getitem__(self, name: str) -> Constant:
-        """Get a Constant object from the current context's `Constants` instance.
+        """
+        Get a Constant object from the current context's `Constants` instance.
 
         :param name: Name of the constant
         :return: Constant object

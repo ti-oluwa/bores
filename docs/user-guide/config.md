@@ -4,7 +4,7 @@
 
 The `Config` class holds every parameter that controls how a BORES simulation runs. It specifies the timer (time stepping behavior), the rock-fluid tables (relative permeability and capillary pressure models), the wells, the numerical scheme, the solvers, the preconditioners, the convergence tolerances, and all the physical constraints that keep the simulation stable and accurate.
 
-`Config` is a frozen (immutable) attrs class. Once you create a `Config`, its fields cannot be changed in place. To modify a configuration, you create a new one using the `copy()` or `with_updates()` methods. This immutability prevents accidental modification of simulation parameters during a run and makes configurations safe to pass between functions without defensive copying.
+`Config` is a frozen (immutable) attrs class. Once you create a `Config`, its fields cannot be changed in place. To modify a configuration, you create a new one using the `copy()` or `update()` methods. This immutability prevents accidental modification of simulation parameters during a run and makes configurations safe to pass between functions without defensive copying.
 
 Every simulation in BORES requires a `Config`. You pass it (along with a reservoir model) to `bores.run()` to start the simulation. The `Config` is the single point of control for all numerical behavior. If two simulations use different schemes, solvers, or convergence criteria, those differences are captured entirely in their respective `Config` objects.
 
@@ -321,7 +321,7 @@ with pool_context as pool:
 
 ## Modifying a Config
 
-Since `Config` is immutable, you cannot modify fields directly. Use `copy()` or `with_updates()` to create modified versions:
+Since `Config` is immutable, you cannot modify fields directly. Use `copy()` or `update()` to create modified versions:
 
 ### `copy()`
 
@@ -338,19 +338,19 @@ tuned_config = config.copy(
 )
 ```
 
-### `with_updates()`
+### `update()`
 
-`with_updates()` works the same way as `copy()` but validates that all provided keys are valid `Config` attributes:
+`update()` works the same way as `copy()` but validates that all provided keys are valid `Config` attributes:
 
 ```python
 # This works
-updated = config.with_updates(scheme="full-sequential-implicit")
+updated = config.update(scheme="full-sequential-implicit")
 
 # This raises AttributeError because "schemee" is not a valid field
-updated = config.with_updates(schemee="full-sequential-implicit")  # AttributeError
+updated = config.update(schemee="full-sequential-implicit")  # AttributeError
 ```
 
-Use `with_updates()` when you want protection against typos in parameter names. Use `copy()` when you prefer the shorter name and are confident in the parameter names.
+Use `update()` when you want protection against typos in parameter names. Use `copy()` when you prefer the shorter name and are confident in the parameter names.
 
 ---
 

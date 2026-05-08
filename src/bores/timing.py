@@ -106,6 +106,7 @@ class TimerState(TypedDict):
     steps_since_last_failure: int
     recent_metrics: typing.List[StepMetricsDict]
     failed_step_sizes: typing.List[float]
+    last_successful_step_size: float
 
 
 @attrs.frozen(slots=True)
@@ -117,6 +118,15 @@ class StepMetrics:
     cfl: typing.Optional[float] = None
     newton_iterations: typing.Optional[int] = None
     success: bool = True
+
+
+def _utilization(
+    actual: typing.Optional[float], limit: typing.Optional[float]
+) -> typing.Optional[float]:
+    """Return actual/limit, or None if either is None/zero."""
+    if actual is None or limit is None or limit <= 0.0:
+        return None
+    return actual / limit
 
 
 @attrs.define
@@ -139,9 +149,10 @@ class Timer(StoreSerializable):
     """Factor by which to ramp up time step size on successful steps."""
     backoff_factor: float = 0.5
     """
-    Default factor by which to reduce time step size on failed steps. 
+    Default factor by which to reduce time step size on failed steps.
 
-    Only used when there not enough information to intelligently determine a suitable backoff factor for the time step size.
+    Only used when there is not enough information to intelligently determine a
+    suitable backoff factor.
     """
     aggressive_backoff_factor: float = 0.25
     """Factor by which to aggressively reduce time step size on failed steps."""
@@ -150,13 +161,21 @@ class Timer(StoreSerializable):
 
     # Adaptive parameters
     growth_cooldown_steps: int = 5
-    """Minimum successful steps required before allowing aggressive growth. Higher values lead to more conservative growth."""
+    """Minimum successful steps required before allowing aggressive growth."""
     maximum_growth_per_step: float = 1.3
-    """Maximum multiplicative growth allowed per step (e.g., 1.3 = 30% max growth). Lower values lead to much smoother growth."""
+    """Maximum multiplicative growth allowed per step (e.g., 1.3 = 30% max growth)."""
     cfl_safety_margin: float = 0.95
     """Safety factor for CFL-based adjustments (target below max CFL)."""
     step_size_smoothing: float = 0.2
-    """EMA smoothing factor (0 = no smoothing, 1 = maximum smoothing). Higher values lead to smoother step size changes and higher dampening of fluctuations."""
+    """
+    EMA smoothing factor applied to step size changes.
+
+    The EMA is: `ema = (1 - α) * ema_prev + α * new_dt`, so a value of 0.2
+    means 20% weight on the new proposal and 80% on the running average
+    i.e., *higher values = less smoothing, faster response* (closer to the raw
+    proposed size), *lower values = more smoothing, slower adaptation*.
+    Set to 1.0 to disable smoothing entirely.
+    """
     metrics_history_size: int = 10
     """Number of recent steps to track for performance analysis."""
     failure_memory_window: int = 5
@@ -181,24 +200,22 @@ class Timer(StoreSerializable):
     """Total relative MBE threshold (fraction). Reject step if exceeded."""
     use_mbe_for_step_size: bool = False
     """
-    If True, MBE values are used to modulate the next step size proposal even
-    when the step is accepted (analogous to how CFL and saturation change drive
-    growth/shrinkage on accepted steps). When False (default), MBE only
-    triggers step rejection when a configured limit is exceeded; it has no
-    influence on step-size growth on passing steps.
+    If True, MBE values modulate the next step size proposal on accepted steps
+    (analogous to CFL/saturation-driven growth). When False (default), MBE only
+    triggers rejection when a configured limit is exceeded.
     """
 
-    # State variables
+    # Runtime state
     elapsed_time: float = attrs.field(init=False, default=0.0)
     """Current simulation time in seconds (sum of all accepted steps)."""
     step_size: float = attrs.field(init=False, default=0.0)
-    """The time step size (in seconds) that was used for the most recently accepted step."""
+    """The time step size used for the most recently accepted step."""
     next_step_size: float = attrs.field(init=False, default=0.0)
-    """Time step size (in seconds) to propose for the next step."""
+    """Time step size to propose for the next step."""
     ema_step_size: float = attrs.field(init=False, default=0.0)
-    """Exponential moving average of step size for smoothing."""
+    """Exponential moving average of accepted step sizes."""
     step: int = attrs.field(init=False, default=0)
-    """Number of accepted time steps completed so far (0-indexed)."""
+    """Number of accepted time steps completed so far."""
     last_step_failed: bool = attrs.field(init=False, default=False)
     """Whether the most recent step attempt was rejected."""
     maximum_rejections: int = 10
@@ -208,120 +225,119 @@ class Timer(StoreSerializable):
     steps_since_last_failure: int = attrs.field(init=False, default=0)
     """Number of successful steps since the last failure."""
     use_constant_step_size: bool = attrs.field(init=False, default=False)
-    """Whether to use a constant time step size."""
+    """Whether to use a constant time step size (init == max == min)."""
+    last_successful_step_size: float = attrs.field(init=False, default=0.0)
+    """The step size used in the most recently *accepted* step."""
 
     # Performance tracking
     recent_metrics: typing.Deque[StepMetrics] = attrs.field(init=False)
-    """Recent step performance metrics."""
+    """Recent step performance metrics (bounded deque, newest at right)."""
     failed_step_sizes: typing.Deque[float] = attrs.field(init=False)
-    """Recent failed step sizes for memory."""
+    """Recent failed step sizes for failure-zone memory."""
 
-    # Rolling statistics (saved to avoid list comprehensions)
-    _recent_cfl_sum: float = attrs.field(init=False, default=0.0)
-    """Sum of recent successful CFL values for rolling average."""
-    _recent_cfl_count: int = attrs.field(init=False, default=0)
-    """Count of recent successful CFL values."""
-    _recent_newton_sum: int = attrs.field(init=False, default=0)
-    """Sum of recent Newton iterations for rolling average."""
-    _recent_newton_count: int = attrs.field(init=False, default=0)
-    """Count of recent Newton iterations."""
-    _recent_cfl_oldest: typing.Optional[float] = attrs.field(init=False, default=None)
-    """Oldest CFL value in rolling window (5-step)."""
-    _recent_newton_oldest: typing.Optional[int] = attrs.field(init=False, default=None)
-    """Oldest Newton iteration count in rolling window (5-step)."""
+    # Rolling window statistics stored as a fixed-size deque so the sliding
+    # window is exact and never corrupted by approximation.
+    _cfl_window: typing.Deque[float] = attrs.field(init=False)
+    """Sliding window of the last N successful CFL values (N = metrics_history_size)."""
+    _newton_window: typing.Deque[int] = attrs.field(init=False)
+    """Sliding window of the last N successful Newton iteration counts."""
 
     def __attrs_post_init__(self) -> None:
         self.next_step_size = self.initial_step_size
         self.step_size = self.initial_step_size
         self.ema_step_size = self.initial_step_size
+        self.last_successful_step_size = self.initial_step_size
         self.use_constant_step_size = (
             self.initial_step_size == self.maximum_step_size
             and self.initial_step_size == self.minimum_step_size
         )
         self.recent_metrics = deque(maxlen=self.metrics_history_size)
         self.failed_step_sizes = deque(maxlen=self.failure_memory_window)
+        # Rolling windows share the same bound as metrics_history_size for simplicity.
+        self._cfl_window = deque(maxlen=self.metrics_history_size)
+        self._newton_window = deque(maxlen=self.metrics_history_size)
 
     @property
     def next_step(self) -> int:
-        """Returns the next time step count."""
+        """Returns the next time step count (1-indexed)."""
         return self.step + 1
 
     def done(self) -> bool:
-        """
-        Checks if the simulation has reached its end criteria.
-
-        If True, simulation has reached it end.
-        """
-        # Use small tolerance for floating-point comparison
+        """True once the simulation has reached its end criteria."""
         if self.elapsed_time >= (self.simulation_time - 1e-9):
             return True
         return self.maximum_steps is not None and self.step >= self.maximum_steps
 
     @property
     def time_remaining(self) -> float:
-        """Calculates the remaining simulation time in seconds."""
+        """Remaining simulation time in seconds."""
         return max(self.simulation_time - self.elapsed_time, 0.0)
 
     @property
     def is_last_step(self) -> bool:
-        """Determines if the latest accepted step was the last one (simulation is now complete)."""
+        """True if the latest accepted step completed the simulation."""
         if self.time_remaining <= 0:
             return True
-
         return self.maximum_steps is not None and self.step >= self.maximum_steps
 
-    def _is_near_failed_size(self, dt: float, tolerance: float = 0.15) -> bool:
-        """Check if proposed step size is near a recently failed size."""
+    @property
+    def _avg_cfl(self) -> typing.Optional[float]:
+        """Average CFL over the recent window, or None if no data."""
+        if not self._cfl_window:
+            return None
+        return sum(self._cfl_window) / len(self._cfl_window)
+
+    @property
+    def _avg_newton(self) -> typing.Optional[float]:
+        """Average Newton iterations over the recent window, or None if no data."""
+        if not self._newton_window:
+            return None
+        return sum(self._newton_window) / len(self._newton_window)
+
+    def _is_near_failed_size(self, dt: float, tolerance: float = 0.10) -> bool:
+        """
+        True if *dt* is within *tolerance* of a recently failed size **from below**.
+
+        We only guard against stepping into the failure zone from the safe side
+        (i.e., growing toward a previously failed size). A size that is already
+        *smaller* than a failed size is safe by definition.
+        """
         for failed_size in self.failed_step_sizes:
-            if abs(dt - failed_size) / failed_size < tolerance:
+            if 0.0 < (failed_size - dt) / failed_size < tolerance:
                 return True
         return False
 
     def _compute_performance_factor(self) -> float:
         """
-        Analyze recent performance metrics to compute an adaptive factor.
+        Derive a multiplicative adjustment factor from recent solver trends.
 
-        Returns a factor in (0, 1] where:
-        - 1.0 = excellent performance, allow normal growth
-        - <1.0 = concerning trends, be more conservative
+        Returns a value in (0.5, 1.0]. Values below 1.0 indicate the solver
+        is under stress and growth should be dampened.
         """
-        if self._recent_cfl_count < 3 and self._recent_newton_count < 3:
-            return 1.0
-
         factor = 1.0
 
-        # Check CFL trend (are we pushing limits?) - using rolling averages
-        if self._recent_cfl_count >= 3:
-            avg_cfl = self._recent_cfl_sum / self._recent_cfl_count
+        avg_cfl = self._avg_cfl
+        if avg_cfl is not None and len(self._cfl_window) >= 3:
+            # If we are consistently using >75 % of the CFL budget, be cautious.
             if avg_cfl > 0.75 * self.maximum_cfl:
                 factor *= 0.95
+            # Upward CFL trend within the window?
+            cfl_list = list(self._cfl_window)
+            if len(cfl_list) >= 4:
+                trend = cfl_list[-1] - cfl_list[0]
+                if trend > 0.15:
+                    factor *= 0.90
 
-            # Check if CFL is trending upward by comparing newest vs oldest in rolling window
-            if self._recent_cfl_count >= 4 and self._recent_cfl_oldest is not None:
-                # Get the newest CFL from recent_metrics
-                if len(self.recent_metrics) > 0:
-                    newest_metric = self.recent_metrics[-1]
-                    if newest_metric.cfl is not None:
-                        cfl_trend = newest_metric.cfl - (self._recent_cfl_oldest or 0.0)
-                        if cfl_trend > 0.15:
-                            factor *= 0.9
-
-        # Check Newton iteration trends (is solver struggling?) - using rolling averages
-        if self._recent_newton_count >= 3:
-            avg_iterations = self._recent_newton_sum / self._recent_newton_count
-            if avg_iterations > 8:
+        avg_newton = self._avg_newton
+        if avg_newton is not None and len(self._newton_window) >= 3:
+            if avg_newton > 8:
                 factor *= 0.85
-            elif self._recent_newton_count >= 3 and len(self.recent_metrics) >= 3:
-                # Check if last 3 are all > 10
-                recent_newtons = [
-                    m.newton_iterations
-                    for m in list(self.recent_metrics)[-3:]
-                    if m.newton_iterations is not None and m.success
-                ]
-                if len(recent_newtons) >= 3 and all(i > 10 for i in recent_newtons):
-                    factor *= 0.75  # Solver consistently struggling
+            # Are the last 3 iterations consistently high?
+            recent_newtons = list(self._newton_window)[-3:]
+            if len(recent_newtons) == 3 and all(n > 10 for n in recent_newtons):
+                factor *= 0.75
 
-        return max(factor, 0.5)  # We don't want to be too aggressive in reduction
+        return max(factor, 0.5)
 
     def _check_mbe_violations(
         self,
@@ -335,11 +351,9 @@ class Timer(StoreSerializable):
         total_relative_mbe: typing.Optional[float] = None,
     ) -> typing.Tuple[bool, typing.List[str]]:
         """
-        Check if any MBE limits are violated and collect violation messages.
+        Check if any MBE limits are violated.
 
-        :return: Tuple of (any_violated, message_list). If any_violated is False,
-            message_list will be empty. Otherwise message_list contains descriptions
-            of each violation.
+        :return: `(any_violated, message_list)`.
         """
         mbe_checks = [
             (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "abs oil MBE"),
@@ -357,27 +371,34 @@ class Timer(StoreSerializable):
                 continue
             if actual > limit:
                 messages.append(f"{label}: |{actual:.3e}| > {limit:.3e}")
-
-        return len(messages) > 0, messages
+        return bool(messages), messages
 
     def propose_step_size(self) -> float:
-        """Proposes the next time step size without updating state."""
+        """
+        Propose the next time step size without updating any internal state.
+
+        If the proposed size would exceed the remaining simulation time, it is
+        clamped to the remaining time. The minimum step size is honoured
+        unless the remaining time is already smaller than it.
+
+        :return: Proposed time step size in seconds.
+        """
         if self.use_constant_step_size:
             return self.initial_step_size
 
         dt = self.next_step_size
-        remaining_time = self.time_remaining
-        if dt > remaining_time:
+        remaining = self.time_remaining
+        if dt > remaining:
+            # Clamp to remaining time; honour minimum only if time allows it.
             return (
-                max(remaining_time, self.minimum_step_size)
-                if remaining_time >= self.minimum_step_size
-                else remaining_time
+                remaining
+                if remaining < self.minimum_step_size
+                else max(remaining, self.minimum_step_size)
             )
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                "Proposing time step of size %.6e for time step %d "
-                "at elapsed time %.4f",
+                "Proposing time step of size %.6e for step %d at elapsed time %.4f",
                 dt,
                 self.next_step,
                 self.elapsed_time,
@@ -406,43 +427,60 @@ class Timer(StoreSerializable):
         total_relative_mbe: typing.Optional[float] = None,
     ) -> float:
         """
-        Registers a rejected time step proposal and computes an intelligently adjusted time step size
-        based on the specific failure criteria encountered.
+        Register a rejected time step and compute an intelligently adjusted step
+        size based on the specific failure criteria encountered.
 
-        :param step_size: The step size that was rejected.
-        :param aggressive: Whether to use aggressive backoff (fallback if no specific info provided).
-        :param maximum_cfl_encountered: The maximum CFL number that caused rejection.
-        :param cfl_threshold: The CFL threshold that was exceeded.
-        :param newton_iterations: Number of Newton iterations attempted before failure.
-        :param maximum_saturation_change: The maximum saturation change encountered.
-        :param maximum_allowed_saturation_change: The allowed saturation change threshold.
-        :param maximum_pressure_change: The maximum pressure change encountered.
-        :param maximum_allowed_pressure_change: The allowed pressure change threshold.
-        :param absolute_oil_mbe: Absolute oil material balance error for this step (res ft³).
-        :param absolute_water_mbe: Absolute water material balance error for this step (res ft³).
-        :param absolute_gas_mbe: Absolute gas material balance error for this step (res ft³), including dissolved gas.
-        :param total_absolute_mbe: Sum of absolute phase MBEs (res ft³).
-        :param relative_oil_mbe: Oil MBE as a fraction of the previous-step oil pore volume.
-        :param relative_water_mbe: Water MBE as a fraction of the previous-step water pore volume.
-        :param relative_gas_mbe: Gas MBE as a fraction of the previous-step gas pore volume equivalent.
-        :param total_relative_mbe: Total MBE as a fraction of the previous-step total pore volume.
-        :return: The new/adjusted time step size in seconds.
+        Each diagnostic argument is used to derive a proportional backoff factor.
+        The most conservative factor across all active signals is selected and
+        applied to the current `next_step_size`.  When the result would fall
+        below the last known-good step size and the failure is not severe
+        (backoff factor ≥ 0.5), a conservative floor of
+        `last_successful_step_size * 0.90` is applied to avoid over-cutting.
+
+        :param step_size: The step size that was rejected (seconds).
+        :param aggressive: When *True*, the final factor is additionally capped
+            by `aggressive_backoff_factor`.  Intended for use after repeated
+            consecutive rejections.
+        :param maximum_cfl_encountered: Maximum CFL number observed during the
+            attempted step.
+        :param cfl_threshold: The CFL threshold that was active during the step.
+            Falls back to `maximum_cfl` when *None*.
+        :param newton_iterations: Number of Newton iterations attempted before
+            the transport solve failed or was deemed too expensive.
+        :param maximum_saturation_change: Maximum phase saturation change
+            encountered during the attempted step (fraction, 0-1).
+        :param maximum_allowed_saturation_change: The configured saturation
+            change limit that was violated.
+        :param maximum_pressure_change: Maximum absolute pressure change
+            encountered during the attempted step (psi).
+        :param maximum_allowed_pressure_change: The configured pressure change
+            limit that was violated (psi).
+        :param absolute_oil_mbe: Absolute oil material balance error (res ft³).
+        :param absolute_water_mbe: Absolute water material balance error (res ft³).
+        :param absolute_gas_mbe: Absolute gas material balance error (res ft³),
+            including dissolved gas contribution.
+        :param total_absolute_mbe: Sum of all absolute phase MBEs (res ft³).
+        :param relative_oil_mbe: Oil MBE as a fraction of the previous-step oil
+            pore volume.
+        :param relative_water_mbe: Water MBE as a fraction of the previous-step
+            water pore volume.
+        :param relative_gas_mbe: Gas MBE as a fraction of the previous-step gas
+            pore volume equivalent.
+        :param total_relative_mbe: Total MBE as a fraction of the previous-step
+            total pore volume.
+        :return: The new proposed time step size in seconds.
+        :raises TimingError: If the number of consecutive rejections has reached
+            `maximum_rejections`.
         """
         if self.rejection_count >= self.maximum_rejections:
             raise TimingError(
                 "Maximum number of consecutive time step rejections exceeded"
             )
 
-        # Warn when approaching rejection limit
         rejection_threshold = int(0.7 * self.maximum_rejections)
-        if (
-            self.rejection_count >= rejection_threshold
-            and self.rejection_count < self.maximum_rejections
-        ):
+        if rejection_threshold <= self.rejection_count < self.maximum_rejections:
             logger.warning(
-                "Time step rejection count (%d) is approaching "
-                "maximum allowed (%d). Consider adjusting simulation "
-                "parameters or initial conditions.",
+                "Time step rejection count (%d) is approaching maximum allowed (%d).",
                 self.rejection_count,
                 self.maximum_rejections,
             )
@@ -450,20 +488,17 @@ class Timer(StoreSerializable):
         if self.use_constant_step_size:
             return self.initial_step_size
 
-        # Store failed step size for memory
         self.failed_step_sizes.append(step_size)
-
-        # Record metrics
-        metrics = StepMetrics(
-            step_number=self.next_step,
-            step_size=step_size,
-            cfl=maximum_cfl_encountered,
-            newton_iterations=newton_iterations,
-            success=False,
+        self.recent_metrics.append(
+            StepMetrics(
+                step_number=self.next_step,
+                step_size=step_size,
+                cfl=maximum_cfl_encountered,
+                newton_iterations=newton_iterations,
+                success=False,
+            )
         )
-        self.recent_metrics.append(metrics)
 
-        # Compute backoff based on failure cause
         factor = self._compute_backoff_factor(
             maximum_cfl_encountered=maximum_cfl_encountered,
             cfl_threshold=cfl_threshold,
@@ -482,40 +517,67 @@ class Timer(StoreSerializable):
             total_relative_mbe=total_relative_mbe,
             aggressive=aggressive,
         )
-        self.next_step_size *= factor
+        raw_new_size = self.next_step_size * factor
 
-        # Warn when hitting minimum step size
-        if self.next_step_size < self.minimum_step_size:
+        # If the backoff brings us *below* the last
+        # successful size, don't go lower than a slight discount off that
+        # size. The physics at the current state may have changed, so we
+        # don't blindly reuse `last_successful_step_size`, but there's no
+        # reason to shrink beyond 90 % of it unless the failure was severe
+        # (factor < 0.5) or the last successful size itself was the rejected
+        # size (which means it is no longer reliable).
+        if (
+            self.last_successful_step_size > 0.0
+            and step_size > self.last_successful_step_size  # we grew and failed
+            and factor >= 0.5  # not a severe failure
+            and raw_new_size < self.last_successful_step_size
+        ):
+            # Prefer a slight discount off the last known-good size rather than
+            # an over-aggressive cut.
+            conservative_floor = self.last_successful_step_size * 0.90
+            raw_new_size = max(raw_new_size, conservative_floor)
+            logger.debug(
+                "Backoff floor applied: raw %.6e raised to conservative floor %.6e "
+                "(last successful: %.6e)",
+                self.next_step_size * factor,
+                raw_new_size,
+                self.last_successful_step_size,
+            )
+
+        if raw_new_size < self.minimum_step_size:
             logger.warning(
                 "Step size %.6e would be below minimum %.6e. Clamping to minimum.",
-                self.next_step_size,
+                raw_new_size,
                 self.minimum_step_size,
             )
-        self.next_step_size = max(self.next_step_size, self.minimum_step_size)
+        self.next_step_size = max(raw_new_size, self.minimum_step_size)
 
-        # Check if we're stuck at minimum step size (panic mode detection)
+        # Panic-mode detection: repeated failures at/near minimum
         if self.next_step_size <= self.minimum_step_size * 1.01:
             min_failures = sum(
                 1 for s in self.failed_step_sizes if s <= self.minimum_step_size * 1.1
             )
             if min_failures >= 3:
                 logger.error(
-                    "Repeated failures (%d) at or near minimum step size "
-                    "(%.6e). Simulation may be unstable.",
+                    "Repeated failures (%d) at or near minimum step size (%.6e). "
+                    "Simulation may be unstable.",
                     min_failures,
                     self.minimum_step_size,
                 )
 
-        # Update EMA to reflect the reduction
         self.ema_step_size = self.next_step_size
         self.last_step_failed = True
         self.rejection_count += 1
         self.steps_since_last_failure = 0
 
         logger.debug(
-            f"Time step of size {step_size} rejected for time step {self.next_step} "
-            f"at elapsed time {self.elapsed_time}. Backoff factor: {factor:.3f}, "
-            f"New size: {self.next_step_size:.6e}"
+            "Step size %.6e rejected (step %d, elapsed %.4fs). "
+            "Backoff factor: %.3f -> new size: %.6e",
+            step_size,
+            self.next_step,
+            self.elapsed_time,
+            factor,
+            self.next_step_size,
         )
         return self.next_step_size
 
@@ -540,221 +602,91 @@ class Timer(StoreSerializable):
         aggressive: bool = False,
     ) -> float:
         """
-        Compute an intelligent backoff factor based on the specific failure criteria.
-
-        Returns a factor in (0, 1] to multiply the step size by.
-        Smaller factors mean more aggressive reduction.
+        Compute the most conservative (smallest) backoff factor from all
+        failure signals.  Returns a value in (0, 1].
         """
-        factors = []
+        factors: typing.List[float] = []
 
-        # CFL-based backoff
-        if maximum_cfl_encountered is not None and cfl_threshold is not None:
-            cfl_limit = cfl_threshold if cfl_threshold > 0 else self.maximum_cfl
-            if maximum_cfl_encountered > cfl_limit:
-                # Proportional backoff based on how much we exceeded the limit
-                overshoot_ratio = maximum_cfl_encountered / cfl_limit
-
-                if overshoot_ratio > 2.0:
-                    # Severe CFL violation
-                    cfl_factor = 0.3
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "Severe CFL violation: %.3f > %.3f (ratio: %.6f)",
-                            maximum_cfl_encountered,
-                            cfl_limit,
-                            overshoot_ratio,
-                        )
-                elif overshoot_ratio > 1.5:
-                    # Moderate CFL violation
-                    cfl_factor = 0.5
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "Moderate CFL violation: %.3f > %.3f (ratio: %.6f)",
-                            maximum_cfl_encountered,
-                            cfl_limit,
-                            overshoot_ratio,
-                        )
-                else:
-                    # Mild CFL violation. Try to target the limit
-                    cfl_factor = (cfl_limit * 0.9) / maximum_cfl_encountered
-                    cfl_factor = max(cfl_factor, 0.6)  # Don't reduce too much
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "Mild CFL violation: %.3f > %.3f (ratio: %.6f)",
-                            maximum_cfl_encountered,
-                            cfl_limit,
-                            overshoot_ratio,
-                        )
-                factors.append(cfl_factor)
-
-        # Saturation change backoff
-        if (
-            maximum_saturation_change is not None
-            and maximum_allowed_saturation_change is not None
-            and maximum_saturation_change > maximum_allowed_saturation_change
-        ):
-            overshoot_ratio = (
-                maximum_saturation_change / maximum_allowed_saturation_change
-            )
-
-            if overshoot_ratio > 3.0:
-                # Very large saturation changes. Apply aggressive reduction
-                saturation_factor = 0.25
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Severe saturation change: %.4f > %.4f (ratio: %.6f)",
-                        maximum_saturation_change,
-                        maximum_allowed_saturation_change,
-                        overshoot_ratio,
-                    )
-            elif overshoot_ratio > 2.0:
-                # Large saturation changes
-                saturation_factor = 0.4
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Large saturation change: %.4f > %.4f (ratio: %.6f)",
-                        maximum_saturation_change,
-                        maximum_allowed_saturation_change,
-                        overshoot_ratio,
-                    )
+        # CFL
+        cfl_limit = (
+            cfl_threshold
+            if (cfl_threshold is not None and cfl_threshold > 0)
+            else self.maximum_cfl
+        )
+        if maximum_cfl_encountered is not None and maximum_cfl_encountered > cfl_limit:
+            ratio = maximum_cfl_encountered / cfl_limit
+            if ratio > 2.0:
+                factors.append(0.30)
+            elif ratio > 1.5:
+                factors.append(0.50)
             else:
-                # Moderate overshoot. Apply proportional reduction
-                saturation_factor = (
-                    maximum_allowed_saturation_change / maximum_saturation_change
-                )
-                saturation_factor = max(saturation_factor, 0.5)  # Don't reduce too much
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Moderate saturation change: %.4f > %.4f (ratio: %.6f)",
-                        maximum_saturation_change,
-                        maximum_allowed_saturation_change,
-                        overshoot_ratio,
-                    )
-            factors.append(saturation_factor)
+                factors.append(max((cfl_limit * 0.90) / maximum_cfl_encountered, 0.60))
 
-        # Pressure change backoff
-        if (
-            maximum_pressure_change is not None
-            and maximum_allowed_pressure_change is not None
-            and maximum_pressure_change > maximum_allowed_pressure_change
-        ):
-            overshoot_ratio = maximum_pressure_change / maximum_allowed_pressure_change
-
-            if overshoot_ratio > 3.0:
-                # Very large pressure changes
-                pressure_factor = 0.25
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Severe pressure change: %.4e > %.4e (ratio: %.6f)",
-                        maximum_pressure_change,
-                        maximum_allowed_pressure_change,
-                        overshoot_ratio,
-                    )
-            elif overshoot_ratio > 2.0:
-                # Large pressure changes
-                pressure_factor = 0.4
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Large pressure change: %.4e > %.4e (ratio: %.6f)",
-                        maximum_pressure_change,
-                        maximum_allowed_pressure_change,
-                        overshoot_ratio,
-                    )
+        # Saturation change
+        saturation_utilization = _utilization(
+            maximum_saturation_change, maximum_allowed_saturation_change
+        )
+        if saturation_utilization is not None and saturation_utilization > 1.0:
+            if saturation_utilization > 3.0:
+                factors.append(0.25)
+            elif saturation_utilization > 2.0:
+                factors.append(0.40)
             else:
-                # Moderate overshoot
-                pressure_factor = (
-                    maximum_allowed_pressure_change / maximum_pressure_change
-                )
-                pressure_factor = max(pressure_factor, 0.5)
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Moderate pressure change: %.4e > %.4e (ratio: %.6f)",
-                        maximum_pressure_change,
-                        maximum_allowed_pressure_change,
-                        overshoot_ratio,
-                    )
+                factors.append(max(1.0 / saturation_utilization, 0.50))
 
-            factors.append(pressure_factor)
+        # Pressure change
+        pressure_utilization = _utilization(
+            maximum_pressure_change, maximum_allowed_pressure_change
+        )
+        if pressure_utilization is not None and pressure_utilization > 1.0:
+            if pressure_utilization > 3.0:
+                factors.append(0.25)
+            elif pressure_utilization > 2.0:
+                factors.append(0.40)
+            else:
+                factors.append(max(1.0 / pressure_utilization, 0.50))
 
-        # Newton iteration failure backoff
+        # Newton iterations
         if newton_iterations is not None:
             if newton_iterations > 20:
-                # Solver really struggling. Apply aggressive reduction
-                newton_iteration_factor = 0.3
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Newton solver struggling severely: %d iterations",
-                        newton_iterations,
-                    )
-                factors.append(newton_iteration_factor)
+                factors.append(0.30)
             elif newton_iterations > 15:
-                # Solver struggling. Apply moderate reduction
-                newton_iteration_factor = 0.5
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Newton solver struggling: %d iterations", newton_iterations
-                    )
-                factors.append(newton_iteration_factor)
+                factors.append(0.50)
             elif newton_iterations > 10:
-                # Solver having some difficulty
-                newton_iteration_factor = 0.7
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Newton solver having difficulty: %d iterations",
-                        newton_iterations,
-                    )
-                factors.append(newton_iteration_factor)
+                factors.append(0.70)
 
-        # Compute backoff factors for each MBE violation
+        # MBE violations
         mbe_pairs = [
-            (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "absolute oil MBE"),
-            (absolute_water_mbe, self.maximum_absolute_water_mbe, "absolute water MBE"),
-            (absolute_gas_mbe, self.maximum_absolute_gas_mbe, "absolute gas MBE"),
-            (total_absolute_mbe, self.maximum_total_absolute_mbe, "total absolute MBE"),
-            (relative_oil_mbe, self.maximum_relative_oil_mbe, "relative oil MBE"),
-            (relative_water_mbe, self.maximum_relative_water_mbe, "relative water MBE"),
-            (relative_gas_mbe, self.maximum_relative_gas_mbe, "relative gas MBE"),
-            (total_relative_mbe, self.maximum_total_relative_mbe, "total relative MBE"),
+            (absolute_oil_mbe, self.maximum_absolute_oil_mbe),
+            (absolute_water_mbe, self.maximum_absolute_water_mbe),
+            (absolute_gas_mbe, self.maximum_absolute_gas_mbe),
+            (total_absolute_mbe, self.maximum_total_absolute_mbe),
+            (relative_oil_mbe, self.maximum_relative_oil_mbe),
+            (relative_water_mbe, self.maximum_relative_water_mbe),
+            (relative_gas_mbe, self.maximum_relative_gas_mbe),
+            (total_relative_mbe, self.maximum_total_relative_mbe),
         ]
-        for actual, limit, label in mbe_pairs:
-            if actual is None or limit is None:
-                continue
-            actual_abs = abs(actual)
-            if actual_abs > limit:
-                overshoot = actual_abs / limit
-                if overshoot > 3.0:
-                    mbe_factor = 0.4
-                elif overshoot > 1.5:
-                    mbe_factor = 0.6
+        for actual, limit in mbe_pairs:
+            u = _utilization(actual, limit)
+            if u is not None and u > 1.0:
+                if u > 3.0:
+                    factors.append(0.40)
+                elif u > 1.5:
+                    factors.append(0.60)
                 else:
-                    mbe_factor = max(limit / actual_abs * 0.9, 0.7)
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "MBE violation (%s): |%.3e| > %.3e (ratio %.2f), factor=%.3f",
-                        label,
-                        actual,
-                        limit,
-                        overshoot,
-                        mbe_factor,
-                    )
-                factors.append(mbe_factor)
+                    factors.append(max(0.90 / u, 0.70))
 
-        # If we have specific information, use the most conservative (smallest) factor
         if factors:
-            final_factor = min(factors)
+            final = min(factors)
+            if aggressive:
+                final = min(final, self.aggressive_backoff_factor)
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "Computed backoff factor: %.3f from %d criteria",
-                    final_factor,
-                    len(factors),
+                    "Backoff factor: %.3f (from %d criteria)", final, len(factors)
                 )
-            return self.aggressive_backoff_factor if aggressive else final_factor
+            return final
 
-        # Fallback to original behavior if no specific information provided
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(
-                "No specific failure information provided, using fallback backoff"
-            )
+        # Fallback when no diagnostic information is available
         return self.aggressive_backoff_factor if aggressive else self.backoff_factor
 
     def is_acceptable(
@@ -774,58 +706,80 @@ class Timer(StoreSerializable):
         relative_water_mbe: typing.Optional[float] = None,
         relative_gas_mbe: typing.Optional[float] = None,
         total_relative_mbe: typing.Optional[float] = None,
-        **kwargs: typing.Any,  # Just to ensure that any other kwargs passed dont cause on error (based on usage)
+        **kwargs: typing.Any,
     ) -> typing.Tuple[bool, str]:
         """
-        Determine if a time step is acceptable based on given criteria
+        Determine whether a completed time step meets all acceptance criteria.
 
-        :param maximum_cfl_encountered: The maximum CFL number encountered during the step.
-        :param cfl_threshold: The CFL threshold used during the step.
-        :param maximum_saturation_change: Maximum saturation change in the accepted step.
-        :param maximum_allowed_saturation_change: Maximum allowed saturation change threshold.
-        :param maximum_pressure_change: Maximum pressure change in the accepted step.
-        :param maximum_allowed_pressure_change: Maximum allowed pressure change threshold.
-        :param absolute_oil_mbe: Absolute oil MBE to check against `maximum_absolute_oil_mbe` (res ft³).
-        :param absolute_water_mbe: Absolute water MBE to check against `maximum_absolute_water_mbe` (res ft³).
-        :param absolute_gas_mbe: Absolute gas MBE to check against `maximum_absolute_gas_mbe` (res ft³).
-        :param total_absolute_mbe: Total absolute MBE to check against `maximum_total_absolute_mbe` (res ft³).
-        :param relative_oil_mbe: Relative oil MBE fraction to check against `maximum_relative_oil_mbe`.
-        :param relative_water_mbe: Relative water MBE fraction to check against `maximum_relative_water_mbe`.
-        :param relative_gas_mbe: Relative gas MBE fraction to check against `maximum_relative_gas_mbe`.
-        :param total_relative_mbe: Total relative MBE fraction to check against `maximum_total_relative_mbe`.
-        :param kwargs: Additional timer kwargs forwarded from `StepResult.timer_kwargs`; ignored.
-        :return: Tuple of (acceptable, error/message). The first item is True if the timestep is acceptable. Else, Flase.
+        Each argument is checked against its corresponding configured limit.
+        The first violated criterion causes an immediate `(False, message)`
+        return; subsequent criteria are not evaluated. When all criteria pass
+        `(True, 'Step acceptable')` is returned.
+
+        :param maximum_cfl_encountered: Maximum CFL number observed during the
+            step.  Checked against `cfl_threshold` (or `maximum_cfl` when
+            *cfl_threshold* is *None*).
+        :param cfl_threshold: The CFL threshold that was active during the step.
+        :param maximum_saturation_change: Maximum phase saturation change
+            encountered (fraction, 0-1).
+        :param maximum_allowed_saturation_change: Configured saturation change
+            limit.  Both this and *maximum_saturation_change* must be non-*None*
+            for the check to be active.
+        :param maximum_pressure_change: Maximum absolute pressure change
+            encountered (psi).
+        :param maximum_allowed_pressure_change: Configured pressure change limit
+            (psi).  Both this and *maximum_pressure_change* must be non-*None*
+            for the check to be active.
+        :param absolute_oil_mbe: Absolute oil MBE (res ft³) to check against
+            `maximum_absolute_oil_mbe`.
+        :param absolute_water_mbe: Absolute water MBE (res ft³) to check against
+            `maximum_absolute_water_mbe`.
+        :param absolute_gas_mbe: Absolute gas MBE (res ft³) to check against
+            `maximum_absolute_gas_mbe`.
+        :param total_absolute_mbe: Total absolute MBE (res ft³) to check against
+            `maximum_total_absolute_mbe`.
+        :param relative_oil_mbe: Relative oil MBE fraction to check against
+            `maximum_relative_oil_mbe`.
+        :param relative_water_mbe: Relative water MBE fraction to check against
+            `maximum_relative_water_mbe`.
+        :param relative_gas_mbe: Relative gas MBE fraction to check against
+            `maximum_relative_gas_mbe`.
+        :param total_relative_mbe: Total relative MBE fraction to check against
+            `maximum_total_relative_mbe`.
+        :param kwargs: Additional keyword arguments forwarded from
+            `StepResult.timer_context`; silently ignored.
+        :return: Tuple of `(acceptable, message)`.  *acceptable* is *True*
+            when the step passes all checks.  *message* describes the first
+            violated criterion, or `'Step acceptable'` on success.
         """
         cfl_limit = cfl_threshold if cfl_threshold is not None else self.maximum_cfl
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > cfl_limit:
             return (
                 False,
-                f"Maximum CFL ({cfl_limit}) violated. Maximum CFL encountered is {maximum_cfl_encountered}",
+                f"Maximum CFL ({cfl_limit}) violated. Encountered: {maximum_cfl_encountered}",
             )
 
-        if (
-            maximum_saturation_change is not None
-            and maximum_allowed_saturation_change is not None
-            and maximum_saturation_change > maximum_allowed_saturation_change
-        ):
+        saturation_utilization = _utilization(
+            maximum_saturation_change, maximum_allowed_saturation_change
+        )
+        if saturation_utilization is not None and saturation_utilization > 1.0:
             return (
                 False,
                 f"Maximum allowed saturation change ({maximum_allowed_saturation_change}) violated. "
-                "Maximum saturation change encountered is {maximum_saturation_change}",
+                f"Encountered: {maximum_saturation_change}",
             )
 
-        if (
-            maximum_pressure_change is not None
-            and maximum_allowed_pressure_change is not None
-            and maximum_pressure_change > maximum_allowed_pressure_change
-        ):
+        pressure_utilization = _utilization(
+            maximum_pressure_change, maximum_allowed_pressure_change
+        )
+        if pressure_utilization is not None and pressure_utilization > 1.0:
             return (
                 False,
                 f"Maximum allowed pressure change ({maximum_allowed_pressure_change}) violated. "
-                "Maximum pressure change encountered is {maximum_pressure_change}",
+                f"Encountered: {maximum_pressure_change}",
             )
 
-        mbe_violated, mbe_message_parts = self._check_mbe_violations(
+        mbe_violated, mbe_messages = self._check_mbe_violations(
             absolute_oil_mbe=absolute_oil_mbe,
             absolute_water_mbe=absolute_water_mbe,
             absolute_gas_mbe=absolute_gas_mbe,
@@ -836,8 +790,7 @@ class Timer(StoreSerializable):
             total_relative_mbe=total_relative_mbe,
         )
         if mbe_violated:
-            message = "MBE limits violated: " + "; ".join(mbe_message_parts)
-            return False, message
+            return False, "MBE limits violated: " + "; ".join(mbe_messages)
 
         return True, "Step acceptable"
 
@@ -862,376 +815,258 @@ class Timer(StoreSerializable):
         total_relative_mbe: typing.Optional[float] = None,
     ) -> float:
         """
-        Registers an accepted time step and computes the next time step size
-        based on criteria from the accepted step.
+        Register an accepted time step and compute the next proposed step size.
 
-        :param step_size: The time step size that was just accepted.
-        :param maximum_cfl_encountered: The maximum CFL number encountered during the step.
-        :param cfl_threshold: The CFL threshold used during the step.
-        :param newton_iterations: Number of Newton iterations taken (if applicable).
-        :param maximum_saturation_change: Maximum saturation change in the accepted step.
-        :param maximum_allowed_saturation_change: Maximum allowed saturation change threshold.
-        :param maximum_pressure_change: Maximum pressure change in the accepted step.
-        :param maximum_allowed_pressure_change: Maximum allowed pressure change threshold.
-        :param absolute_oil_mbe: Absolute oil material balance error for this step (res ft³).
-        :param absolute_water_mbe: Absolute water material balance error for this step (res ft³).
-        :param absolute_gas_mbe: Absolute gas material balance error for this step (res ft³), including dissolved gas.
-        :param total_absolute_mbe: Sum of absolute phase MBEs (res ft³).
-        :param relative_oil_mbe: Oil MBE as a fraction of the previous-step oil pore volume.
-        :param relative_water_mbe: Water MBE as a fraction of the previous-step water pore volume.
-        :param relative_gas_mbe: Gas MBE as a fraction of the previous-step gas pore volume equivalent.
-        :param total_relative_mbe: Total MBE as a fraction of the previous-step total pore volume.
-        :return: The next proposed time step size.
+        The next step size is derived by collecting adjustment factors from all
+        active diagnostic signals, separating them into *limiting* factors
+        (≤ 1.0, all applied) and *growth* factors (> 1.0, only the most
+        conservative applied). An additional easy-regime acceleration is
+        triggered when all utilization metrics are well below their limits and
+        the solver has had several consecutive successes, allowing fast geometric
+        growth toward `maximum_step_size`. The result is smoothed via an
+        exponential moving average controlled by `step_size_smoothing`.
+
+        :param step_size: The time step size that was just accepted (seconds).
+        :param maximum_cfl_encountered: Maximum CFL number observed during the
+            step.  Used to compute a CFL-proportional growth or limiting factor.
+        :param cfl_threshold: The CFL threshold that was active during the step.
+            Falls back to `maximum_cfl` when *None*.
+        :param newton_iterations: Number of Newton iterations taken by the
+            transport solver. High counts produce a limiting factor; very low
+            counts (< 4) after a cooldown period allow additional growth.
+        :param maximum_saturation_change: Maximum phase saturation change
+            encountered during the step (fraction, 0-1).
+        :param maximum_allowed_saturation_change: Configured saturation change
+            limit used to compute the utilization ratio.
+        :param maximum_pressure_change: Maximum absolute pressure change
+            encountered during the step (psi).
+        :param maximum_allowed_pressure_change: Configured pressure change limit
+            (psi) used to compute the utilization ratio.
+        :param absolute_oil_mbe: Absolute oil material balance error (res ft³).
+            Only used when `use_mbe_for_step_size` is *True*.
+        :param absolute_water_mbe: Absolute water material balance error (res ft³).
+            Only used when `use_mbe_for_step_size` is *True*.
+        :param absolute_gas_mbe: Absolute gas material balance error (res ft³),
+            including dissolved gas. Only used when `use_mbe_for_step_size`
+            is *True*.
+        :param total_absolute_mbe: Sum of all absolute phase MBEs (res ft³).
+            Only used when `use_mbe_for_step_size` is *True*.
+        :param relative_oil_mbe: Oil MBE as a fraction of the previous-step oil
+            pore volume. Only used when `use_mbe_for_step_size` is *True*.
+        :param relative_water_mbe: Water MBE as a fraction of the previous-step
+            water pore volume. Only used when `use_mbe_for_step_size` is *True*.
+        :param relative_gas_mbe: Gas MBE as a fraction of the previous-step gas
+            pore volume equivalent. Only used when `use_mbe_for_step_size`
+            is *True*.
+        :param total_relative_mbe: Total MBE as a fraction of the previous-step
+            total pore volume. Only used when `use_mbe_for_step_size` is *True*.
+        :return: The next proposed time step size in seconds.
+        :raises TimingError: If *step_size* exceeds the remaining simulation time,
+            which indicates a bug in the calling time-stepping logic.
         """
-        # Use small tolerance for floating point comparison as step sizes may slightly overshoot
         if step_size > (self.time_remaining + 1e-9):
             raise TimingError(
-                f"Step size {step_size} exceeds remaining time {self.time_remaining}. "
-                "This indicates a bug in the time stepping logic."
+                f"Step size {step_size} exceeds remaining time {self.time_remaining}."
             )
 
         if self.use_constant_step_size:
             return self.initial_step_size
 
-        # Advance time and step count
+        # Advance clocks
         self.elapsed_time += step_size
         self.step_size = step_size
+        self.last_successful_step_size = step_size
         self.step += 1
         self.steps_since_last_failure += 1
 
         # Record metrics
-        metrics = StepMetrics(
-            step_number=self.step,
-            step_size=step_size,
-            cfl=maximum_cfl_encountered,
-            newton_iterations=newton_iterations,
-            success=True,
+        self.recent_metrics.append(
+            StepMetrics(
+                step_number=self.step,
+                step_size=step_size,
+                cfl=maximum_cfl_encountered,
+                newton_iterations=newton_iterations,
+                success=True,
+            )
         )
-        self.recent_metrics.append(metrics)
 
-        # Update rolling statistics for performance tracking to avoid list comprehensions
+        # Update exact rolling windows
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > 0.0:
-            self._recent_cfl_sum += maximum_cfl_encountered
-            self._recent_cfl_count += 1
-            # Keep only last 5 values by removing oldest when exceeding window
-            if self._recent_cfl_count > 5:
-                # When we have more than 5, the oldest value needs to be removed from the sum
-                # We approximate by dividing the oldest value
-                if self._recent_cfl_oldest is not None:
-                    self._recent_cfl_sum -= self._recent_cfl_oldest
-                # Get the oldest value from metrics (5 steps back)
-                if len(self.recent_metrics) >= 5:
-                    old_metric = list(self.recent_metrics)[
-                        -6
-                    ]  # 6th from end (5 steps back)
-                    if old_metric.cfl is not None:
-                        self._recent_cfl_oldest = old_metric.cfl
-                self._recent_cfl_count = 5
-
+            self._cfl_window.append(maximum_cfl_encountered)
         if newton_iterations is not None and newton_iterations > 0:
-            self._recent_newton_sum += newton_iterations
-            self._recent_newton_count += 1
-            # Keep only last 5 values
-            if self._recent_newton_count > 5:
-                if self._recent_newton_oldest is not None:
-                    self._recent_newton_sum -= self._recent_newton_oldest
-                if len(self.recent_metrics) >= 5:
-                    old_metric = list(self.recent_metrics)[-6]
-                    if old_metric.newton_iterations is not None:
-                        self._recent_newton_oldest = old_metric.newton_iterations
-                self._recent_newton_count = 5
+            self._newton_window.append(newton_iterations)
 
-        # Start with current step size as base
-        dt = self.next_step_size
+        # Build a single consolidated growth factor.
+        # Strategy: collect one factor per "signal type", then take the
+        # *minimum* of the limiting signals and the *maximum* of the growth
+        # signals separately, then combine. This is more physically
+        # meaningful than chaining multiplications, which compounds noise.
+        limiting_factors: typing.List[float] = []  # ≤ 1.0 must honour all
+        growth_factors: typing.List[float] = []  # > 1.0 honour the most conservative
 
-        # Collect adjustment factors from various criteria
-        adjustment_factors = []
-
-        # CFL-based adjustment with safety margin
         maximum_cfl = cfl_threshold if cfl_threshold is not None else self.maximum_cfl
+
+        # CFL signal
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > 0.0:
             target_cfl = maximum_cfl * self.cfl_safety_margin
-            cfl_ratio = target_cfl / maximum_cfl_encountered
-
-            # Cap CFL-based growth to prevent wild jumps when CFL is very low
-            cfl_ratio = min(cfl_ratio, self.maximum_growth_per_step)
-
-            # Be more conservative if we were close to the limit
-            proximity_to_limit = maximum_cfl_encountered / maximum_cfl
-            if proximity_to_limit > 0.9:
-                # Very close to limit, we only decrease or maintain
-                cfl_factor = min(cfl_ratio, 1.0)
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "CFL very close to limit (%.2f%%), conservative growth",
-                        proximity_to_limit * 100,
-                    )
-            elif proximity_to_limit > 0.8:
-                # Close to limit, we need be cautious
-                cfl_factor = min(cfl_ratio, 1.1)
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "CFL close to limit (%.2f%%), cautious growth",
-                        proximity_to_limit * 100,
-                    )
-            else:
-                # Comfortable margin, we can allow normal growth
-                cfl_factor = cfl_ratio
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "CFL comfortable (%.2f%%), normal growth",
-                        proximity_to_limit * 100,
-                    )
-            adjustment_factors.append(("CFL", cfl_factor))
-
-        # Saturation change adjustment with intelligent scaling
-        if (
-            maximum_saturation_change is not None
-            and maximum_allowed_saturation_change is not None
-            and maximum_saturation_change > 0.0
-        ):
-            saturation_utilization = (
-                maximum_saturation_change / maximum_allowed_saturation_change
+            raw_cfl_factor = target_cfl / maximum_cfl_encountered
+            cfl_factor = min(raw_cfl_factor, self.maximum_growth_per_step)
+            proximity = maximum_cfl_encountered / maximum_cfl
+            if proximity > 0.90:
+                cfl_factor = min(cfl_factor, 1.00)
+            elif proximity > 0.80:
+                cfl_factor = min(cfl_factor, 1.10)
+            (limiting_factors if cfl_factor < 1.0 else growth_factors).append(
+                cfl_factor
             )
 
+        # Saturation signal
+        saturation_utilization = _utilization(
+            maximum_saturation_change, maximum_allowed_saturation_change
+        )
+        if saturation_utilization is not None and saturation_utilization > 0.0:
             if saturation_utilization > 0.95:
-                # Very close to limit. Reduce step size
-                saturation_factor = 0.85
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Saturation change very high (%.2f%%), reducing step",
-                        saturation_utilization * 100,
-                    )
+                limiting_factors.append(0.85)
             elif saturation_utilization > 0.85:
-                # Getting close, maintain or slightly reduce
-                saturation_factor = 0.95
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Saturation change high (%.2f%%), maintaining step",
-                        saturation_utilization * 100,
-                    )
-            elif saturation_utilization > 0.7:
-                # Moderate usage, allow modest growth
-                saturation_factor = 1.05
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Saturation change moderate (%.2f%%), modest growth",
-                        saturation_utilization * 100,
-                    )
-            elif saturation_utilization < 0.3:
-                # Very low usage, could grow more aggressively
-                saturation_factor = min(
-                    1.3,
-                    maximum_allowed_saturation_change / maximum_saturation_change * 0.8,
-                )
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Saturation change low (%.2f%%), allowing growth",
-                        saturation_utilization * 100,
-                    )
+                limiting_factors.append(0.95)
+            elif saturation_utilization > 0.70:
+                growth_factors.append(1.05)
+            elif saturation_utilization < 0.30:
+                growth_factors.append(min(1.30, (1.0 / saturation_utilization) * 0.80))
             else:
-                # Normal range. Apply proportional adjustment
-                saturation_factor = min(
-                    1.15,
-                    maximum_allowed_saturation_change / maximum_saturation_change * 0.9,
-                )
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Saturation change normal (%.2f%%), proportional growth",
-                        saturation_utilization * 100,
-                    )
-            adjustment_factors.append(("Saturation", saturation_factor))
+                growth_factors.append(min(1.15, (1.0 / saturation_utilization) * 0.90))
 
-        # Pressure change adjustment with intelligent scaling
-        if (
-            maximum_pressure_change is not None
-            and maximum_allowed_pressure_change is not None
-            and maximum_pressure_change > 0.0
-        ):
-            pressure_utilization = (
-                maximum_pressure_change / maximum_allowed_pressure_change
-            )
-
+        # Pressure signal
+        pressure_utilization = _utilization(
+            maximum_pressure_change, maximum_allowed_pressure_change
+        )
+        if pressure_utilization is not None and pressure_utilization > 0.0:
             if pressure_utilization > 0.95:
-                # Very close to limit. Reduce step size
-                pressure_factor = 0.85
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Pressure change very high (%.2f%%), reducing step",
-                        pressure_utilization * 100,
-                    )
+                limiting_factors.append(0.85)
             elif pressure_utilization > 0.85:
-                # Getting close. Maintain or slightly reduce
-                pressure_factor = 0.95
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Pressure change high (%.2f%%), maintaining step",
-                        pressure_utilization * 100,
-                    )
-            elif pressure_utilization > 0.7:
-                # Moderate usage. Allow modest growth
-                pressure_factor = 1.05
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Pressure change moderate (%.2f%%), modest growth",
-                        pressure_utilization * 100,
-                    )
-            elif pressure_utilization < 0.3:
-                # Very low usage, could grow more aggressively
-                pressure_factor = min(
-                    1.3, maximum_allowed_pressure_change / maximum_pressure_change * 0.8
-                )
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Pressure change low (%.2f%%), allowing growth",
-                        pressure_utilization * 100,
-                    )
+                limiting_factors.append(0.95)
+            elif pressure_utilization > 0.70:
+                growth_factors.append(1.05)
+            elif pressure_utilization < 0.30:
+                growth_factors.append(min(1.30, (1.0 / pressure_utilization) * 0.80))
             else:
-                # Normal range. Apply proportional adjustment
-                pressure_factor = min(
-                    1.15,
-                    maximum_allowed_pressure_change / maximum_pressure_change * 0.9,
-                )
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Pressure change normal (%.2f%%), proportional growth",
-                        pressure_utilization * 100,
-                    )
-            adjustment_factors.append(("Pressure", pressure_factor))
+                growth_factors.append(min(1.15, (1.0 / pressure_utilization) * 0.90))
 
-        # Performance-based factor from historical trends
-        performance_factor = self._compute_performance_factor()
-        if performance_factor < 1.0:
-            adjustment_factors.append(("Performance", performance_factor))
-            logger.debug(f"Performance trends suggest factor: {performance_factor:.3f}")
-
-        # Newton iteration-based adjustment
+        # Newton signal
         if newton_iterations is not None:
             if newton_iterations > 10:
-                newton_iteration_factor = 0.7
-                logger.debug(
-                    f"High Newton iterations ({newton_iterations}), reducing step"
-                )
-                adjustment_factors.append(("Newton", newton_iteration_factor))
+                limiting_factors.append(0.70)
             elif newton_iterations < 4 and self.steps_since_last_failure >= 3:
-                newton_iteration_factor = 1.2
-                logger.debug(
-                    f"Low Newton iterations ({newton_iterations}), allowing growth"
-                )
-                adjustment_factors.append(("Newton", newton_iteration_factor))
+                growth_factors.append(1.20)
 
-        # MBE-based step-size adjustment (only when opt-in flag is set)
+        # Historical performance signal
+        perf = self._compute_performance_factor()
+        if perf < 1.0:
+            limiting_factors.append(perf)
+
+        # MBE signal (optional)
         if self.use_mbe_for_step_size:
             mbe_accept_pairs = [
-                (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "absolute oil MBE"),
-                (
-                    absolute_water_mbe,
-                    self.maximum_absolute_water_mbe,
-                    "absolute water MBE",
-                ),
-                (absolute_gas_mbe, self.maximum_absolute_gas_mbe, "absolute gas MBE"),
-                (
-                    total_absolute_mbe,
-                    self.maximum_total_absolute_mbe,
-                    "total absolute MBE",
-                ),
-                (relative_oil_mbe, self.maximum_relative_oil_mbe, "relative oil MBE"),
-                (
-                    relative_water_mbe,
-                    self.maximum_relative_water_mbe,
-                    "relative water MBE",
-                ),
-                (relative_gas_mbe, self.maximum_relative_gas_mbe, "relative gas MBE"),
-                (
-                    total_relative_mbe,
-                    self.maximum_total_relative_mbe,
-                    "total relative MBE",
-                ),
+                (absolute_oil_mbe, self.maximum_absolute_oil_mbe),
+                (absolute_water_mbe, self.maximum_absolute_water_mbe),
+                (absolute_gas_mbe, self.maximum_absolute_gas_mbe),
+                (total_absolute_mbe, self.maximum_total_absolute_mbe),
+                (relative_oil_mbe, self.maximum_relative_oil_mbe),
+                (relative_water_mbe, self.maximum_relative_water_mbe),
+                (relative_gas_mbe, self.maximum_relative_gas_mbe),
+                (total_relative_mbe, self.maximum_total_relative_mbe),
             ]
-            for actual, limit, label in mbe_accept_pairs:
-                if actual is None or limit is None:
+            for actual, limit in mbe_accept_pairs:
+                u = _utilization(actual, limit)
+                if u is None:
                     continue
-                actual_abs = abs(actual)
-                utilization = actual_abs / limit if limit > 0 else 0.0
-                if utilization > 0.9:
-                    mbe_factor = 0.85
-                elif utilization > 0.75:
-                    mbe_factor = 0.95
-                elif utilization < 0.2:
-                    mbe_factor = min(1.2, limit / max(actual_abs, 1e-30) * 0.5)
-                else:
-                    mbe_factor = 1.0  # comfortable, no adjustment
-                if mbe_factor != 1.0:
-                    logger.debug(
-                        f"MBE accept adjustment ({label}): utilization={utilization:.2%}, factor={mbe_factor:.3f}"
-                    )
-                    adjustment_factors.append((f"MBE({label})", mbe_factor))
+                if u > 0.90:
+                    limiting_factors.append(0.85)
+                elif u > 0.75:
+                    limiting_factors.append(0.95)
+                elif u < 0.20:
+                    growth_factors.append(min(1.20, (1.0 / max(u, 1e-9)) * 0.50))
 
-        # Apply all adjustment factors
-        if adjustment_factors:
-            logger.debug(f"Applying {len(adjustment_factors)} adjustment factors:")
-            for name, factor in adjustment_factors:
-                logger.debug(f"  {name}: {factor:.3f}")
-                dt *= factor
+        # Combine: all limiting factors must apply; of growth factors only
+        # the most conservative (smallest) is used so we don't overshoot.
+        dt = self.next_step_size
 
-        # Apply ramp-up factor (only after cooldown period)
-        can_ramp_up = (
+        # Apply limiting factors (all must apply)
+        for f in limiting_factors:
+            dt *= f
+
+        # Apply the most conservative growth factor only (avoid compounding)
+        if growth_factors and not limiting_factors:
+            dt *= min(growth_factors)
+
+        # Ramp-up (only when limits are comfortably met)
+        can_ramp = (
             self.ramp_up_factor is not None
             and not self.last_step_failed
             and self.steps_since_last_failure >= self.growth_cooldown_steps
         )
-        if can_ramp_up:
-            # Only apply ramp-up if we're not pushing any limits
-            limits_ok = True
-            if maximum_cfl_encountered is not None and maximum_cfl > 0:
-                limits_ok &= (maximum_cfl_encountered / maximum_cfl) < 0.7
-            if (
-                maximum_saturation_change is not None
-                and maximum_allowed_saturation_change is not None
-            ):
-                limits_ok &= (
-                    maximum_saturation_change / maximum_allowed_saturation_change
-                ) < 0.7
-            if (
-                maximum_pressure_change is not None
-                and maximum_allowed_pressure_change is not None
-            ):
-                limits_ok &= (
-                    maximum_pressure_change / maximum_allowed_pressure_change
-                ) < 0.7
-
-            if limits_ok:
-                dt *= self.ramp_up_factor  # type: ignore
-                logger.debug(f"Applying ramp-up factor: {self.ramp_up_factor}")
-            else:
-                logger.debug("Ramp-up suppressed: too close to limits")
-
-        # Limit growth rate relative to current step
-        max_allowed_growth = self.step_size * self.maximum_growth_per_step
-        if dt > max_allowed_growth:
-            logger.debug(f"Capping growth from {dt:.6e} to {max_allowed_growth:.6e}")
-            dt = max_allowed_growth
-
-        # Check if we're approaching a previously failed step size
-        if self._is_near_failed_size(dt):
-            dt *= 0.8  # Be more conservative near failure zones
-            logger.debug(
-                f"Step size {dt:.6e} is near a previously failed size, reducing conservatively"
+        if can_ramp:
+            all_comfy = all(
+                u is None or u < 0.70
+                for u in (
+                    _utilization(maximum_cfl_encountered, maximum_cfl),
+                    saturation_utilization,
+                    pressure_utilization,
+                )
             )
+            if all_comfy:
+                dt *= self.ramp_up_factor  # type: ignore
 
-        # Enforce absolute bounds
+        # Easy-regime accelerated growth
+        # When *all* utilisation metrics are well below their limits and we
+        # have had several consecutive successes, grow more aggressively
+        # toward maximum_step_size instead of being held back by the default
+        # maximum_growth_per_step cap. This significantly reduces the number
+        # of steps in "easy" parts of the simulation.
+        easy_regime = (
+            self.steps_since_last_failure >= self.growth_cooldown_steps
+            and not limiting_factors
+            and all(
+                u is None or u < 0.30
+                for u in (
+                    _utilization(maximum_cfl_encountered, maximum_cfl),
+                    saturation_utilization,
+                    pressure_utilization,
+                )
+            )
+        )
+        if easy_regime:
+            # Geometric approach toward maximum_step_size
+            gap = self.maximum_step_size - dt
+            if gap > 0.0:
+                dt += gap * 0.50  # close half the gap each step
+                logger.debug(
+                    "Easy regime: geometric growth toward max step size -> %.6e", dt
+                )
+
+        # Hard caps
         dt = min(dt, self.maximum_step_size)
+        if not easy_regime:
+            # Normal regime: honour growth-rate cap
+            dt = min(dt, self.step_size * self.maximum_growth_per_step)
         dt = max(dt, self.minimum_step_size)
 
-        # Apply smoothing via EMA
-        # Initialize EMA on first step (more robust than checking == 0.0)
-        if self.step == 0:
+        # Failure-zone avoidance
+        if self._is_near_failed_size(dt):
+            dt *= 0.85
+            dt = max(dt, self.minimum_step_size)
+            logger.debug("Failure-zone avoidance: reduced proposed size to %.6e", dt)
+
+        # EMA smoothing
+        # Formula:  ema = (1 - α) * ema_prev + α * dt
+        # α = step_size_smoothing; 0 -> no change (pure old EMA),  1 -> no smoothing.
+        # At α = 0.2 the response weight is 20 % new / 80 % history (smooth).
+        # At α = 1.0 the EMA equals the raw proposal (no smoothing).
+        if self.step == 1:
             self.ema_step_size = dt
         else:
-            self.ema_step_size = (
-                self.step_size_smoothing * self.ema_step_size
-                + (1 - self.step_size_smoothing) * dt
-            )
+            alpha = self.step_size_smoothing
+            self.ema_step_size = (1.0 - alpha) * self.ema_step_size + alpha * dt
 
         self.next_step_size = self.ema_step_size
 
@@ -1240,35 +1075,16 @@ class Timer(StoreSerializable):
         self.rejection_count = 0
 
         logger.debug(
-            f"Time step of size {step_size:.6e} accepted for time step {self.step} "
-            f"at elapsed time {self.elapsed_time:.4f}s. Next size: {self.next_step_size:.6e}"
+            "Step %.6e accepted (step %d, elapsed %.4fs). Next proposed: %.6e",
+            step_size,
+            self.step,
+            self.elapsed_time,
+            self.next_step_size,
         )
         return self.next_step_size
 
     def dump_state(self) -> TimerState:
-        """
-        Serialize the current timer state to a dictionary.
-
-        Returns all the internal state needed to reconstruct this timer's
-        exact state at this point in time. Useful for checkpointing, saving
-        simulation progress, or debugging.
-
-        :return: `TimerState` dictionary containing all timer state variables
-
-        Example:
-        ```python
-        timer = Timer(initial_step_size=0.1, simulation_time=1000.0)
-        # ... run simulation for a while ...
-
-        # Save timer state
-        timer_state = timer.dump_state()
-        save_to_file(timer_state, "timer_state.json")
-
-        # Later, restore timer
-        timer_state = load_from_file("timer_state.json")
-        timer = Timer.load_state(timer_state)
-        ```
-        """
+        """Serialize the current timer state to a dictionary."""
         return {
             "initial_step_size": self.initial_step_size,
             "maximum_step_size": self.maximum_step_size,
@@ -1304,36 +1120,17 @@ class Timer(StoreSerializable):
             "last_step_failed": self.last_step_failed,
             "rejection_count": self.rejection_count,
             "steps_since_last_failure": self.steps_since_last_failure,
+            "last_successful_step_size": self.last_successful_step_size,
             "recent_metrics": [
-                typing.cast(StepMetricsDict, attrs.asdict(metric))
-                for metric in self.recent_metrics
+                typing.cast(StepMetricsDict, attrs.asdict(m))
+                for m in self.recent_metrics
             ],
             "failed_step_sizes": list(self.failed_step_sizes),
         }
 
     @classmethod
     def load_state(cls, state: TimerState) -> Self:
-        """
-        Reconstruct a timer from a previously saved timer state.
-
-        Creates a new timer instance and restores all internal state from
-        the provided dictionary. This is the inverse of `dump_state()`.
-
-        :param state: `TimerState` dictionary containing timer state (from `dump_state()`)
-        :return: A new timer instance with the restored state
-        :raises `ValidationError`: If state dictionary is invalid or incomplete
-
-        Example:
-        ```python
-        # Save timer state during simulation
-        timer_state = timer.dump_state()
-
-        # Later, restore and continue
-        timer = Timer.load_state(timer_state)
-        for state in run(model, timer, wells):
-            process(state)
-        ```
-        """
+        """Reconstruct a timer from a previously saved state dictionary"""
         required_keys = {
             "initial_step_size",
             "maximum_step_size",
@@ -1343,9 +1140,9 @@ class Timer(StoreSerializable):
             "step",
             "step_size",
         }
-        missing_keys = required_keys - set(state.keys())
-        if missing_keys:
-            raise ValidationError(f"Timer state missing required keys: {missing_keys}")
+        missing = required_keys - set(state.keys())
+        if missing:
+            raise ValidationError(f"Timer state missing required keys: {missing}")
 
         params = {
             "initial_step_size": state["initial_step_size"],
@@ -1358,62 +1155,70 @@ class Timer(StoreSerializable):
             "backoff_factor": state.get("backoff_factor", 0.5),
             "aggressive_backoff_factor": state.get("aggressive_backoff_factor", 0.25),
             "maximum_steps": state.get("maximum_steps"),
-            "maximum_absolute_oil_mbe": state.get("maximum_absolute_oil_mbe", None),
-            "maximum_absolute_water_mbe": state.get("maximum_absolute_water_mbe", None),
-            "maximum_absolute_gas_mbe": state.get("maximum_absolute_gas_mbe", None),
-            "maximum_total_absolute_mbe": state.get("maximum_total_absolute_mbe", None),
-            "maximum_relative_oil_mbe": state.get("maximum_relative_oil_mbe", None),
-            "maximum_relative_water_mbe": state.get("maximum_relative_water_mbe", None),
-            "maximum_relative_gas_mbe": state.get("maximum_relative_gas_mbe", None),
-            "maximum_total_relative_mbe": state.get("maximum_total_relative_mbe", None),
+            "maximum_absolute_oil_mbe": state.get("maximum_absolute_oil_mbe"),
+            "maximum_absolute_water_mbe": state.get("maximum_absolute_water_mbe"),
+            "maximum_absolute_gas_mbe": state.get("maximum_absolute_gas_mbe"),
+            "maximum_total_absolute_mbe": state.get("maximum_total_absolute_mbe"),
+            "maximum_relative_oil_mbe": state.get("maximum_relative_oil_mbe"),
+            "maximum_relative_water_mbe": state.get("maximum_relative_water_mbe"),
+            "maximum_relative_gas_mbe": state.get("maximum_relative_gas_mbe"),
+            "maximum_total_relative_mbe": state.get("maximum_total_relative_mbe"),
             "use_mbe_for_step_size": state.get("use_mbe_for_step_size", False),
             "maximum_rejections": state.get("maximum_rejections", 10),
-            "maximum_growth_per_step": state.get("maximum_growth_per_step", 1.5),
-            "step_size_smoothing": state.get("step_size_smoothing", 0.7),
+            "maximum_growth_per_step": state.get("maximum_growth_per_step", 1.3),
+            "step_size_smoothing": state.get("step_size_smoothing", 0.2),
             "growth_cooldown_steps": state.get("growth_cooldown_steps", 5),
-            "failure_memory_window": state.get("failure_memory_window", 10),
-            "metrics_history_size": state.get("metrics_history_size", 20),
+            "failure_memory_window": state.get("failure_memory_window", 5),
+            "metrics_history_size": state.get("metrics_history_size", 10),
         }
-        timer = cls(**params)  # type: ignore
+        timer = cls(**params)
 
-        # Restore runtime state (use `object.__setattr__` just in case `Timer` is frozen)
-        object.__setattr__(timer, "elapsed_time", state["elapsed_time"])
-        object.__setattr__(timer, "step", state["step"])
-        object.__setattr__(timer, "step_size", state["step_size"])
-        object.__setattr__(
-            timer, "next_step_size", state.get("next_step_size", state["step_size"])
-        )
-        object.__setattr__(
-            timer, "ema_step_size", state.get("ema_step_size", state["step_size"])
-        )
-        object.__setattr__(
-            timer, "last_step_failed", state.get("last_step_failed", False)
-        )
-        object.__setattr__(timer, "rejection_count", state.get("rejection_count", 0))
-        object.__setattr__(
-            timer,
-            "steps_since_last_failure",
-            state.get("steps_since_last_failure", 0),
-        )
+        for attr, key, default in [
+            ("elapsed_time", "elapsed_time", 0.0),
+            ("step", "step", 0),
+            ("step_size", "step_size", 0.0),
+            ("next_step_size", "next_step_size", state["step_size"]),
+            ("ema_step_size", "ema_step_size", state["step_size"]),
+            ("last_step_failed", "last_step_failed", False),
+            ("rejection_count", "rejection_count", 0),
+            ("steps_since_last_failure", "steps_since_last_failure", 0),
+            (
+                "last_successful_step_size",
+                "last_successful_step_size",
+                state["step_size"],
+            ),
+        ]:
+            object.__setattr__(timer, attr, state.get(key, default))
 
-        # Restore history
-        recent_metrics_data = state.get("recent_metrics", [])
         recent_metrics = deque(
-            [StepMetrics(**metric_data) for metric_data in recent_metrics_data],
+            [StepMetrics(**m) for m in state.get("recent_metrics", [])],
             maxlen=timer.metrics_history_size,
         )
         object.__setattr__(timer, "recent_metrics", recent_metrics)
 
-        failed_step_sizes_data = state.get("failed_step_sizes", [])
         failed_step_sizes = deque(
-            failed_step_sizes_data, maxlen=timer.failure_memory_window
+            state.get("failed_step_sizes", []),
+            maxlen=timer.failure_memory_window,
         )
         object.__setattr__(timer, "failed_step_sizes", failed_step_sizes)
 
+        # Rebuild rolling windows from recent_metrics history
+        cfl_window: deque = deque(maxlen=timer.metrics_history_size)
+        newton_window: deque = deque(maxlen=timer.metrics_history_size)
+        for m in recent_metrics:
+            if m.success:
+                if m.cfl is not None and m.cfl > 0.0:
+                    cfl_window.append(m.cfl)
+                if m.newton_iterations is not None and m.newton_iterations > 0:
+                    newton_window.append(m.newton_iterations)
+        object.__setattr__(timer, "_cfl_window", cfl_window)
+        object.__setattr__(timer, "_newton_window", newton_window)
+
         logger.debug(
-            f"Timer state loaded: step {timer.step}, "
-            f"elapsed time {timer.elapsed_time:.4f}s, "
-            f"step size {timer.step_size:.6f}s"
+            "Timer state loaded: step %d, elapsed %.4fs, step_size %.6e",
+            timer.step,
+            timer.elapsed_time,
+            timer.step_size,
         )
         return timer
 
@@ -1422,5 +1227,4 @@ class Timer(StoreSerializable):
 
     @classmethod
     def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        data = typing.cast(TimerState, data)
-        return cls.load_state(data)
+        return cls.load_state(typing.cast(TimerState, data))

@@ -399,7 +399,7 @@ pvt_tables = bores.PVTTables.from_dataset(
     pvt_dataset, interpolation_method="linear", clamps=False
 )
 
-# Build Reservoir Model
+# Build reservoir model
 model = bores.reservoir_model(
     grid_shape=grid_shape,
     cell_dimension=cell_dimension,
@@ -589,7 +589,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="si",
+    scheme="impes",
     output_frequency=1,
     pressure_solver="direct",
     transport_solver="direct",
@@ -650,7 +650,7 @@ states = list(
     bores.monitor(
         run,
         # on_step_accepted=diagnostic,
-        # monitor=bores.MonitorConfig(use_tqdm=True, use_rich=False),
+        # monitor=bores.Monitor(use_rich=False),
     )
 )
 final = states[-1]

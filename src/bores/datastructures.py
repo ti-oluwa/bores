@@ -80,7 +80,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         self._shape: ShapeT = shape
         self._ndim: int = len(shape)
         self._dtype = dtype
-        self._default: DType = dtype(default)  # type: ignore
+        self._default: DType = dtype(default)
         self._data: dict[ShapeT, DType] = {}
 
         if data is not None:
@@ -115,7 +115,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         """
         self._validate_key(key)
         self._check_bounds(key)
-        cast: DType = self._dtype(value)  # type: ignore
+        cast: DType = self._dtype(value)
         if cast == self._default:
             self._data.pop(key, None)
         else:
@@ -176,7 +176,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
             return False
 
         try:
-            self._validate_key(key)  # type: ignore
+            self._validate_key(key)
         except KeyError:
             return False
         return key in self._data
@@ -249,7 +249,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         )
         for k, v in self._data.items():
             result[k] = v * scalar
-        return result  # type: ignore[return-value]
+        return result  # type: ignore[return-value]   # ty:ignore[invalid-return-type]
 
     def __rmul__(self, scalar: typing.Union[float, np.floating], /) -> Self:
         """
@@ -297,7 +297,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
                     f"1D dot product requires equal lengths, "
                     f"got {self._shape[0]} and {other._shape[0]}"
                 )
-            acc: DType = self._dtype(0)  # type: ignore
+            acc: DType = self._dtype(0)
             for (i,), v1 in self._data.items():
                 if (i,) in other._data:
                     acc = self._dtype(acc + v1 * other._data[(i,)])  # type: ignore
@@ -316,7 +316,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
             for (i,), v1 in self._data.items():
                 for (i2, j), v2 in other._data.items():
                     if i == i2:
-                        result[(j,)] = result[(j,)] + v1 * v2  # type: ignore
+                        result[(j,)] = result[(j,)] + v1 * v2
             return result
 
         # 2D @ 1D: (n, m) @ (m,) to (n,)
@@ -348,7 +348,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
             for (i, k1), v1 in self._data.items():
                 for (k2, j), v2 in other._data.items():
                     if k1 == k2:
-                        result[(i, j)] = result[(i, j)] + v1 * v2  # type: ignore
+                        result[(i, j)] = result[(i, j)] + v1 * v2
             return result
 
         # ND @ ND: batched contraction, delegate to NumPy
@@ -366,7 +366,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         )
         for idx in zip(*np.nonzero(dense_result != self._default)):
             key = tuple(int(i) for i in idx)
-            result[key] = self._dtype(dense_result[key])  # type: ignore
+            result[key] = self._dtype(dense_result[key])
         return result
 
     def __truediv__(self, scalar: typing.Union[float, np.floating], /) -> Self:
@@ -389,7 +389,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         )
         for k, v in self._data.items():
             result[k] = v / scalar
-        return result  # type: ignore[return-value]
+        return result  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
     def __pow__(self, exponent: typing.Union[float, np.floating], /) -> Self:
         """
@@ -410,7 +410,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         )
         for k, v in self._data.items():
             result[k] = v**exponent
-        return result  # type: ignore[return-value]
+        return result  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
     def __iadd__(self, other: "SparseTensor[DType, ShapeT]", /) -> Self:
         """
@@ -519,7 +519,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
             if v == 0:
                 raise ZeroDivisionError(f"Cannot invert zero entry at {k}")
             result[k] = self._dtype(1) / v  # type: ignore
-        return result  # type: ignore[return-value]
+        return result  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
     def __neg__(self) -> Self:
         """
@@ -532,7 +532,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         )
         for k, v in self._data.items():
             result[k] = -v
-        return result  # type: ignore[return-value]
+        return result  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
     def __abs__(self) -> Self:
         """
@@ -550,11 +550,11 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         )
 
         for k, v in self._data.items():
-            abs_v = self._dtype(abs(v))  # type: ignore
+            abs_v = self._dtype(abs(v))
             if abs_v != self._default:
                 result[k] = abs_v
 
-        return result  # type: ignore[return-value]
+        return result  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
     def __array__(self, dtype: typing.Optional[npt.DTypeLike] = None):
         return self.array(dtype=dtype)
@@ -659,7 +659,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         if default is None:
             return self._data.get(key, self._default)
 
-        cast_default: DType = self._dtype(default)  # type: ignore
+        cast_default: DType = self._dtype(default)
         return self._data.get(key, cast_default)
 
     def update(
@@ -694,8 +694,8 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
 
         def _build(dim: int, prefix: ShapeT) -> list:
             if dim == self._ndim:
-                return self._data.get(prefix, self._default)  # type: ignore[return-value]
-            return [_build(dim + 1, prefix + (i,)) for i in range(self._shape[dim])]  # type: ignore[return-value]
+                return self._data.get(prefix, self._default)  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
+            return [_build(dim + 1, prefix + (i,)) for i in range(self._shape[dim])]  # type: ignore[return-value]  # ty:ignore[invalid-argument-type]
 
         return _build(0, ())  # type: ignore
 
@@ -733,9 +733,9 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         """
         Sum of all elements (including implicit default entries).
         """
-        acc: DType = self._dtype(0)  # type: ignore
+        acc: DType = self._dtype(0)
         for v in self._data.values():
-            acc = self._dtype(acc + v)  # type: ignore
+            acc = self._dtype(acc + v)
 
         total_size = int(np.prod(self._shape))
         missing = total_size - len(self._data)
@@ -748,16 +748,16 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         """
         Sum ignoring NaNs (including implicit default entries).
         """
-        acc: DType = self._dtype(0)  # type: ignore
+        acc: DType = self._dtype(0)
         for v in self._data.values():
             if not np.isnan(v):
-                acc = self._dtype(acc + v)  # type: ignore
+                acc = self._dtype(acc + v)
 
         total_size = int(np.prod(self._shape))
         missing = total_size - len(self._data)
 
         if not np.isnan(self._default):
-            acc = self._dtype(acc + missing * self._default)  # type: ignore
+            acc = self._dtype(acc + missing * self._default)
         return acc
 
     def mean(self) -> DType:
@@ -776,21 +776,21 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         total_size = int(np.prod(self._shape))
 
         count = 0
-        acc: DType = self._dtype(0)  # type: ignore
+        acc: DType = self._dtype(0)
 
         for v in self._data.values():
             if not np.isnan(v):
-                acc = self._dtype(acc + v)  # type: ignore
+                acc = self._dtype(acc + v)
                 count += 1
 
         missing = total_size - len(self._data)
 
         if not np.isnan(self._default):
-            acc = self._dtype(acc + missing * self._default)  # type: ignore
+            acc = self._dtype(acc + missing * self._default)
             count += missing
 
         if count == 0:
-            return self._dtype(np.nan)  # type: ignore
+            return self._dtype(np.nan)
 
         return acc / count  # type: ignore
 
@@ -806,7 +806,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         if not values:
             raise ValueError("min() of an empty tensor cannot be evaluated")
 
-        return self._dtype(min(values))  # type: ignore
+        return self._dtype(min(values))
 
     def max(self) -> DType:
         """
@@ -820,7 +820,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         if not values:
             raise ValueError("max() of an empty tensor cannot be evaluated")
 
-        return self._dtype(max(values))  # type: ignore
+        return self._dtype(max(values))
 
     def nanmin(self) -> DType:
         """
@@ -832,9 +832,9 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
             values.append(self._default)
 
         if not values:
-            return self._dtype(np.nan)  # type: ignore
+            return self._dtype(np.nan)
 
-        return self._dtype(min(values))  # type: ignore
+        return self._dtype(min(values))
 
     def nanmax(self) -> DType:
         """
@@ -846,9 +846,9 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
             values.append(self._default)
 
         if not values:
-            return self._dtype(np.nan)  # type: ignore
+            return self._dtype(np.nan)
 
-        return self._dtype(max(values))  # type: ignore
+        return self._dtype(max(values))
 
     def abs(self) -> Self:
         """
@@ -1022,7 +1022,7 @@ class Rates(Serializable, typing.Generic[DType, ShapeT]):
             oil=self.oil.abs(),
             water=self.water.abs(),
             gas=self.gas.abs(),
-        )
+        )  # ty:ignore[invalid-return-type]
 
 
 @attrs.frozen(slots=True)

@@ -889,8 +889,8 @@ class StateStream(typing.Generic[NDimension]):
         :return: True if state should be saved, False otherwise
         """
         if not self._uses_save_func:
-            return self.save  # type: ignore[return-value]
-        return self.save(state)  # type: ignore[call-arg]
+            return self.save  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
+        return self.save(state)  # type: ignore[call-arg]  # ty:ignore[call-non-callable]
 
     def _should_flush(self) -> bool:
         """
@@ -1034,8 +1034,8 @@ class StateStream(typing.Generic[NDimension]):
             memory_usage=batch_memory_usage,
         )
         if self.background_io and self._io_queue is not None:
-            progress["io_queue_size"] = self._io_queue.qsize()  # type: ignore[typeddict-unknown-key]
-            progress["io_thread_alive"] = (  # type: ignore[typeddict-unknown-key]
+            progress["io_queue_size"] = self._io_queue.qsize()  # type: ignore[typeddict-unknown-key]  # ty:ignore[invalid-key]
+            progress["io_thread_alive"] = (  # type: ignore[typeddict-unknown-key]  # ty:ignore[invalid-key]
                 self._io_thread.is_alive() if self._io_thread else False
             )
         return progress

@@ -252,7 +252,7 @@ def validate(
     _validate_bubble_point(fluid_properties, config, report)
     _validate_transmissibility(model, report)
     _validate_pore_volume_distribution(model, report)
-    _validate_capillary_pressure_sign(config, report)
+    _validate_capillary_pressure_sign(config, rock_properties, report)
 
     if emit_log:
         report.log()
@@ -1300,7 +1300,9 @@ def _validate_pore_volume_distribution(
         )
 
 
-def _validate_capillary_pressure_sign(config: Config, report: ValidationReport) -> None:
+def _validate_capillary_pressure_sign(
+    config: Config, rock_properties: RockProperties, report: ValidationReport
+) -> None:
     """
     Verify the capillary pressure sign convention in the rock-fluid tables.
 
@@ -1313,6 +1315,7 @@ def _validate_capillary_pressure_sign(config: Config, report: ValidationReport) 
     a correctly oriented water-wet / gas-oil table.
 
     :param config: Simulation config carrying the rock-fluid tables.
+    :param rock_properties: Rock properties containing residual saturation grids.
     :param report: Report to append issues to.
     """
     check = "capillary_pressure_sign"
@@ -1331,10 +1334,14 @@ def _validate_capillary_pressure_sign(config: Config, report: ValidationReport) 
             water_saturation=probe_water_saturation,
             oil_saturation=probe_oil_saturation,
             gas_saturation=probe_gas_saturation,
+            irreducible_water_saturation=rock_properties.irreducible_water_saturation_grid.mean(),
+            residual_oil_saturation_water=rock_properties.residual_oil_saturation_water_grid.mean(),
+            residual_oil_saturation_gas=rock_properties.residual_oil_saturation_gas_grid.mean(),
+            residual_gas_saturation=rock_properties.residual_gas_saturation_grid.mean(),
         )
 
-        pcow = float(np.atleast_1d(capillary_pressures["oil_water"])[0])
-        pcgo = float(np.atleast_1d(capillary_pressures["gas_oil"])[0])
+        pcow = float(capillary_pressures["oil_water"])
+        pcgo = float(capillary_pressures["gas_oil"])
 
         if pcow < -1.0:
             report.warn(

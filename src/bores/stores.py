@@ -583,7 +583,7 @@ def _get_index_from_group_name(name: str) -> typing.Optional[int]:
 
 
 """
-DataStore with flattened entry layout.
+`DataStore` with flattened entry layout.
 
 **Encoding contract**
 Path segments are percent-encoded so that the separator character (``->``,
@@ -616,7 +616,7 @@ collide after encoding.
 
 
 _SEP = "\u2192"  # -> U+2192  RIGHTWARDS ARROW — path segment separator
-_ESC = "%"  # percent   — escape character
+_ESC = "%"  # percent  — escape character
 
 _SEP_ENCODED = "%E2%86%92"
 _ESC_ENCODED = "%25"
@@ -695,7 +695,7 @@ def _flatten(
             out_arrays[flat_key] = value
             continue
 
-        # Convert numpy scalars to Python native ---
+        # Convert numpy scalars to Python native
         if isinstance(value, (np.integer, np.floating)):
             out_scalars[flat_key] = value.item()
             continue

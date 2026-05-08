@@ -26,13 +26,13 @@ from bores.types import ThreeDimensions
 from bores.utils import _close_iter
 from bores.wells.base import InjectionWell, ProductionWell
 
-__all__ = ["MonitorConfig", "RunStats", "StepDiagnostics", "monitor"]
+__all__ = ["Monitor", "RunStats", "StepDiagnostics", "monitor"]
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class MonitorConfig:
+class Monitor:
     """
     Configuration for the simulation monitor.
 
@@ -73,7 +73,7 @@ class MonitorConfig:
     total and phase absolute and relative material balance errors.
     """
 
-    color_theme: str = "dark"
+    theme: str = "dark"
     """
     Color theme for the Rich panel.
 
@@ -816,6 +816,7 @@ def build_rich_panel(
     show_wells: bool,
     show_mbe: bool,
     theme: str,
+    description: typing.Optional[str] = None,
 ) -> Panel:
     """
     Build the Rich renderable for the live monitor panel.
@@ -861,7 +862,7 @@ def build_rich_panel(
     filled = int(bar_width * percentage / 100)
     bar = f"[{good}]{'█' * filled}[/{good}][{dim}]{'░' * (bar_width - filled)}[/{dim}]"
     progress_line = Text.assemble(
-        ("Progress ", dim),
+        (f"{description or 'Progress'} ", dim),
         Text.from_markup(bar),
         (f" {percentage:.1f}%", good if percentage >= 99.9 else val),
         (f"  step {diagnostics.step:,}", dim),
@@ -1089,7 +1090,7 @@ def monitor(
     ],
     config: typing.Optional[Config] = ...,
     *,
-    monitor: typing.Optional[MonitorConfig] = ...,
+    monitor: typing.Optional[Monitor] = ...,
     on_step_rejected: typing.Optional[StepCallback] = ...,
     on_step_accepted: typing.Optional[StepCallback] = ...,
     return_stats: typing.Literal[False] = ...,
@@ -1109,7 +1110,7 @@ def monitor(
     ],
     config: typing.Optional[Config] = ...,
     *,
-    monitor: typing.Optional[MonitorConfig] = ...,
+    monitor: typing.Optional[Monitor] = ...,
     on_step_rejected: typing.Optional[StepCallback] = ...,
     on_step_accepted: typing.Optional[StepCallback] = ...,
     return_stats: typing.Literal[True],
@@ -1128,7 +1129,7 @@ def monitor(
     ],
     config: typing.Optional[Config] = None,
     *,
-    monitor: typing.Optional[MonitorConfig] = None,
+    monitor: typing.Optional[Monitor] = None,
     on_step_rejected: typing.Optional[StepCallback] = None,
     on_step_accepted: typing.Optional[StepCallback] = None,
     return_stats: bool = False,
@@ -1157,8 +1158,8 @@ def monitor(
     :param config: Simulation configuration. Required when `input` is a
         `ReservoirModel`; optional when `input` is a `Run` (overrides
         the config stored on the `Run` when provided).
-    :param monitor: `MonitorConfig` controlling display options. Defaults
-        to `MonitorConfig()` (rich live panel enabled by default).
+    :param monitor: `Monitor` controlling display options. Defaults
+        to `Monitor()` (rich live panel enabled by default).
     :param on_step_rejected: Optional callback to be invoked whenever a
         proposed time step is rejected by the timer. The callback receives the
         same arguments as the `on_step_rejected` callback of `bores.run`.
@@ -1174,11 +1175,13 @@ def monitor(
     :raises ValidationError: If `input` is a `ReservoirModel` and `config` is not provided.
     """
     if monitor is None:
-        monitor = MonitorConfig()
+        monitor = Monitor()
 
     is_generic_input = not isinstance(input, (ReservoirModel, Run))
+    description = "Running Simulation"
     if isinstance(input, Run):
         config = config if config is not None else input.config
+        description = f"Running {input.name!r}" if input.name else description
     else:
         if config is None and not is_generic_input:
             raise ValueError(
@@ -1188,7 +1191,7 @@ def monitor(
 
     # Suppress logging from `run(...)`; monitor handles all output and stats
     config = config.with_updates(log_interval=0)
-    total_simulation_time: float = float(config.timer.simulation_time)
+    total_simulation_time = config.timer.simulation_time
     stats = RunStats()
     _step_result: typing.Optional[StepResult] = None
 
@@ -1209,15 +1212,17 @@ def monitor(
     if not monitor.use_rich:
         tqdm_bar = tqdm(
             total=100,
-            desc="Simulation",
+            desc=description,
             unit="%",
             bar_format=(
                 "{desc}: {percentage:3.1f}%|{bar:40}| "
                 "{n:.2f}/{total:.2f}% "
                 "[{elapsed}<{remaining}, {rate_fmt}]"
             ),
-            colour="green",
+            colour="blue" if monitor.theme == "light" else "green",
             dynamic_ncols=True,
+            smoothing=0.6,
+            leave=True,
         )
 
     # All logging from 'bores.*' is redirected through the same `Console` that
@@ -1299,7 +1304,8 @@ def monitor(
                         total_simulation_time=total_simulation_time,
                         show_wells=monitor.show_wells,
                         show_mbe=monitor.show_mbe,
-                        theme=monitor.color_theme,
+                        theme=monitor.theme,
+                        description=description,
                     )
                 )
 
@@ -1310,6 +1316,7 @@ def monitor(
                 change = float(new_percentage - last_percentage)
                 if change > 0:
                     tqdm_bar.update(change)
+
                 last_percentage = new_percentage
                 tqdm_bar.set_postfix_str(
                     f"step={diagnostics.step} "
@@ -1338,7 +1345,8 @@ def monitor(
                         total_simulation_time=total_simulation_time,
                         show_wells=monitor.show_wells,
                         show_mbe=monitor.show_mbe,
-                        theme=monitor.color_theme,
+                        theme=monitor.theme,
+                        description=description,
                     )
                 )
             live.__exit__(None, None, None)

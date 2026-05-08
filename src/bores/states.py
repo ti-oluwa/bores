@@ -95,7 +95,7 @@ class ModelState(
         """Check if there are any wells in this state."""
         if self._well_exists is None:
             object.__setattr__(self, "_well_exists", self.wells.exists())
-        return self._well_exists  # type: ignore[return-value]
+        return self._well_exists  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
     # Quick access properties for commonly queried derived quantities
     @property
@@ -375,6 +375,18 @@ def validate_state(
                 field_name="Gas imbibition flag grid",
                 dtype=dtype,
             ),
+            water_reversal_saturation_grid=_validate_array(
+                model_shape=model_shape,
+                grid=sat_hist.water_reversal_saturation_grid,
+                field_name="Water reversal saturation grid",
+                dtype=dtype,
+            ),
+            gas_reversal_saturation_grid=_validate_array(
+                model_shape=model_shape,
+                grid=sat_hist.gas_reversal_saturation_grid,
+                field_name="Gas reversal saturation grid",
+                dtype=dtype,
+            ),
         )
         # Reconstruct model and model state with coerced data
         model = typing.cast(
@@ -383,8 +395,8 @@ def validate_state(
                 grid_shape=model.grid_shape,
                 cell_dimension=model.cell_dimension,
                 thickness_grid=thickness_grid,
-                fluid_properties=fluid_properties,  # type:ignore[arg-type]
-                rock_properties=rock_properties,  # type:ignore[arg-type]
+                fluid_properties=fluid_properties,  # type:ignore[arg-type]  # ty:ignore[invalid-argument-type]
+                rock_properties=rock_properties,  # type:ignore[arg-type]  # ty:ignore[invalid-argument-type]
                 hysteresis_state=hysteresis_state,
                 boundary_conditions=model.boundary_conditions,  # type: ignore
                 dip_angle=model.dip_angle,

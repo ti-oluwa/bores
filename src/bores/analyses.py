@@ -2143,14 +2143,14 @@ class ModelAnalyst(typing.Generic[NDimension]):
 
                 if cells_obj is not None:
                     mask = cells_obj.get_mask(st.model.grid_shape, st.wells)
-                    oil_production_stb = np.where(mask, oil_production_stb, 0.0)  # type: ignore[arg-type]
-                    solution_gor_grid = np.where(mask, solution_gor_grid, 0.0)  # type: ignore[arg-type]
-                    water_production_stb = np.where(mask, water_production_stb, 0.0)  # type: ignore[arg-type]
+                    oil_production_stb = np.where(mask, oil_production_stb, 0.0)  # type: ignore[arg-type]  # ty:ignore[no-matching-overload]
+                    solution_gor_grid = np.where(mask, solution_gor_grid, 0.0)  # type: ignore[arg-type]  # ty:ignore[no-matching-overload]
+                    water_production_stb = np.where(mask, water_production_stb, 0.0)  # type: ignore[arg-type]  # ty:ignore[no-matching-overload]
                     gas_solubility_in_water_grid = np.where(  # type: ignore[arg-type]
                         mask,  # type: ignore[arg-type]
                         gas_solubility_in_water_grid,
                         0.0,
-                    )
+                    )  # ty:ignore[no-matching-overload]
 
                 step_solution_gas[s] = float(
                     (
@@ -3128,7 +3128,7 @@ class ModelAnalyst(typing.Generic[NDimension]):
             average_front_saturation=avg_front_saturation,
             max_front_saturation=max_front_saturation,
             saturation_delta_grid=delta.reshape(grid_shape),
-            front_centroid=centroid,  # type: ignore[arg-type]
+            front_centroid=centroid,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
         )
 
     def recommend_ipr_method(

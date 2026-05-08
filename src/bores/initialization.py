@@ -183,8 +183,8 @@ def seed_injection_saturations(
             )
             continue
 
-        wells_indices = wells_indices.injection[well.name]
-        for perforation_index in wells_indices:
+        indices = wells_indices.injection[well.name]
+        for perforation_index in indices:
             i, j, k = perforation_index.cell
 
             if injected_phase == FluidPhase.WATER:
@@ -334,7 +334,7 @@ def apply_minimum_injector_saturations(
                 if current >= seed:
                     continue
 
-                delta = dtype(seed - current)  # type: ignore[union-attr]
+                delta = dtype(seed - current)  # type: ignore
                 oil_available = float(oil_saturation_grid[i, j, k])
                 if oil_available - delta < 0.0:
                     logger.warning(
@@ -347,12 +347,13 @@ def apply_minimum_injector_saturations(
                         k,
                         delta,
                     )
-                    delta = dtype(oil_available)  # type: ignore[union-attr]
+                    delta = dtype(oil_available)  # type: ignore
 
-                water_saturation_grid[i, j, k] = dtype(current + delta)  # type: ignore[union-attr]
+                water_saturation_grid[i, j, k] = dtype(current + delta)  # type: ignore
                 oil_saturation_grid[i, j, k] = max(
-                    dtype(0.0), dtype(oil_available - delta)
-                )  # type: ignore[union-attr]
+                    dtype(0.0),  # type: ignore
+                    dtype(oil_available - delta),  # type: ignore
+                )
                 water_cells_enforced += 1
 
             else:  # GAS
@@ -360,7 +361,7 @@ def apply_minimum_injector_saturations(
                 if current >= seed:
                     continue
 
-                delta = dtype(seed - current)  # type: ignore[union-attr]
+                delta = dtype(seed - current)  # type: ignore
                 oil_available = float(oil_saturation_grid[i, j, k])
                 if oil_available - delta < 0.0:
                     logger.warning(
@@ -373,12 +374,12 @@ def apply_minimum_injector_saturations(
                         k,
                         delta,
                     )
-                    delta = dtype(oil_available)  # type: ignore[union-attr]
+                    delta = dtype(oil_available)  # type: ignore
 
-                gas_saturation_grid[i, j, k] = dtype(current + delta)  # type: ignore[union-attr]
-                oil_saturation_grid[i, j, k] = max(  # type: ignore[union-attr]
-                    dtype(0.0),
-                    dtype(oil_available - delta),
+                gas_saturation_grid[i, j, k] = dtype(current + delta)  # type: ignore
+                oil_saturation_grid[i, j, k] = max(
+                    dtype(0.0),  # type: ignore
+                    dtype(oil_available - delta),  # type: ignore
                 )
                 gas_cells_enforced += 1
 
