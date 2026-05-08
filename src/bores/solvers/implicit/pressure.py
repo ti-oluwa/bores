@@ -235,7 +235,7 @@ def solve_pressure(
     maximum_pressure_change = np.max(np.abs(new_pressure_grid - current_pressure_grid))
     return Solution(
         value=ImplicitPressureSolution(
-            pressure_grid=new_pressure_grid.astype(dtype, copy=False),  # type: ignore[arg-type]
+            pressure_grid=new_pressure_grid.astype(dtype, copy=False),  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
             maximum_pressure_change=maximum_pressure_change,
         ),
         success=True,
@@ -532,10 +532,10 @@ def solve_nonlinear_pressure(
                 water_relative_mobility_grid=water_relative_mobility,
                 oil_relative_mobility_grid=oil_relative_mobility,
                 gas_relative_mobility_grid=gas_relative_mobility,
-                wells=wells,  # type: ignore
+                wells=wells,
                 time=time_step_size,
                 config=config,
-                wells_indices=wells_indices,  # type: ignore
+                wells_indices=wells_indices,
                 dtype=dtype,
             )
 

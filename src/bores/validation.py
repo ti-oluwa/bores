@@ -64,7 +64,7 @@ class ValidationIssue:
 @attrs.frozen
 class ValidationReport:
     """
-    Aggregated result returned by `validate`.
+    Aggregated model validation result (returned by `validate`).
 
     :param issues: All issues collected across every check, in emission order.
     """
@@ -810,7 +810,7 @@ def _validate_zero_flow(
         tolerance_source = "user-specified"
     else:
         tolerance = _recommend_zero_flow_tolerance(cell_dimension)
-        tolerance_source = "auto (grid-scale adaptive)"
+        tolerance_source = "auto [grid-scale adaptive]"
 
     report.info(
         check, f"Zero-flow tolerance: {tolerance:.2e} day⁻¹ ({tolerance_source})."

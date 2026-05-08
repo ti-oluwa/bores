@@ -555,8 +555,7 @@ def build_cpr_preconditioner(
     :raises ValidationError: If no pressure DOFs are found.
     :raises RuntimeError: If AMG or ILU construction fails.
 
-    Notes
-    -----
+    *Notes*
     CPR workflow:
 
     1. Restrict residual to pressure DOFs:      r_p = R * r
@@ -571,7 +570,7 @@ def build_cpr_preconditioner(
 
     amg_kwargs = amg_kwargs or dict(_CPR_AMG_KWARGS)
     ilu_kwargs = ilu_kwargs or dict(_CPR_ILU_KWARGS)
-    number_of_equations = A_csr.shape[0]  # type: ignore
+    number_of_equations = A_csr.shape[0]
     # Identify the pressure DOFs: [p_i, So_i, Sg_i, ...]
     pressure_dof_indices = np.arange(
         pressure_variable_index,
@@ -585,7 +584,7 @@ def build_cpr_preconditioner(
         )
 
     # Extract the pressure-pressure block (A_pp)
-    A_pp = A_csr[pressure_dof_indices, :][:, pressure_dof_indices].tocsr()  # type: ignore
+    A_pp = A_csr[pressure_dof_indices, :][:, pressure_dof_indices].tocsr()
 
     # Build AMG preconditioner for A_pp
     try:
@@ -619,7 +618,7 @@ def build_cpr_preconditioner(
         except TypeError:
             z_p = M_amg(r_p)
 
-        z = prolongate_to_full(z_p)  # type: ignore[arg-type]
+        z = prolongate_to_full(z_p)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
 
         # Stage 2: ILU correction
         w = residual - A_csr.dot(z)
@@ -1124,7 +1123,7 @@ def solver_func(
                     f"Solver function '{name}' is already registered. "
                     f"Use `override=True` to replace it."
                 )
-            _SOLVER_FUNCS[key] = func
+            _SOLVER_FUNCS[key] = func  # ty:ignore[invalid-assignment]
         return func
 
     if func is not None:
@@ -1156,7 +1155,7 @@ def get_solver_func(name: str) -> typing.Optional[SolverFunc]:
                 f"Use `@solver_func` to register new solvers. "
                 f"Available solvers: {list(_SOLVER_FUNCS.keys())}"
             )
-        return _SOLVER_FUNCS[name]  # type: ignore[return-value]
+        return _SOLVER_FUNCS[name]  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
 
 def _get_preconditioner(
@@ -1204,13 +1203,13 @@ def _get_solver_func(
         if solver in _SOLVER_FUNCS:
             solver_func = _SOLVER_FUNCS[solver]
             if isinstance(solver_func, (list, tuple)):
-                return list(solver_func)  # type: ignore[return-value]
-            return [solver_func]  # type: ignore[return-value]
+                return list(solver_func)  # type: ignore[return-value]  # ty:ignore[invalid-return-type, invalid-argument-type]
+            return [solver_func]  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
         raise ValidationError(
             f"Unknown solver type: {solver!r}. Available solvers: {list(_SOLVER_FUNCS.keys())}"
         )
     elif callable(solver):
-        return [solver]  # type: ignore[return-value]
+        return [solver]  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
     elif isinstance(solver, (list, tuple, set)):
         solver_funcs = []
         for s in solver:
@@ -1343,40 +1342,32 @@ def scale_linear_system(
     (row scaling) and/or variable sensitivities (column scaling).
 
     Supported scaling methods:
-        - "row": Row-infinity norm scaling (max absolute value per row)
-        - "diagonal": Diagonal (column) scaling using Jacobian diagonal entries
+    - "row": Row-infinity norm scaling (max absolute value per row)
+    - "diagonal": Diagonal (column) scaling using Jacobian diagonal entries
 
     If no methods are provided, an automatic heuristic is used:
-        - If the Jacobian diagonal is sufficiently strong -> use ("row", "diagonal")
-        - Otherwise -> use ("row",) only
+    - If the Jacobian diagonal is sufficiently strong -> use ("row", "diagonal")
+    - Otherwise -> use ("row",) only
 
     Notes:
-        - Row scaling modifies both J and R
-        - Column scaling modifies only J
-        - Column scaling requires post-solve unscaling of the solution vector
+    - Row scaling modifies both J and R
+    - Column scaling modifies only J
+    - Column scaling requires post-solve unscaling of the solution vector
 
-    :param jacobian_csr:
-        Sparse Jacobian matrix in CSR format of shape (n, n)
-
-    :param residual_vector:
-        Residual vector of shape (n,)
-
-    :param methods:
-        Scaling methods to apply. Can be:
-            - None (auto-select)
-            - "row"
-            - "diagonal"
-            - Iterable like ("row", "diagonal")
+    :param jacobian_csr: Sparse Jacobian matrix in CSR format of shape (n, n)
+    :param residual_vector: Residual vector of shape (n,)
+    :param methods: Scaling methods to apply. Can be:
+        - None (auto-select)
+        - "row"
+        - "diagonal"
+        - Iterable like ("row", "diagonal")
         Order matters (applied sequentially)
 
-    :param epsilon:
-        Small threshold to prevent division by zero or near-zero values
-
-    :return:
-        Tuple of:
-            - scaled jacobian (CSR matrix)
-            - scaled residual (ndarray)
-            - column scaling vector (ndarray or None)
+    :param epsilon: Small threshold to prevent division by zero or near-zero values
+    :return: Tuple of:
+        - scaled jacobian (CSR matrix)
+        - scaled residual (ndarray)
+        - column scaling vector (ndarray or None)
 
         The column_scaling_vector must be used to unscale the solution:
             dx = dx_scaled * column_scaling_vector
@@ -1418,4 +1409,4 @@ def scale_linear_system(
         J = J @ diags(inverse_diag_scale)
         column_scaling_vector = inverse_diag_scale
 
-    return J, R, column_scaling_vector  # type: ignore[return-value]
+    return J, R, column_scaling_vector  # type: ignore[return-value]  # ty:ignore[invalid-return-type]

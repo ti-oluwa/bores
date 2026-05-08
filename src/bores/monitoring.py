@@ -19,7 +19,6 @@ from tqdm import tqdm
 from bores.config import Config
 from bores.constants import c
 from bores.datastructures import FormationVolumeFactors, Rates, SparseTensor
-from bores.errors import ValidationError
 from bores.models import ReservoirModel
 from bores.simulate import Run, StepCallback, StepResult, run
 from bores.states import ModelState
@@ -27,12 +26,7 @@ from bores.types import ThreeDimensions
 from bores.utils import _close_iter
 from bores.wells.base import InjectionWell, ProductionWell
 
-__all__ = [
-    "MonitorConfig",
-    "RunStats",
-    "StepDiagnostics",
-    "monitor",
-]
+__all__ = ["MonitorConfig", "RunStats", "StepDiagnostics", "monitor"]
 
 logger = logging.getLogger(__name__)
 
@@ -47,15 +41,12 @@ class MonitorConfig:
 
     use_rich: bool = True
     """
-    Show a live Rich panel with solver diagnostics and physics summary.
+    Show a live `Rich` panel with solver diagnostics and physics summary.
 
     The panel updates in-place every `refresh_interval` accepted steps
     and is left in terminal history when the run ends.
-    """
 
-    use_tqdm: bool = False
-    """
-    Show a tqdm progress bar tracking simulation-time completion.
+    Else, show a `tqdm` progress bar tracking simulation-time completion.
 
     The bar runs from 0 % to 100 % of total simulation time and displays
     a postfix with current step, average pressure, water saturation, and
@@ -89,12 +80,6 @@ class MonitorConfig:
     `"dark"` uses a charcoal background with amber accents.
     `"light"` uses off-white with navy accents.
     """
-
-    def __post_init__(self) -> None:
-        if self.use_rich and self.use_tqdm:
-            raise ValidationError(
-                "`use_tqdm=True` and `use_rich=True` is not allowed. Choose one"
-            )
 
 
 @dataclass
@@ -1191,11 +1176,6 @@ def monitor(
     if monitor is None:
         monitor = MonitorConfig()
 
-    if not monitor.use_rich and not monitor.use_tqdm:
-        logger.warning(
-            "Monitor config has both `use_rich` and `use_tqdm` set to False; no live progress display will be shown."
-        )
-
     is_generic_input = not isinstance(input, (ReservoirModel, Run))
     if isinstance(input, Run):
         config = config if config is not None else input.config
@@ -1226,7 +1206,7 @@ def monitor(
             on_step_accepted(step_result)
 
     tqdm_bar: typing.Optional[tqdm] = None  # type: ignore[type-arg]
-    if monitor.use_tqdm:
+    if not monitor.use_rich:
         tqdm_bar = tqdm(
             total=100,
             desc="Simulation",
@@ -1249,7 +1229,6 @@ def monitor(
     bores_logger = logging.getLogger("bores")
     original_propagate = bores_logger.propagate  # Save original propagate setting
     original_handlers: typing.List[logging.Handler] = []
-    rich_log_handler: typing.Optional[RichHandler] = None
 
     if monitor.use_rich:
         rich_console = Console()
@@ -1291,13 +1270,13 @@ def monitor(
             )
         else:
             simulation = run(
-                input,  # type: ignore[arg-type]
+                input,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
                 config,
                 on_step_rejected=_on_step_rejected,
                 on_step_accepted=_on_step_accepted,
             )
 
-        for state in simulation:  # type: ignore[arg-type]
+        for state in simulation:  # type: ignore
             step_end = time.perf_counter()
             wall_ms = (step_end - step_start) * 1000.0
             step_start = step_end

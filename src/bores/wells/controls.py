@@ -80,11 +80,7 @@ def _disallow_flow(
         Default 1e-12 cP⁻¹ corresponds to k_r ≈ 0.00001 (essentially zero).
     :return: True if no flow should happen, False otherwise.
     """
-    return (
-        fluid is None
-        or phase_mobility < minimum_mobility
-        or not is_active
-    )
+    return fluid is None or phase_mobility < minimum_mobility or not is_active
 
 
 def _compute_required_bhp(
@@ -1004,9 +1000,7 @@ class RateControl(WellControl[WellFluidTcon]):
             return self.bhp_limit or pressure
 
         # Apply allocation to target rate and convert to reservoir rate
-        target_rate_reservoir = (
-            self.target_rate * allocation_fraction * phase_fvf
-        )
+        target_rate_reservoir = self.target_rate * allocation_fraction * phase_fvf
         # Compute required BHP for target rate
         try:
             required_bhp = _compute_required_bhp(
@@ -1038,7 +1032,7 @@ class RateControl(WellControl[WellFluidTcon]):
         # BHP never exceeds (injection) or goes below (production) the declared limit.
         bhp_limit = self.bhp_limit
         bhp = required_bhp
-        if bhp_limit is not  None:
+        if bhp_limit is not None:
             is_production = target_rate_reservoir < 0.0
             if is_production:
                 # Production: BHP must be >= bhp_limit
@@ -1129,7 +1123,9 @@ class RateControl(WellControl[WellFluidTcon]):
         if _disallow_flow(
             fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
         ) or (self.target_phase is not None and fluid.phase != self.target_phase):
-            return ControlInfo(rate=0.0, bhp=self.bhp_limit or pressure, is_bhp_control=True)
+            return ControlInfo(
+                rate=0.0, bhp=self.bhp_limit or pressure, is_bhp_control=True
+            )
 
         # Allocated reservoir rate
         target_rate = self.target_rate * allocation_fraction * phase_fvf
@@ -1157,7 +1153,9 @@ class RateControl(WellControl[WellFluidTcon]):
                 f"Failed to compute required BHP for target rate {target_rate:.6f}: {exc}. "
                 "Returning shut-in state (rate=0, bhp=reservoir pressure)."
             )
-            return ControlInfo(rate=0.0, bhp=self.bhp_limit or pressure, is_bhp_control=False)
+            return ControlInfo(
+                rate=0.0, bhp=self.bhp_limit or pressure, is_bhp_control=True
+            )
 
         logger.debug(
             f"Required BHP: {required_bhp:.6f} psi, Reservoir pressure: {pressure:.6f} psi, "
@@ -1497,9 +1495,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             return bhp_limit
 
         # Apply allocation to target rate (for rate mode)
-        target_rate_reservoir = (
-            self.target_rate * allocation_fraction * phase_fvf
-        )
+        target_rate_reservoir = self.target_rate * allocation_fraction * phase_fvf
 
         # Try to compute required BHP for target rate
         try:
@@ -1520,7 +1516,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         except (ValueError, ZeroDivisionError, ComputationError) as exc:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("Cannot achieve rate mode: %s. Using BHP mode.", exc)
-            
+
             # BHP mode fallback - report bhp_limit, clamped if necessary
             bhp = bhp_limit
             if self.clamp is not None:
@@ -1915,7 +1911,7 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
         :param controlling_phase_compressibility: Compressibility of the controlling phase (psi⁻¹).
         :param controlling_phase_viscosity: Viscosity of the controlling phase (cP). Required for pseudo-pressure gas path.
         :param pvt_tables: PVT look-up tables.
-        :return: Shared BHP (psi). Equals `pressure` (no drawdown) when the control shuts the well in.
+        :return: Shared BHP (psi).
         """
         return self.control.get_bottom_hole_pressure(
             pressure=pressure,
@@ -2048,18 +2044,26 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
         pvt_tables: typing.Optional[PVTTables] = None,
         **kwargs: typing.Any,
     ) -> float:
-        """
-        Not the intended call path for ``ProducerRateControl``.
+        # Only the controlling phase drives the BHP solve.
+        # For non-controlling phases, raise an error.
+        if fluid.phase != self.controlling_phase:
+            raise NotImplementedError(
+                f"{self.__class__.__name__}.get_bottom_hole_pressure(...) can only be called for he controlling phase. "
+            )
 
-        The shared BHP should be obtained by calling ``compute_bhp`` explicitly
-        before the phase loop, passing total mobility. This method exists only
-        to satisfy the ``WellControl`` base interface and will raise if called,
-        since the caller must supply ``total_mobility`` and the controlling
-        phase context that this signature cannot express.
-        """
-        raise NotImplementedError(
-            f"{self.__class__.__name__}.get_bottom_hole_pressure(...) should not be called directly. "
-            "Call compute_bhp(...) with total_mobility before the phase loop instead."
+        return self.control.get_bottom_hole_pressure(
+            pressure=pressure,
+            temperature=temperature,
+            well_index=well_index,
+            fluid=fluid,
+            phase_fvf=phase_fvf,
+            phase_mobility=phase_mobility,
+            phase_viscosity=phase_viscosity,
+            allocation_fraction=allocation_fraction,
+            is_active=is_active,
+            use_pseudo_pressure=use_pseudo_pressure,
+            fluid_compressibility=fluid_compressibility,
+            pvt_tables=pvt_tables,
         )
 
     def get_control(
@@ -2077,17 +2081,10 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
         fluid_compressibility: typing.Optional[float] = None,
         pvt_tables: typing.Optional[PVTTables] = None,
         **kwargs: typing.Any,
-    ) -> ControlInfo:
-        """
-        Not the intended call path for ``ProducerRateControl``.
-
-        The correct usage is to call ``compute_bhp`` once before the phase
-        loop, then ``get_flow_rate`` per phase. This method raises to prevent
-        accidental use of the old per-phase pattern.
-        """
+    ) -> typing.NoReturn:
         raise NotImplementedError(
             f"{self.__class__.__name__}.get_control(...) should not be called directly. "
-            "Call compute_bhp(...) once before the phase loop, then get_flow_rate(...) per phase."
+            "Call compute_bhp(...), then get_flow_rate(...) per phase. Phases are always BHP controlled."
         )
 
     def build_context(
@@ -2128,13 +2125,13 @@ class ProducerRateControl(WellControl[WellFluidTcon]):
         phase_props = {
             FluidPhase.OIL: (oil_mobility, oil_fvf, oil_compressibility, oil_viscosity),
             FluidPhase.GAS: (
-                water_mobility,
+                gas_mobility,
                 gas_fvf,
                 gas_compressibility,
                 gas_viscosity,
             ),
             FluidPhase.WATER: (
-                gas_mobility,
+                water_mobility,
                 water_fvf,
                 water_compressibility,
                 water_viscosity,

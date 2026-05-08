@@ -2432,9 +2432,9 @@ class TwoPhaseRelPermTable(
             and np.isscalar(oil_saturation)
             and np.isscalar(gas_saturation)
         )
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
+        sw = np.atleast_1d(water_saturation)
+        so = np.atleast_1d(oil_saturation)
+        sg = np.atleast_1d(gas_saturation)
         sw, so, sg = np.broadcast_arrays(sw, so, sg)
         zeros = np.zeros_like(sw)
 
@@ -2457,8 +2457,8 @@ class TwoPhaseRelPermTable(
                 )
             if is_scalar:
                 return RelativePermeabilities(
-                    water=float(np.atleast_1d(krw).ravel()[0]),
-                    oil=float(np.atleast_1d(kro).ravel()[0]),
+                    water=krw.item(),  # type: ignore
+                    oil=kro.item(),  # type: ignore
                     gas=0.0,
                 )
             return RelativePermeabilities(water=krw, oil=kro, gas=zeros)  # type: ignore[typeddict-item]
@@ -2481,8 +2481,8 @@ class TwoPhaseRelPermTable(
             if is_scalar:
                 return RelativePermeabilities(
                     water=0.0,
-                    oil=float(np.atleast_1d(kro).ravel()[0]),
-                    gas=float(np.atleast_1d(krg).ravel()[0]),
+                    oil=kro.item(),  # type: ignore
+                    gas=krg.item(),  # type: ignore
                 )
             return RelativePermeabilities(water=zeros, oil=kro, gas=krg)  # type: ignore[typeddict-item]
 
@@ -2522,9 +2522,9 @@ class TwoPhaseRelPermTable(
         :param gas_saturation: Gas saturation (fraction, 0 to 1).
         :return: `RelativePermeabilityDerivatives` dictionary.
         """
-        sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
-        so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
-        sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
+        sw = np.atleast_1d(water_saturation)
+        so = np.atleast_1d(oil_saturation)
+        sg = np.atleast_1d(gas_saturation)
         sw, so, sg = np.broadcast_arrays(sw, so, sg)
         zeros = np.zeros_like(sw)
         is_scalar = (
@@ -2582,7 +2582,7 @@ class TwoPhaseRelPermTable(
                 zeros,
             )
             if is_scalar:
-                results = tuple(float(np.atleast_1d(r).ravel()[0]) for r in results)
+                results = tuple(r.item() for r in results)  # type: ignore
             return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],
@@ -2641,7 +2641,7 @@ class TwoPhaseRelPermTable(
                 d_krg_d_sg,
             )
             if is_scalar:
-                results = tuple(float(np.atleast_1d(r).ravel()[0]) for r in results)
+                results = tuple(r.item() for r in results)  # type: ignore
             return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],
@@ -2732,10 +2732,10 @@ class ThreePhaseRelPermTable(
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
-        return self.oil_water_table.wetting_phase  # type:ignore[return-value]
+        return self.oil_water_table.wetting_phase  # type:ignore[return-value]  # ty:ignore[invalid-return-type]
 
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
-        return self.gas_oil_table.wetting_phase  # type:ignore[return-value]
+        return self.gas_oil_table.wetting_phase  # type:ignore[return-value]    # ty:ignore[invalid-return-type]
 
     def get_oil_relperm_endpoint(self) -> float:
         """

@@ -295,6 +295,9 @@ def compute_well_rates(
                 cell_count_y=cell_count_y,
                 cell_count_z=cell_count_z,
             )
+            if not is_gas:
+                flow_rate *= bbl_to_ft3
+
             if can_flow:
                 if not use_pseudo_pressure:
                     well_transmissibility = (
@@ -338,7 +341,6 @@ def compute_well_rates(
                 if can_flow:
                     injection_bhps.gas[i, j, k] = effective_bhp
             else:
-                flow_rate *= bbl_to_ft3
                 net_water_well_rate_grid[i, j, k] += flow_rate
                 net_water_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 injection_rates.water[i, j, k] += flow_rate
@@ -395,9 +397,9 @@ def compute_well_rates(
             water_mass_flow_rate = 0.0
             oil_mass_flow_rate = 0.0
             gas_mass_flow_rate = 0.0
-            water_phase_fvf = np.nan
-            oil_phase_fvf = np.nan
-            gas_phase_fvf = np.nan
+            water_fvf = np.nan
+            oil_fvf = np.nan
+            gas_fvf = np.nan
             water_effective_bhp = np.nan
             oil_effective_bhp = np.nan
             gas_effective_bhp = np.nan
@@ -496,6 +498,9 @@ def compute_well_rates(
                     cell_count_y=cell_count_y,
                     cell_count_z=cell_count_z,
                 )
+                if not is_gas:
+                    flow_rate *= bbl_to_ft3
+
                 if can_flow:
                     if not use_pseudo_pressure:
                         phase_transmissibility = (
@@ -533,27 +538,25 @@ def compute_well_rates(
                     phase_density = typing.cast(float, gas_density_grid[i, j, k])
                     gas_flow_rate += flow_rate
                     gas_mass_flow_rate += flow_rate * phase_density
-                    gas_phase_fvf = phase_fvf
+                    gas_fvf = phase_fvf
                     if can_flow:
                         gas_effective_bhp = effective_bhp
                     net_gas_well_rate_grid[i, j, k] += flow_rate
                     net_gas_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 elif is_water:
                     phase_density = typing.cast(float, water_density_grid[i, j, k])
-                    flow_rate *= bbl_to_ft3
                     water_flow_rate += flow_rate
                     water_mass_flow_rate += flow_rate * phase_density
-                    water_phase_fvf = phase_fvf
+                    water_fvf = phase_fvf
                     if can_flow:
                         water_effective_bhp = effective_bhp
                     net_water_well_rate_grid[i, j, k] += flow_rate
                     net_water_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 else:
                     phase_density = typing.cast(float, oil_density_grid[i, j, k])
-                    flow_rate *= bbl_to_ft3
                     oil_flow_rate += flow_rate
                     oil_mass_flow_rate += flow_rate * phase_density
-                    oil_phase_fvf = phase_fvf
+                    oil_fvf = phase_fvf
                     if can_flow:
                         oil_effective_bhp = effective_bhp
                     net_oil_well_rate_grid[i, j, k] += flow_rate
@@ -565,7 +568,7 @@ def compute_well_rates(
                 oil_mass_flow_rate,
                 gas_mass_flow_rate,
             )
-            production_fvfs[i, j, k] = (water_phase_fvf, oil_phase_fvf, gas_phase_fvf)
+            production_fvfs[i, j, k] = (water_fvf, oil_fvf, gas_fvf)
             production_bhps[i, j, k] = (
                 water_effective_bhp,
                 oil_effective_bhp,

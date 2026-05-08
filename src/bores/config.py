@@ -202,7 +202,7 @@ class Config(
     """Relative residual tolerance for Newton convergence in implicit solvers."""
 
     maximum_line_search_cuts: int = attrs.field(
-        default=8,
+        default=4,
         validator=attrs.validators.and_(
             attrs.validators.ge(0),  # type: ignore[arg-type]
             attrs.validators.le(10),  # type: ignore[arg-type]

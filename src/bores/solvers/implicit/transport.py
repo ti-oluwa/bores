@@ -60,7 +60,7 @@ class NewtonConvergenceInfo:
 
 
 @numba.njit(cache=True, parallel=True)
-def pack_saturation_grids_to_vector(
+def pack_grids(
     water_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
     cell_count_x: int,
@@ -99,7 +99,7 @@ def pack_saturation_grids_to_vector(
 
 
 @numba.njit(cache=True, parallel=True)
-def unpack_vector_to_saturation_grids(
+def unpack_vector(
     saturation_vector: npt.NDArray,
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
@@ -188,7 +188,7 @@ def interleave_residuals(
 
 
 @numba.njit(parallel=True, cache=True)
-def _compute_saturation_residuals(
+def _assemble_saturation_residuals(
     pressure_grid: ThreeDimensionalGrid,
     cell_count_x: int,
     cell_count_y: int,
@@ -238,7 +238,7 @@ def _compute_saturation_residuals(
     bbl_to_ft3: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
-    Compute the mass-based residual vector R(S) for the implicit saturation equations.
+    Assemble the mass-based residual vector R(S) for the implicit saturation equations.
 
     For each cell `(i, j, k)` the residual equations are:
 
@@ -351,10 +351,11 @@ def _compute_saturation_residuals(
                 # Guard against zero density
                 if current_gas_density < 1e-30:
                     current_gas_density = 1e-30
+                if current_oil_density < 1e-30:
+                    current_oil_density = 1e-30
                 if current_water_density < 1e-30:
                     current_water_density = 1e-30
 
-                # Alpha factors at current pressure
                 safe_oil_fvf = oil_formation_volume_factor_grid[i, j, k]
                 safe_water_fvf = water_formation_volume_factor_grid[i, j, k]
                 safe_gas_fvf = gas_formation_volume_factor_grid[i, j, k]
@@ -434,7 +435,7 @@ def _compute_saturation_residuals(
                     current_gas_total_mass - old_gas_total_mass
                 )
 
-                # Face flux contributions (mass-weighted)
+                # Face flux contributions
                 net_mass_water_flux = 0.0
                 net_mass_gas_flux = 0.0
 
@@ -482,7 +483,7 @@ def _compute_saturation_residuals(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                     if oil_flux > 0.0:
-                        alpha_solution_gor_face = (
+                        face_alpha_solution_gor = (
                             solution_gas_to_oil_ratio_grid[east_i, j, k]
                             * gas_formation_volume_factor_grid[east_i, j, k]
                             / (
@@ -494,10 +495,10 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_solution_gor_face = cell_alpha_solution_gor
+                        face_alpha_solution_gor = cell_alpha_solution_gor
 
                     if water_flux > 0.0:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             gas_solubility_in_water_grid[east_i, j, k]
                             * gas_formation_volume_factor_grid[east_i, j, k]
                             / (
@@ -509,16 +510,16 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             cell_alpha_gas_solubility_in_water
                         )
 
                     net_mass_water_flux += upwind_water_density * water_flux
                     net_mass_gas_flux += (
                         upwind_gas_density * gas_flux
-                        + upwind_gas_density * alpha_solution_gor_face * oil_flux
+                        + upwind_gas_density * face_alpha_solution_gor * oil_flux
                         + upwind_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * water_flux
                     )
                 else:
@@ -591,7 +592,7 @@ def _compute_saturation_residuals(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                     if oil_flux > 0.0:
-                        alpha_solution_gor_face = (
+                        face_alpha_solution_gor = (
                             solution_gas_to_oil_ratio_grid[west_i, j, k]
                             * gas_formation_volume_factor_grid[west_i, j, k]
                             / (
@@ -603,10 +604,10 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_solution_gor_face = cell_alpha_solution_gor
+                        face_alpha_solution_gor = cell_alpha_solution_gor
 
                     if water_flux > 0.0:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             gas_solubility_in_water_grid[west_i, j, k]
                             * gas_formation_volume_factor_grid[west_i, j, k]
                             / (
@@ -618,16 +619,16 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             cell_alpha_gas_solubility_in_water
                         )
 
                     net_mass_water_flux += upwind_water_density * water_flux
                     net_mass_gas_flux += (
                         upwind_gas_density * gas_flux
-                        + upwind_gas_density * alpha_solution_gor_face * oil_flux
+                        + upwind_gas_density * face_alpha_solution_gor * oil_flux
                         + upwind_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * water_flux
                     )
                 else:
@@ -700,7 +701,7 @@ def _compute_saturation_residuals(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                     if oil_flux > 0.0:
-                        alpha_solution_gor_face = (
+                        face_alpha_solution_gor = (
                             solution_gas_to_oil_ratio_grid[i, south_j, k]
                             * gas_formation_volume_factor_grid[i, south_j, k]
                             / (
@@ -712,10 +713,10 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_solution_gor_face = cell_alpha_solution_gor
+                        face_alpha_solution_gor = cell_alpha_solution_gor
 
                     if water_flux > 0.0:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             gas_solubility_in_water_grid[i, south_j, k]
                             * gas_formation_volume_factor_grid[i, south_j, k]
                             / (
@@ -727,16 +728,16 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             cell_alpha_gas_solubility_in_water
                         )
 
                     net_mass_water_flux += upwind_water_density * water_flux
                     net_mass_gas_flux += (
                         upwind_gas_density * gas_flux
-                        + upwind_gas_density * alpha_solution_gor_face * oil_flux
+                        + upwind_gas_density * face_alpha_solution_gor * oil_flux
                         + upwind_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * water_flux
                     )
                 else:
@@ -809,7 +810,7 @@ def _compute_saturation_residuals(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                     if oil_flux > 0.0:
-                        alpha_solution_gor_face = (
+                        face_alpha_solution_gor = (
                             solution_gas_to_oil_ratio_grid[i, north_j, k]
                             * gas_formation_volume_factor_grid[i, north_j, k]
                             / (
@@ -821,10 +822,10 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_solution_gor_face = cell_alpha_solution_gor
+                        face_alpha_solution_gor = cell_alpha_solution_gor
 
                     if water_flux > 0.0:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             gas_solubility_in_water_grid[i, north_j, k]
                             * gas_formation_volume_factor_grid[i, north_j, k]
                             / (
@@ -836,16 +837,16 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             cell_alpha_gas_solubility_in_water
                         )
 
                     net_mass_water_flux += upwind_water_density * water_flux
                     net_mass_gas_flux += (
                         upwind_gas_density * gas_flux
-                        + upwind_gas_density * alpha_solution_gor_face * oil_flux
+                        + upwind_gas_density * face_alpha_solution_gor * oil_flux
                         + upwind_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * water_flux
                     )
                 else:
@@ -918,7 +919,7 @@ def _compute_saturation_residuals(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                     if oil_flux > 0.0:
-                        alpha_solution_gor_face = (
+                        face_alpha_solution_gor = (
                             solution_gas_to_oil_ratio_grid[i, j, bottom_k]
                             * gas_formation_volume_factor_grid[i, j, bottom_k]
                             / (
@@ -930,10 +931,10 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_solution_gor_face = cell_alpha_solution_gor
+                        face_alpha_solution_gor = cell_alpha_solution_gor
 
                     if water_flux > 0.0:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             gas_solubility_in_water_grid[i, j, bottom_k]
                             * gas_formation_volume_factor_grid[i, j, bottom_k]
                             / (
@@ -945,16 +946,16 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             cell_alpha_gas_solubility_in_water
                         )
 
                     net_mass_water_flux += upwind_water_density * water_flux
                     net_mass_gas_flux += (
                         upwind_gas_density * gas_flux
-                        + upwind_gas_density * alpha_solution_gor_face * oil_flux
+                        + upwind_gas_density * face_alpha_solution_gor * oil_flux
                         + upwind_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * water_flux
                     )
                 else:
@@ -1027,7 +1028,7 @@ def _compute_saturation_residuals(
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
                     if oil_flux > 0.0:
-                        alpha_solution_gor_face = (
+                        face_alpha_solution_gor = (
                             solution_gas_to_oil_ratio_grid[i, j, top_k]
                             * gas_formation_volume_factor_grid[i, j, top_k]
                             / (
@@ -1038,10 +1039,10 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_solution_gor_face = cell_alpha_solution_gor
+                        face_alpha_solution_gor = cell_alpha_solution_gor
 
                     if water_flux > 0.0:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             gas_solubility_in_water_grid[i, j, top_k]
                             * gas_formation_volume_factor_grid[i, j, top_k]
                             / (
@@ -1053,16 +1054,16 @@ def _compute_saturation_residuals(
                             )
                         )
                     else:
-                        alpha_gas_solubility_in_water_face = (
+                        face_alpha_gas_solubility_in_water = (
                             cell_alpha_gas_solubility_in_water
                         )
 
                     net_mass_water_flux += upwind_water_density * water_flux
                     net_mass_gas_flux += (
                         upwind_gas_density * gas_flux
-                        + upwind_gas_density * alpha_solution_gor_face * oil_flux
+                        + upwind_gas_density * face_alpha_solution_gor * oil_flux
                         + upwind_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * water_flux
                     )
                 else:
@@ -1116,11 +1117,11 @@ def _compute_saturation_residuals(
                     current_gas_density
                     * cell_alpha_solution_gor
                     * min(net_oil_mass_rate, 0.0)
-                    / max(current_oil_density, 1e-30)
+                    / current_oil_density
                     + current_gas_density
                     * cell_alpha_gas_solubility_in_water
                     * min(net_water_mass_rate, 0.0)
-                    / max(current_water_density, 1e-30)
+                    / current_water_density
                 )
 
                 water_residual[cell_idx] = (
@@ -1202,7 +1203,7 @@ def compute_rock_fluid_properties(
     return (relative_mobility_grids, capillary_pressure_grids, mobility_grids)
 
 
-def _compute_residuals(
+def _assemble_residuals(
     water_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
     old_water_saturation_grid: ThreeDimensionalGrid,
@@ -1240,7 +1241,7 @@ def _compute_residuals(
     bbl_to_ft3: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
-    Compute the mass-based residual from pre-computed saturation-dependent properties.
+    Assemble the mass-based residual from pre-computed saturation-dependent properties.
 
     :param water_saturation_grid: Current (Newton iterate) water saturation grid.
     :param gas_saturation_grid: Current (Newton iterate) gas saturation grid.
@@ -1279,7 +1280,7 @@ def _compute_residuals(
         oil_relative_mobility_grid,
         gas_relative_mobility_grid,
     ) = relative_mobility_grids
-    return _compute_saturation_residuals(
+    return _assemble_saturation_residuals(
         pressure_grid=pressure_grid,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
@@ -1330,7 +1331,7 @@ def _compute_residuals(
     )
 
 
-def compute_residuals(
+def assemble_residuals(
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -1368,7 +1369,7 @@ def compute_residuals(
     bbl_to_ft3: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
-    Compute the full mass-based residual, rebuilding saturation-dependent properties first.
+    Assemble the mass-based residuals, rebuilding saturation-dependent properties first.
 
     :param water_saturation_grid: Current (Newton iterate) water saturation grid.
     :param oil_saturation_grid: Current (Newton iterate) oil saturation grid.
@@ -1414,7 +1415,7 @@ def compute_residuals(
         config=config,
         hysteresis_state=hysteresis_state,
     )
-    return _compute_residuals(
+    return _assemble_residuals(
         water_saturation_grid=water_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
         old_water_saturation_grid=old_water_saturation_grid,
@@ -1455,7 +1456,7 @@ def compute_residuals(
 
 def assemble_numerical_jacobian(
     saturation_vector: npt.NDArray,
-    residual_base: npt.NDArray,
+    base_residual: npt.NDArray,
     total_cell_count: int,
     cell_count_x: int,
     cell_count_y: int,
@@ -1497,13 +1498,13 @@ def assemble_numerical_jacobian(
     Assemble the mass-based saturation Jacobian using column-wise forward finite differences.
 
     The numerical Jacobian is correct for the mass formulation automatically because
-    it calls `compute_residuals`, which evaluates the mass-based residual at each
+    it calls `assemble_residuals`, which evaluates the mass-based residual at each
     perturbed saturation. Densities and Rs/Rsw are frozen during Newton (function of
     pressure only), so the numerical Jacobian is exact for the sequential implicit
     scheme.
 
     :param saturation_vector: Current saturation vector `[Sw_0, Sg_0, ...]`.
-    :param residual_base: Base residual `R(S)` at current iterate.
+    :param base_residual: Base residual `R(S)` at current iterate.
     :param total_cell_count: Total number of cells `nx * ny * nz`.
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
@@ -1649,13 +1650,13 @@ def assemble_numerical_jacobian(
             gas_saturation_grid[i, j, k] = perturbed_gas_saturation
             oil_saturation_grid[i, j, k] = perturbed_oil_saturation
 
-            perturbed_water_residual, perturbed_gas_residual = compute_residuals(
+            perturbed_water_residual, perturbed_gas_residual = assemble_residuals(
                 water_saturation_grid=water_saturation_grid,
                 oil_saturation_grid=oil_saturation_grid,
                 gas_saturation_grid=gas_saturation_grid,
                 **residual_kwargs,  # type: ignore
             )
-            residual_perturbed = interleave_residuals(
+            perturbed_residual = interleave_residuals(
                 water_residual=perturbed_water_residual,
                 gas_residual=perturbed_gas_residual,
             )
@@ -1667,7 +1668,7 @@ def assemble_numerical_jacobian(
             for affected_idx in affected_cell_indices:
                 water_row = 2 * affected_idx
                 dR_water = (
-                    residual_perturbed[water_row] - residual_base[water_row]
+                    perturbed_residual[water_row] - base_residual[water_row]
                 ) / epsilon
                 if abs(dR_water) > 1e-30:
                     rows.append(water_row)
@@ -1676,7 +1677,7 @@ def assemble_numerical_jacobian(
 
                 gas_row = 2 * affected_idx + 1
                 dR_gas = (
-                    residual_perturbed[gas_row] - residual_base[gas_row]
+                    perturbed_residual[gas_row] - base_residual[gas_row]
                 ) / epsilon
                 if abs(dR_gas) > 1e-30:
                     rows.append(gas_row)
@@ -1855,7 +1856,7 @@ def compute_rock_fluid_derivatives(
         dPcow_dSg_eff,
         dPcgo_dSw_eff,
         dPcgo_dSg_eff,
-    )
+    )  # ty:ignore[invalid-return-type]
 
 
 @numba.njit(parallel=True, cache=True)
@@ -1914,9 +1915,9 @@ def assemble_flux_contributions(
     in the sequential implicit scheme), the accumulation Jacobian terms are simply scaled by
     the frozen cell density:
 
-        dR_w/dSw_i (accumulation) = water_density_i * (phi*V_i/dt)
-        dR_g/dSg_i (accumulation) = (gas_density_i - gas_density_i*alpha_Rs_i) * (phi*V_i/dt)
-        dR_g/dSw_i (accumulation) = (gas_density_i*alpha_Rsw_i - gas_density_i*alpha_Rs_i) * (phi*V_i/dt)
+        dR_w/dSw_i (accumulation) = cell_water_density * (phi*V_i/dt)
+        dR_g/dSg_i (accumulation) = (cell_gas_density - cell_gas_density*alpha_Rs_i) * (phi*V_i/dt)
+        dR_g/dSw_i (accumulation) = (cell_gas_density*alpha_Rsw_i - cell_gas_density*alpha_Rs_i) * (phi*V_i/dt)
             [from So = 1 - Sw - Sg substitution into M_g]
 
     Note: the gas accumulation captures all three saturation dependencies:
@@ -1928,10 +1929,10 @@ def assemble_flux_contributions(
     dRw/dSw, dRw/dSg, dRg/dSw, dRg/dSg. Every flux stream that appears in
     the residual contributes to all four entries:
 
-      - Water residual R_w = -rho_w * F_w  ->  dRw/dS terms
-      - Gas residual R_g   = -rho_g * F_g  (free gas)
-                           - rho_g * alpha_Rs * F_o  (dissolved gas in oil)
-                           - rho_g * alpha_Rsw * F_w  (dissolved gas in water)
+      - Water residual R_w = -water_density * F_w  ->  dRw/dS terms
+      - Gas residual R_g   = -gas_density * F_g  (free gas)
+                           - gas_density * alpha_Rs * F_o  (dissolved gas in oil)
+                           - gas_density * alpha_Rsw * F_w  (dissolved gas in water)
                            ->  dRg/dS terms from all three streams
 
     Alpha coefficients (alpha_Rs, alpha_Rsw) and densities are arithmetic-averaged
@@ -2023,33 +2024,35 @@ def assemble_flux_contributions(
                 )
                 accumulation_coefficient = pore_volume / time_step_in_days
 
-                water_density_i = water_density_grid[i, j, k]
-                gas_density_i = gas_density_grid[i, j, k]
+                cell_water_density = water_density_grid[i, j, k]
+                cell_gas_density = gas_density_grid[i, j, k]
 
                 # FVF guards for cell i
-                safe_oil_fvf_i = oil_formation_volume_factor_grid[i, j, k]
-                safe_water_fvf_i = water_formation_volume_factor_grid[i, j, k]
-                safe_gas_fvf_i = gas_formation_volume_factor_grid[i, j, k]
-                if safe_oil_fvf_i < 1e-30:
-                    safe_oil_fvf_i = 1e-30
-                if safe_water_fvf_i < 1e-30:
-                    safe_water_fvf_i = 1e-30
-                if safe_gas_fvf_i < 1e-30:
-                    safe_gas_fvf_i = 1e-30
+                cell_safe_oil_fvf = oil_formation_volume_factor_grid[i, j, k]
+                cell_safe_water_fvf = water_formation_volume_factor_grid[i, j, k]
+                cell_safe_gas_fvf = gas_formation_volume_factor_grid[i, j, k]
+                if cell_safe_oil_fvf < 1e-30:
+                    cell_safe_oil_fvf = 1e-30
+                if cell_safe_water_fvf < 1e-30:
+                    cell_safe_water_fvf = 1e-30
+                if cell_safe_gas_fvf < 1e-30:
+                    cell_safe_gas_fvf = 1e-30
 
-                alpha_solution_gor_i = (
+                cell_alpha_solution_gor = (
                     solution_gas_to_oil_ratio_grid[i, j, k]
-                    * safe_gas_fvf_i
-                    / (safe_oil_fvf_i * bbl_to_ft3)
+                    * cell_safe_gas_fvf
+                    / (cell_safe_oil_fvf * bbl_to_ft3)
                 )
-                alpha_gas_solubility_in_water_i = (
+                cell_alpha_gas_solubility_in_water = (
                     gas_solubility_in_water_grid[i, j, k]
-                    * safe_gas_fvf_i
-                    / (safe_water_fvf_i * bbl_to_ft3)
+                    * cell_safe_gas_fvf
+                    / (cell_safe_water_fvf * bbl_to_ft3)
                 )
 
                 # Water accumulation diagonal: dR_w/dSw = water_density * phi*V/dt
-                water_accumulation_diagonal = water_density_i * accumulation_coefficient
+                water_accumulation_diagonal = (
+                    cell_water_density * accumulation_coefficient
+                )
                 all_rows[i, local_ptr] = water_row
                 all_cols[i, local_ptr] = cell_water_column
                 all_vals[i, local_ptr] = water_accumulation_diagonal
@@ -2059,7 +2062,7 @@ def assemble_flux_contributions(
                 # Clamp to a small positive value to prevent negative diagonal
                 # which destabilises iterative solvers when dissolved gas dominates
                 gas_accumulation_diagonal = (
-                    gas_density_i - gas_density_i * alpha_solution_gor_i
+                    cell_gas_density - cell_gas_density * cell_alpha_solution_gor
                 ) * accumulation_coefficient
 
                 # The diagonal must remain positive for solver stability; if dissolved-gas
@@ -2073,16 +2076,16 @@ def assemble_flux_contributions(
                 # Gas-water coupling accumulation:
                 # dR_g/dSw = (gas_density*alpha_Rsw - gas_density*alpha_Rs) * phi*V/dt
                 # From dM_g/dSw with So = 1 - Sw - Sg substituted:
-                #   M_g = rho_g*Sg + rho_g*alpha_Rs*(1-Sw-Sg) + rho_g*alpha_Rsw*Sw
-                #   dM_g/dSw = -rho_g*alpha_Rs + rho_g*alpha_Rsw
-                coupling_val = (
-                    gas_density_i * alpha_gas_solubility_in_water_i
-                    - gas_density_i * alpha_solution_gor_i
+                #   M_g = gas_density*Sg + gas_density*alpha_Rs*(1-Sw-Sg) + gas_density*alpha_Rsw*Sw
+                #   dM_g/dSw = -gas_density*alpha_Rs + gas_density*alpha_Rsw
+                coupling_value = (
+                    cell_gas_density * cell_alpha_gas_solubility_in_water
+                    - cell_gas_density * cell_alpha_solution_gor
                 ) * accumulation_coefficient
-                if coupling_val != 0.0:
+                if coupling_value != 0.0:
                     all_rows[i, local_ptr] = gas_row
                     all_cols[i, local_ptr] = cell_water_column
-                    all_vals[i, local_ptr] = coupling_val
+                    all_vals[i, local_ptr] = coupling_value
                     local_ptr += 1
 
                 for face in range(6):
@@ -2133,7 +2136,7 @@ def assemble_flux_contributions(
                     ):
                         continue
 
-                    neighbour_1d_index = to_1D_index(
+                    neighbour_idx = to_1D_index(
                         i=ni,  # type: ignore[arg-type]
                         j=nj,  # type: ignore[arg-type]
                         k=nk,  # type: ignore[arg-type]
@@ -2141,8 +2144,8 @@ def assemble_flux_contributions(
                         cell_count_y=cell_count_y,
                         cell_count_z=cell_count_z,
                     )
-                    neighbour_water_column = 2 * neighbour_1d_index
-                    neighbour_gas_column = 2 * neighbour_1d_index + 1
+                    neighbour_water_column = 2 * neighbour_idx
+                    neighbour_gas_column = 2 * neighbour_idx + 1
 
                     # Phase potentials
                     oil_pressure_difference = (
@@ -2240,131 +2243,158 @@ def assemble_flux_contributions(
                     # FVF guards for neighbour; compute alpha on each side then average
                     # Arithmetic averaging eliminates O(1) jumps when upwind cell
                     # switches at a saturation front, keeping the Jacobian consistent.
-                    safe_oil_fvf_n = oil_formation_volume_factor_grid[ni, nj, nk]
-                    safe_gas_fvf_n = gas_formation_volume_factor_grid[ni, nj, nk]
-                    safe_water_fvf_n = water_formation_volume_factor_grid[ni, nj, nk]
-                    if safe_oil_fvf_n < 1e-30:
-                        safe_oil_fvf_n = 1e-30
-                    if safe_gas_fvf_n < 1e-30:
-                        safe_gas_fvf_n = 1e-30
-                    if safe_water_fvf_n < 1e-30:
-                        safe_water_fvf_n = 1e-30
+                    neighbour_safe_oil_fvf = oil_formation_volume_factor_grid[
+                        ni, nj, nk
+                    ]
+                    neighbour_safe_gas_fvf = gas_formation_volume_factor_grid[
+                        ni, nj, nk
+                    ]
+                    neighbour_safe_water_fvf = water_formation_volume_factor_grid[
+                        ni, nj, nk
+                    ]
+                    if neighbour_safe_oil_fvf < 1e-30:
+                        neighbour_safe_oil_fvf = 1e-30
+                    if neighbour_safe_gas_fvf < 1e-30:
+                        neighbour_safe_gas_fvf = 1e-30
+                    if neighbour_safe_water_fvf < 1e-30:
+                        neighbour_safe_water_fvf = 1e-30
 
-                    alpha_solution_gor_n = (
+                    neighbour_alpha_solution_gor = (
                         solution_gas_to_oil_ratio_grid[ni, nj, nk]
-                        * safe_gas_fvf_n
-                        / (safe_oil_fvf_n * bbl_to_ft3)
+                        * neighbour_safe_gas_fvf
+                        / (neighbour_safe_oil_fvf * bbl_to_ft3)
                     )
-                    alpha_gas_solubility_in_water_n = (
+                    neighbour_alpha_gas_solubility_in_water = (
                         gas_solubility_in_water_grid[ni, nj, nk]
-                        * safe_gas_fvf_n
-                        / (safe_water_fvf_n * bbl_to_ft3)
-                    )
-
-                    # Arithmetic-mean alpha and density for face mass-weighting
-                    alpha_solution_gor_face = 0.5 * (
-                        alpha_solution_gor_i + alpha_solution_gor_n
-                    )
-                    alpha_gas_solubility_in_water_face = 0.5 * (
-                        alpha_gas_solubility_in_water_i
-                        + alpha_gas_solubility_in_water_n
-                    )
-                    face_water_density = 0.5 * (
-                        water_density_grid[i, j, k] + water_density_grid[ni, nj, nk]
-                    )
-                    face_gas_density = 0.5 * (
-                        gas_density_grid[i, j, k] + gas_density_grid[ni, nj, nk]
+                        * neighbour_safe_gas_fvf
+                        / (neighbour_safe_water_fvf * bbl_to_ft3)
                     )
 
                     # Inverse viscosities (upwind cell only; zero for non-upwind)
                     if not water_neighbour_is_upwind:
-                        inverse_water_viscosity_i = (
+                        cell_inverse_water_viscosity = (
                             1.0 / water_viscosity_grid[i, j, k]
                             if water_viscosity_grid[i, j, k] > 0.0
                             else 0.0
                         )
-                        inverse_water_viscosity_n = 0.0
+                        neighbour_inverse_water_viscosity = 0.0
+                        face_alpha_gas_solubility_in_water = (
+                            cell_alpha_gas_solubility_in_water
+                        )
+                        face_water_density = water_density_grid[i, j, k]
                     else:
-                        inverse_water_viscosity_i = 0.0
-                        inverse_water_viscosity_n = (
+                        cell_inverse_water_viscosity = 0.0
+                        neighbour_inverse_water_viscosity = (
                             1.0 / water_viscosity_grid[ni, nj, nk]
                             if water_viscosity_grid[ni, nj, nk] > 0.0
                             else 0.0
                         )
+                        face_alpha_gas_solubility_in_water = (
+                            neighbour_alpha_gas_solubility_in_water
+                        )
+                        face_water_density = water_density_grid[ni, nj, nk]
 
                     if not oil_neighbour_is_upwind:
-                        inverse_oil_viscosity_i = (
+                        cell_inverse_oil_viscosity = (
                             1.0 / oil_viscosity_grid[i, j, k]
                             if oil_viscosity_grid[i, j, k] > 0.0
                             else 0.0
                         )
-                        inverse_oil_viscosity_n = 0.0
+                        neighbour_inverse_oil_viscosity = 0.0
+                        face_alpha_solution_gor = cell_alpha_solution_gor
                     else:
-                        inverse_oil_viscosity_i = 0.0
-                        inverse_oil_viscosity_n = (
+                        cell_inverse_oil_viscosity = 0.0
+                        neighbour_inverse_oil_viscosity = (
                             1.0 / oil_viscosity_grid[ni, nj, nk]
                             if oil_viscosity_grid[ni, nj, nk] > 0.0
                             else 0.0
                         )
+                        face_alpha_solution_gor = neighbour_alpha_solution_gor
 
                     if not gas_neighbour_is_upwind:
-                        inverse_gas_viscosity_i = (
+                        cell_inverse_gas_viscosity = (
                             1.0 / gas_viscosity_grid[i, j, k]
                             if gas_viscosity_grid[i, j, k] > 0.0
                             else 0.0
                         )
-                        inverse_gas_viscosity_n = 0.0
+                        neighbour_inverse_gas_viscosity = 0.0
+                        face_gas_density = gas_density_grid[i, j, k]
                     else:
-                        inverse_gas_viscosity_i = 0.0
-                        inverse_gas_viscosity_n = (
+                        cell_inverse_gas_viscosity = 0.0
+                        neighbour_inverse_gas_viscosity = (
                             1.0 / gas_viscosity_grid[ni, nj, nk]
                             if gas_viscosity_grid[ni, nj, nk] > 0.0
                             else 0.0
                         )
+                        face_gas_density = gas_density_grid[ni, nj, nk]
 
                     # Mobility flux derivatives: dF_alpha/dS from relperm (upwind only)
                     # dF = (dkr/dS / mu) * potential * T
 
                     # Water
                     dFw_mob_dSw_i = (
-                        dkrw_dSw_i_eff * inverse_water_viscosity_i * water_potential * T
+                        dkrw_dSw_i_eff
+                        * cell_inverse_water_viscosity
+                        * water_potential
+                        * T
                     )
                     dFw_mob_dSg_i = (
-                        dkrw_dSg_i_eff * inverse_water_viscosity_i * water_potential * T
+                        dkrw_dSg_i_eff
+                        * cell_inverse_water_viscosity
+                        * water_potential
+                        * T
                     )
                     dFw_mob_dSw_n = (
-                        dkrw_dSw_n_eff * inverse_water_viscosity_n * water_potential * T
+                        dkrw_dSw_n_eff
+                        * neighbour_inverse_water_viscosity
+                        * water_potential
+                        * T
                     )
                     dFw_mob_dSg_n = (
-                        dkrw_dSg_n_eff * inverse_water_viscosity_n * water_potential * T
+                        dkrw_dSg_n_eff
+                        * neighbour_inverse_water_viscosity
+                        * water_potential
+                        * T
                     )
 
                     # Oil
                     dFo_mob_dSw_i = (
-                        dkro_dSw_i_eff * inverse_oil_viscosity_i * oil_potential * T
+                        dkro_dSw_i_eff * cell_inverse_oil_viscosity * oil_potential * T
                     )
                     dFo_mob_dSg_i = (
-                        dkro_dSg_i_eff * inverse_oil_viscosity_i * oil_potential * T
+                        dkro_dSg_i_eff * cell_inverse_oil_viscosity * oil_potential * T
                     )
                     dFo_mob_dSw_n = (
-                        dkro_dSw_n_eff * inverse_oil_viscosity_n * oil_potential * T
+                        dkro_dSw_n_eff
+                        * neighbour_inverse_oil_viscosity
+                        * oil_potential
+                        * T
                     )
                     dFo_mob_dSg_n = (
-                        dkro_dSg_n_eff * inverse_oil_viscosity_n * oil_potential * T
+                        dkro_dSg_n_eff
+                        * neighbour_inverse_oil_viscosity
+                        * oil_potential
+                        * T
                     )
 
                     # Gas
                     dFg_mob_dSw_i = (
-                        dkrg_dSw_i_eff * inverse_gas_viscosity_i * gas_potential * T
+                        dkrg_dSw_i_eff * cell_inverse_gas_viscosity * gas_potential * T
                     )
                     dFg_mob_dSg_i = (
-                        dkrg_dSg_i_eff * inverse_gas_viscosity_i * gas_potential * T
+                        dkrg_dSg_i_eff * cell_inverse_gas_viscosity * gas_potential * T
                     )
                     dFg_mob_dSw_n = (
-                        dkrg_dSw_n_eff * inverse_gas_viscosity_n * gas_potential * T
+                        dkrg_dSw_n_eff
+                        * neighbour_inverse_gas_viscosity
+                        * gas_potential
+                        * T
                     )
                     dFg_mob_dSg_n = (
-                        dkrg_dSg_n_eff * inverse_gas_viscosity_n * gas_potential * T
+                        dkrg_dSg_n_eff
+                        * neighbour_inverse_gas_viscosity
+                        * gas_potential
+                        * T
                     )
 
                     # Capillary flux derivatives: dF_alpha/dS from capillary pressure
@@ -2423,16 +2453,16 @@ def assemble_flux_contributions(
                         * T
                     )
 
-                    # Water residual Jacobian: dR_w/dS = -rho_w_face * dF_w/dS
+                    # Water residual Jacobian: dR_w/dS = -water_density_face * dF_w/dS
                     dRw_dSw_i = -face_water_density * (dFw_mob_dSw_i + dFw_cap_dSw_i)
                     dRw_dSg_i = -face_water_density * (dFw_mob_dSg_i + dFw_cap_dSg_i)
                     dRw_dSw_n = -face_water_density * (dFw_mob_dSw_n + dFw_cap_dSw_n)
                     dRw_dSg_n = -face_water_density * (dFw_mob_dSg_n + dFw_cap_dSg_n)
 
                     # Gas residual Jacobian from three streams:
-                    #   Stream 1 — free gas: -rho_g_face * dF_g/dS
-                    #   Stream 2 — dissolved in oil: -rho_g_face * alpha_Rs_face * dF_o/dS
-                    #   Stream 3 — dissolved in water: -rho_g_face * alpha_Rsw_face * dF_w/dS
+                    #   Stream 1 — free gas: -gas_density_face * dF_g/dS
+                    #   Stream 2 — dissolved in oil: -gas_density_face * alpha_Rs_face * dF_o/dS
+                    #   Stream 3 — dissolved in water: -gas_density_face * alpha_Rsw_face * dF_w/dS
 
                     # Stream 1: free gas
                     dRg_gas_dSw_i = -face_gas_density * (dFg_mob_dSw_i + dFg_cap_dSw_i)
@@ -2442,37 +2472,37 @@ def assemble_flux_contributions(
 
                     # Stream 2: dissolved gas in oil (oil potential has no Pc correction)
                     dRg_oil_dSw_i = (
-                        -face_gas_density * alpha_solution_gor_face * dFo_mob_dSw_i
+                        -face_gas_density * face_alpha_solution_gor * dFo_mob_dSw_i
                     )
                     dRg_oil_dSg_i = (
-                        -face_gas_density * alpha_solution_gor_face * dFo_mob_dSg_i
+                        -face_gas_density * face_alpha_solution_gor * dFo_mob_dSg_i
                     )
                     dRg_oil_dSw_n = (
-                        -face_gas_density * alpha_solution_gor_face * dFo_mob_dSw_n
+                        -face_gas_density * face_alpha_solution_gor * dFo_mob_dSw_n
                     )
                     dRg_oil_dSg_n = (
-                        -face_gas_density * alpha_solution_gor_face * dFo_mob_dSg_n
+                        -face_gas_density * face_alpha_solution_gor * dFo_mob_dSg_n
                     )
 
                     # Stream 3: dissolved gas in water (water flux, same mobility+cap derivatives)
                     dRg_water_dSw_i = (
                         -face_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * (dFw_mob_dSw_i + dFw_cap_dSw_i)
                     )
                     dRg_water_dSg_i = (
                         -face_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * (dFw_mob_dSg_i + dFw_cap_dSg_i)
                     )
                     dRg_water_dSw_n = (
                         -face_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * (dFw_mob_dSw_n + dFw_cap_dSw_n)
                     )
                     dRg_water_dSg_n = (
                         -face_gas_density
-                        * alpha_gas_solubility_in_water_face
+                        * face_alpha_gas_solubility_in_water
                         * (dFw_mob_dSg_n + dFw_cap_dSg_n)
                     )
 
@@ -2580,37 +2610,46 @@ def assemble_well_contributions(
     injection wells have fixed rates so their Jacobian is zero.
 
     The mass residual for water is:
-        R_w = accum - rho_w * F_w - rho_w * q_w_vol
-    So dR_w/dS_well = -rho_w * WI * (dkr_w/dS / mu_w) * drawdown * T
+        R_w = accum - water_density * F_w - water_density * q_w_vol
+    So dR_w/dS_well = -water_density * WI * (dkr_w/dS / water_viscosity) * drawdown * T
 
     The mass residual for gas includes dissolved components:
-        R_g includes: -rho_g*q_g - rho_g*alpha_Rs*q_o - rho_g*alpha_Rsw*q_w
-    So dR_g/dS_well = -rho_g * WI * (dkrg/dS / mu_g) * drawdown_g * T
-                    - rho_g * alpha_Rs * WI * (dkro/dS / mu_o) * drawdown_o * T
-                    - rho_g * alpha_Rsw * WI * (dkrw/dS / mu_w) * drawdown_w * T
+        R_g includes: -gas_density*q_g - gas_density*alpha_Rs*q_o - gas_density*alpha_Rsw*q_w
+    So dR_g/dS_well = -gas_density * WI * (dkrg/dS / gas_viscosity) * drawdown_g * T
+                    - gas_density * alpha_Rs * WI * (dkro/dS / oil_viscosity) * drawdown_o * T
+                    - gas_density * alpha_Rsw * WI * (dkrw/dS / water_viscosity) * drawdown_w * T
     """
     rows: typing.List[int] = []
     cols: typing.List[int] = []
     vals: typing.List[float] = []
 
-    def _add(cell_idx: int, row_offset: int, col_offset: int, value: float) -> None:
+    def _add_contribution(
+        cell_idx: int, row_offset: int, col_offset: int, value: float
+    ) -> None:
         if value == 0.0:
             return
         rows.append(2 * cell_idx + row_offset)
         cols.append(2 * cell_idx + col_offset)
         vals.append(value)
 
-    def _alpha_rs(i: int, j: int, k: int) -> float:
-        bg = max(gas_formation_volume_factor_grid[i, j, k], 1e-30)
-        bo = max(oil_formation_volume_factor_grid[i, j, k], 1e-30) * bbl_to_ft3
-        return solution_gas_to_oil_ratio_grid[i, j, k] * bg / bo
+    def _alpha_solution_gor(i: int, j: int, k: int) -> float:
+        gas_fvf = max(gas_formation_volume_factor_grid[i, j, k], 1e-30)
+        oil_fvf = max(oil_formation_volume_factor_grid[i, j, k], 1e-30) * bbl_to_ft3
+        return solution_gas_to_oil_ratio_grid[i, j, k] * gas_fvf / oil_fvf
 
-    def _alpha_rsw(i: int, j: int, k: int) -> float:
-        bg = max(gas_formation_volume_factor_grid[i, j, k], 1e-30)
-        bw = max(water_formation_volume_factor_grid[i, j, k], 1e-30) * bbl_to_ft3
-        return gas_solubility_in_water_grid[i, j, k] * bg / bw
+    def _alpha_gas_solubility_in_water(i: int, j: int, k: int) -> float:
+        gas_fvf = max(gas_formation_volume_factor_grid[i, j, k], 1e-30)
+        water_fvf = max(water_formation_volume_factor_grid[i, j, k], 1e-30) * bbl_to_ft3
+        return gas_solubility_in_water_grid[i, j, k] * gas_fvf / water_fvf
 
-    def _eff(dkr_dSw, dkr_dSo, dkr_dSg, i, j, k):
+    def _effective_derivative(
+        dkr_dSw: npt.NDArray,
+        dkr_dSo: npt.NDArray,
+        dkr_dSg: npt.NDArray,
+        i: int,
+        j: int,
+        k: int,
+    ):
         """So-eliminated effective derivatives."""
         dkr_dSw_eff = dkr_dSw[i, j, k] - dkr_dSo[i, j, k]
         dkr_dSg_eff = dkr_dSg[i, j, k] - dkr_dSo[i, j, k]
@@ -2628,32 +2667,36 @@ def assemble_well_contributions(
 
             if np.isfinite(water_bhp) and water_bhp != 0.0:
                 drawdown = water_bhp - cell_pressure
-                mu_w = float(water_viscosity_grid[i, j, k])
-                inv_mu_w = 1.0 / mu_w if mu_w > 0.0 else 0.0
-                rho_w = float(water_density_grid[i, j, k])
-                dkrw_dSw_eff, dkrw_dSg_eff = _eff(
+                water_viscosity = float(water_viscosity_grid[i, j, k])
+                inverse_water_viscosity = (
+                    1.0 / water_viscosity if water_viscosity > 0.0 else 0.0
+                )
+                water_density = float(water_density_grid[i, j, k])
+                dkrw_dSw_eff, dkrw_dSg_eff = _effective_derivative(
                     dkrw_dSw_grid, dkrw_dSo_grid, dkrw_dSg_grid, i, j, k
                 )
 
                 # dR_w/dSw, dR_w/dSg from water well
-                dqw_dSw = T * inv_mu_w * dkrw_dSw_eff * drawdown
-                dqw_dSg = T * inv_mu_w * dkrw_dSg_eff * drawdown
-                _add(cell_idx, 0, 0, -rho_w * dqw_dSw)
-                _add(cell_idx, 0, 1, -rho_w * dqw_dSg)
+                dqw_dSw = T * inverse_water_viscosity * dkrw_dSw_eff * drawdown
+                dqw_dSg = T * inverse_water_viscosity * dkrw_dSg_eff * drawdown
+                _add_contribution(cell_idx, 0, 0, -water_density * dqw_dSw)
+                _add_contribution(cell_idx, 0, 1, -water_density * dqw_dSg)
 
             if np.isfinite(gas_bhp) and gas_bhp != 0.0:
                 drawdown = gas_bhp - cell_pressure
-                mu_g = float(gas_viscosity_grid[i, j, k])
-                inv_mu_g = 1.0 / mu_g if mu_g > 0.0 else 0.0
-                rho_g = float(gas_density_grid[i, j, k])
-                dkrg_dSw_eff, dkrg_dSg_eff = _eff(
+                gas_viscosity = float(gas_viscosity_grid[i, j, k])
+                inverse_gas_viscosity = (
+                    1.0 / gas_viscosity if gas_viscosity > 0.0 else 0.0
+                )
+                gas_density = float(gas_density_grid[i, j, k])
+                dkrg_dSw_eff, dkrg_dSg_eff = _effective_derivative(
                     dkrg_dSw_grid, dkrg_dSo_grid, dkrg_dSg_grid, i, j, k
                 )
 
-                dqg_dSw = T * inv_mu_g * dkrg_dSw_eff * drawdown
-                dqg_dSg = T * inv_mu_g * dkrg_dSg_eff * drawdown
-                _add(cell_idx, 1, 0, -rho_g * dqg_dSw)
-                _add(cell_idx, 1, 1, -rho_g * dqg_dSg)
+                dqg_dSw = T * inverse_gas_viscosity * dkrg_dSw_eff * drawdown
+                dqg_dSg = T * inverse_gas_viscosity * dkrg_dSg_eff * drawdown
+                _add_contribution(cell_idx, 1, 0, -gas_density * dqg_dSw)
+                _add_contribution(cell_idx, 1, 1, -gas_density * dqg_dSg)
 
     for well_indices in wells_indices.production.values():
         for perf in well_indices:
@@ -2664,54 +2707,74 @@ def assemble_well_contributions(
             water_bhp, oil_bhp, gas_bhp = production_bhps[i, j, k]
 
             T = well_index * md_per_cp_to_ft2_per_psi_per_day
-            alpha_rs = _alpha_rs(i, j, k)
-            alpha_rsw = _alpha_rsw(i, j, k)
-            rho_g = float(gas_density_grid[i, j, k])
+            alpha_solution_gor = _alpha_solution_gor(i, j, k)
+            alpha_gas_solubility_in_water = _alpha_gas_solubility_in_water(i, j, k)
+            gas_density = float(gas_density_grid[i, j, k])
 
             if np.isfinite(water_bhp) and water_bhp != 0.0:
                 drawdown = water_bhp - cell_pressure
-                mu_w = float(water_viscosity_grid[i, j, k])
-                inv_mu_w = 1.0 / mu_w if mu_w > 0.0 else 0.0
-                rho_w = float(water_density_grid[i, j, k])
-                dkrw_dSw_eff, dkrw_dSg_eff = _eff(
+                water_viscosity = float(water_viscosity_grid[i, j, k])
+                inverse_water_viscosity = (
+                    1.0 / water_viscosity if water_viscosity > 0.0 else 0.0
+                )
+                water_density = float(water_density_grid[i, j, k])
+                dkrw_dSw_eff, dkrw_dSg_eff = _effective_derivative(
                     dkrw_dSw_grid, dkrw_dSo_grid, dkrw_dSg_grid, i, j, k
                 )
 
-                dqw_dSw = T * inv_mu_w * dkrw_dSw_eff * drawdown
-                dqw_dSg = T * inv_mu_w * dkrw_dSg_eff * drawdown
+                dqw_dSw = T * inverse_water_viscosity * dkrw_dSw_eff * drawdown
+                dqw_dSg = T * inverse_water_viscosity * dkrw_dSg_eff * drawdown
                 # dR_w/dS from water production
-                _add(cell_idx, 0, 0, -rho_w * dqw_dSw)
-                _add(cell_idx, 0, 1, -rho_w * dqw_dSg)
+                _add_contribution(cell_idx, 0, 0, -water_density * dqw_dSw)
+                _add_contribution(cell_idx, 0, 1, -water_density * dqw_dSg)
                 # dR_g/dS from dissolved gas in produced water
-                _add(cell_idx, 1, 0, -rho_g * alpha_rsw * dqw_dSw)
-                _add(cell_idx, 1, 1, -rho_g * alpha_rsw * dqw_dSg)
+                _add_contribution(
+                    cell_idx,
+                    1,
+                    0,
+                    -gas_density * alpha_gas_solubility_in_water * dqw_dSw,
+                )
+                _add_contribution(
+                    cell_idx,
+                    1,
+                    1,
+                    -gas_density * alpha_gas_solubility_in_water * dqw_dSg,
+                )
 
             if np.isfinite(oil_bhp) and oil_bhp != 0.0:
                 drawdown = oil_bhp - cell_pressure
-                mu_o = float(oil_viscosity_grid[i, j, k])
-                inv_mu_o = 1.0 / mu_o if mu_o > 0.0 else 0.0
-                dkro_dSw_eff, dkro_dSg_eff = _eff(
+                oil_viscosity = float(oil_viscosity_grid[i, j, k])
+                inverse_oil_viscosity = (
+                    1.0 / oil_viscosity if oil_viscosity > 0.0 else 0.0
+                )
+                dkro_dSw_eff, dkro_dSg_eff = _effective_derivative(
                     dkro_dSw_grid, dkro_dSo_grid, dkro_dSg_grid, i, j, k
                 )
 
-                dqo_dSw = T * inv_mu_o * dkro_dSw_eff * drawdown
-                dqo_dSg = T * inv_mu_o * dkro_dSg_eff * drawdown
+                dqo_dSw = T * inverse_oil_viscosity * dkro_dSw_eff * drawdown
+                dqo_dSg = T * inverse_oil_viscosity * dkro_dSg_eff * drawdown
                 # dR_g/dS from dissolved gas in produced oil
-                _add(cell_idx, 1, 0, -rho_g * alpha_rs * dqo_dSw)
-                _add(cell_idx, 1, 1, -rho_g * alpha_rs * dqo_dSg)
+                _add_contribution(
+                    cell_idx, 1, 0, -gas_density * alpha_solution_gor * dqo_dSw
+                )
+                _add_contribution(
+                    cell_idx, 1, 1, -gas_density * alpha_solution_gor * dqo_dSg
+                )
 
             if np.isfinite(gas_bhp) and gas_bhp != 0.0:
                 drawdown = gas_bhp - cell_pressure
-                mu_g = float(gas_viscosity_grid[i, j, k])
-                inv_mu_g = 1.0 / mu_g if mu_g > 0.0 else 0.0
-                dkrg_dSw_eff, dkrg_dSg_eff = _eff(
+                gas_viscosity = float(gas_viscosity_grid[i, j, k])
+                inverse_gas_viscosity = (
+                    1.0 / gas_viscosity if gas_viscosity > 0.0 else 0.0
+                )
+                dkrg_dSw_eff, dkrg_dSg_eff = _effective_derivative(
                     dkrg_dSw_grid, dkrg_dSo_grid, dkrg_dSg_grid, i, j, k
                 )
 
-                dqg_dSw = T * inv_mu_g * dkrg_dSw_eff * drawdown
-                dqg_dSg = T * inv_mu_g * dkrg_dSg_eff * drawdown
-                _add(cell_idx, 1, 0, -rho_g * dqg_dSw)
-                _add(cell_idx, 1, 1, -rho_g * dqg_dSg)
+                dqg_dSw = T * inverse_gas_viscosity * dkrg_dSw_eff * drawdown
+                dqg_dSg = T * inverse_gas_viscosity * dkrg_dSg_eff * drawdown
+                _add_contribution(cell_idx, 1, 0, -gas_density * dqg_dSw)
+                _add_contribution(cell_idx, 1, 1, -gas_density * dqg_dSg)
 
     return (
         np.array(rows, dtype=np.int32),
@@ -2923,7 +2986,7 @@ def assemble_analytical_jacobian(
 def assemble_jacobian(
     config: Config,
     saturation_vector: npt.NDArray,
-    residual_base: npt.NDArray,
+    base_residual: npt.NDArray,
     total_cell_count: int,
     cell_count_x: int,
     cell_count_y: int,
@@ -2973,7 +3036,7 @@ def assemble_jacobian(
     :param config: Simulation configuration. `config.jacobian_assembly_method`
         selects `"analytical"` or `"numerical"`.
     :param saturation_vector: Current saturation vector (numerical path only).
-    :param residual_base: Base residual at current iterate (numerical path only).
+    :param base_residual: Base residual at current iterate (numerical path only).
     :param total_cell_count: `nx * ny * nz`.
     :param cell_count_x: Number of cells in x-direction.
     :param cell_count_y: Number of cells in y-direction.
@@ -3051,7 +3114,7 @@ def assemble_jacobian(
 
     return assemble_numerical_jacobian(
         saturation_vector=saturation_vector,
-        residual_base=residual_base,
+        base_residual=base_residual,
         total_cell_count=total_cell_count,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
@@ -3099,7 +3162,6 @@ def solve_transport(
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     old_water_density_grid: ThreeDimensionalGrid,
-    old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
     old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
     old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
@@ -3194,7 +3256,7 @@ def solve_transport(
     oil_saturation_grid = old_oil_saturation_grid.copy()
     gas_saturation_grid = old_gas_saturation_grid.copy()
 
-    saturation_vector = pack_saturation_grids_to_vector(
+    saturation_vector = pack_grids(
         water_saturation_grid=water_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
         cell_count_x=cell_count_x,
@@ -3270,7 +3332,7 @@ def solve_transport(
             )
         )
 
-        water_residual, gas_residual = _compute_residuals(
+        water_residual, gas_residual = _assemble_residuals(
             water_saturation_grid=water_saturation_grid,
             gas_saturation_grid=gas_saturation_grid,
             old_water_saturation_grid=old_water_saturation_grid,
@@ -3314,7 +3376,7 @@ def solve_transport(
             initial_residual_norm = max(residual_norm, 1e-30)
 
         relative_residual_norm = residual_norm / initial_residual_norm
-        last_max_saturation_update = (
+        max_saturation_update = (
             convergence_history[-1].max_saturation_update
             if convergence_history
             else float("inf")
@@ -3323,11 +3385,11 @@ def solve_transport(
         residual_converged = relative_residual_norm < newton_tolerance and iteration > 0
         saturation_converged = (
             (
-                last_max_saturation_update < transport_convergence_tolerance
+                max_saturation_update < transport_convergence_tolerance
                 and relative_residual_norm < 1e-3
             )
             or (
-                last_max_saturation_update < weak_problem_saturation_threshold
+                max_saturation_update < weak_problem_saturation_threshold
                 and iteration >= 2
                 and residual_norm <= best_residual_norm * 1.5
             )
@@ -3345,7 +3407,7 @@ def solve_transport(
                     iteration,
                     reason,
                     relative_residual_norm,
-                    last_max_saturation_update,
+                    max_saturation_update,
                 )
             convergence_history.append(
                 NewtonConvergenceInfo(
@@ -3361,7 +3423,7 @@ def solve_transport(
         jacobian = assemble_jacobian(
             config=config,
             saturation_vector=saturation_vector,
-            residual_base=residual_vector,
+            base_residual=residual_vector,
             total_cell_count=total_cell_count,
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
@@ -3448,7 +3510,7 @@ def solve_transport(
             water_sat_grid = water_saturation_grid.copy()
             oil_sat_grid = oil_saturation_grid.copy()
             gas_sat_grid = gas_saturation_grid.copy()
-            unpack_vector_to_saturation_grids(
+            unpack_vector(
                 saturation_vector=trial_vec,
                 water_saturation_grid=water_sat_grid,
                 oil_saturation_grid=oil_sat_grid,
@@ -3457,7 +3519,7 @@ def solve_transport(
                 cell_count_y=cell_count_y,
                 cell_count_z=cell_count_z,
             )
-            rw, rg = compute_residuals(
+            rw, rg = assemble_residuals(
                 water_saturation_grid=water_sat_grid,
                 oil_saturation_grid=oil_sat_grid,
                 gas_saturation_grid=gas_sat_grid,
@@ -3467,7 +3529,7 @@ def solve_transport(
             )
             return float(np.linalg.norm(interleave_residuals(rw, rg)))
 
-        saturation_vector_trial, line_search_factor, residual_trial_norm = line_search(
+        trial_saturation_vector, line_search_factor, _ = line_search(
             saturation_vector=saturation_vector,
             saturation_change=saturation_change,
             residual_norm_0=residual_norm,
@@ -3478,26 +3540,26 @@ def solve_transport(
             min_step=minimum_step_size,
         )
 
-        water_saturation_grid_trial = water_saturation_grid.copy()
-        oil_saturation_grid_trial = oil_saturation_grid.copy()
-        gas_saturation_grid_trial = gas_saturation_grid.copy()
-        unpack_vector_to_saturation_grids(
-            saturation_vector=saturation_vector_trial,
-            water_saturation_grid=water_saturation_grid_trial,
-            oil_saturation_grid=oil_saturation_grid_trial,
-            gas_saturation_grid=gas_saturation_grid_trial,
+        trial_water_saturation_grid = water_saturation_grid.copy()
+        trial_oil_saturation_gridoil_saturation_grid = oil_saturation_grid.copy()
+        trial_gas_saturation_grid = gas_saturation_grid.copy()
+        unpack_vector(
+            saturation_vector=trial_saturation_vector,
+            water_saturation_grid=trial_water_saturation_grid,
+            oil_saturation_grid=trial_oil_saturation_gridoil_saturation_grid,
+            gas_saturation_grid=trial_gas_saturation_grid,
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
         )
 
         max_saturation_update = float(
-            np.max(np.abs(saturation_vector_trial - saturation_vector))
+            np.max(np.abs(trial_saturation_vector - saturation_vector))
         )
-        saturation_vector = saturation_vector_trial
-        water_saturation_grid = water_saturation_grid_trial
-        oil_saturation_grid = oil_saturation_grid_trial
-        gas_saturation_grid = gas_saturation_grid_trial
+        saturation_vector = trial_saturation_vector
+        water_saturation_grid = trial_water_saturation_grid
+        oil_saturation_grid = trial_oil_saturation_gridoil_saturation_grid
+        gas_saturation_grid = trial_gas_saturation_grid
 
         convergence_history.append(
             NewtonConvergenceInfo(
@@ -3577,14 +3639,14 @@ def solve_transport(
         and maximum_newton_iterations > 0
         and final_iteration >= maximum_newton_iterations
     ):
-        last_max_saturation_update = (
+        max_saturation_update = (
             convergence_history[-1].max_saturation_update
             if convergence_history
             else float("inf")
         )
         final_relative_residual = final_residual_norm / initial_residual_norm
         if (
-            last_max_saturation_update < weak_problem_saturation_threshold
+            max_saturation_update < weak_problem_saturation_threshold
             and final_relative_residual < 1.0
             and final_residual_norm <= best_residual_norm * 1.5
         ):
@@ -3593,7 +3655,7 @@ def solve_transport(
                 logger.debug(
                     "Newton max iterations reached; accepting weak-problem solution: "
                     "max |ΔS| = %.2e, ||R||/||R0|| = %.2e",
-                    last_max_saturation_update,
+                    max_saturation_update,
                     final_relative_residual,
                 )
 

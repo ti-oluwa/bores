@@ -76,7 +76,6 @@ def solve_transport(
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     old_water_density_grid: ThreeDimensionalGrid,
-    old_oil_density_grid: ThreeDimensionalGrid,
     old_gas_density_grid: ThreeDimensionalGrid,
     old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
     old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
@@ -734,7 +733,7 @@ def assemble_flux_contributions(
                 if safe_gas_fvf < 1e-30:
                     safe_gas_fvf = 1e-30
 
-                # alpha_Rs and alpha_Rsw for interior cell (used in boundary faces)
+                # alpha_Rs and alpha_Rsw for interior cell
                 cell_alpha_solution_gor = (
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf
@@ -1622,12 +1621,12 @@ def apply_updates(
                 if safe_gas_fvf < 1e-30:
                     safe_gas_fvf = 1e-30
 
-                current_alpha_rs = (
+                current_alpha_solution_gor = (
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf
                     / (safe_oil_fvf * bbl_to_ft3)
                 )
-                current_alpha_rsw = (
+                current_alpha_gas_solubility_in_water = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf
                     / (safe_water_fvf * bbl_to_ft3)
@@ -1644,12 +1643,12 @@ def apply_updates(
                 if safe_old_gas_fvf < 1e-30:
                     safe_old_gas_fvf = 1e-30
 
-                old_alpha_rs = (
+                old_alpha_solution_gor = (
                     old_solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_old_gas_fvf
                     / (safe_old_oil_fvf * bbl_to_ft3)
                 )
-                old_alpha_rsw = (
+                old_alpha_gas_solubility_in_water = (
                     old_gas_solubility_in_water_grid[i, j, k]
                     * safe_old_gas_fvf
                     / (safe_old_water_fvf * bbl_to_ft3)
@@ -1686,15 +1685,18 @@ def apply_updates(
                 # Total gas mass update
                 old_total_gas_mass = (
                     old_gas_density * old_gas_saturation
-                    + old_gas_density * old_alpha_rs * old_oil_saturation
-                    + old_gas_density * old_alpha_rsw * old_water_saturation
+                    + old_gas_density * old_alpha_solution_gor * old_oil_saturation
+                    + old_gas_density
+                    * old_alpha_gas_solubility_in_water
+                    * old_water_saturation
                 )
                 # Only oil and water produced contain dissolved gas
                 # Injected oil or water is assumed to be gas free
                 well_gas_mass_rate = (
                     net_gas_well_mass_rate_grid[i, j, k]
-                    + current_alpha_rs * min(net_oil_well_mass_rate_grid[i, j, k], 0.0)
-                    + current_alpha_rsw
+                    + current_alpha_solution_gor
+                    * min(net_oil_well_mass_rate_grid[i, j, k], 0.0)
+                    + current_alpha_gas_solubility_in_water
                     * min(net_water_well_mass_rate_grid[i, j, k], 0.0)
                 )
                 new_total_gas_mass = old_total_gas_mass + dt_over_pv * (
@@ -1703,11 +1705,13 @@ def apply_updates(
 
                 max_dissolved_gas_in_oil = (
                     current_gas_density
-                    * current_alpha_rs
+                    * current_alpha_solution_gor
                     * (1.0 - new_water_saturation)
                 )
                 max_dissolved_gas_in_water = (
-                    current_gas_density * current_alpha_rsw * new_water_saturation
+                    current_gas_density
+                    * current_alpha_gas_solubility_in_water
+                    * new_water_saturation
                 )
                 max_dissolved_gas_mass = (
                     max_dissolved_gas_in_oil + max_dissolved_gas_in_water
@@ -1719,7 +1723,8 @@ def apply_updates(
                 else:
                     # Supersaturated — free gas exists
                     effective_gas_density = (
-                        current_gas_density - current_gas_density * current_alpha_rs
+                        current_gas_density
+                        - current_gas_density * current_alpha_solution_gor
                     )
                     if effective_gas_density <= 1e-30:
                         # Degenerate: gas density equals dissolved fraction density

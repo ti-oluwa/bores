@@ -12,7 +12,7 @@ from bores.correlations.core import (
 
 logging.basicConfig(level=logging.DEBUG)
 
-bores.use_32bit_precision()
+# bores.use_32bit_precision()
 
 # -------------------------------------------------------------------------
 # Grid geometry — SPE1 benchmark (Odeh, 1981, JPT)
@@ -547,7 +547,6 @@ injector = bores.injection_well(
 )
 
 # Oil producer: cell (9,9,2), perforating Layer 3
-# Target: 20 MSTB/D; min BHP: 1000 psia
 producer = bores.production_well(
     well_name="OIL-PROD",
     perforating_intervals=[((9, 9, 2), (9, 9, 2))],
@@ -598,7 +597,7 @@ config = bores.Config(
     pvt_tables=pvt_tables,
     wells=wells,
     disable_capillary_effects=True,
-    freeze_saturation_pressure=True,
+    # freeze_saturation_pressure=True,
     # maximum_gas_saturation_change=0.05,
     # maximum_oil_saturation_change=0.05,
     # maximum_water_saturation_change=0.05,
@@ -638,15 +637,22 @@ def diagnostic(result: bores.StepResult) -> None:
         eff_rho = rhog - rhog * alpha
 
         inj_rate = result.rates.injection_rates.gas[i, j, k] if result.rates else 0
+        prod_rate = result.rates.production_rates.gas[i, j, k] if result.rates else 0
         print(
             f"  {label}({i},{j},{k}): P={p:.0f} Pb={pb:.0f} Rs={rs:.1f} "
             f"So={so:.3f} Sg={sg:.4f} alpha={alpha:.4f} "
-            f"eff_rho={eff_rho:.3f} inj={inj_rate:.3e}"
+            f"eff_rho={eff_rho:.3f} inj={inj_rate:.3e} prod={prod_rate:.3e}"
         )
 
 
 # Run and monitor the simulation and collect states
-states = list(bores.monitor(run, on_step_accepted=diagnostic))
+states = list(
+    bores.monitor(
+        run,
+        # on_step_accepted=diagnostic,
+        # monitor=bores.MonitorConfig(use_tqdm=True, use_rich=False),
+    )
+)
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
