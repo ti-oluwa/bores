@@ -239,6 +239,7 @@ def compute_well_rates(
             if is_gas:
                 # Only needed for oil and water
                 phase_compressibility = None
+                phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
             else:
                 phase_compressibility = typing.cast(
                     float,
@@ -252,13 +253,10 @@ def compute_well_rates(
                         gas_solubility_in_water=gas_solubility_in_water_grid[i, j, k],
                     ),
                 )
+                phase_mobility = typing.cast(
+                    float, water_relative_mobility_grid[i, j, k]
+                )
 
-            phase_mobility = typing.cast(
-                float,
-                water_relative_mobility_grid[i, j, k]
-                + oil_relative_mobility_grid[i, j, k]
-                + gas_relative_mobility_grid[i, j, k],
-            )
             control = well.get_control(
                 pressure=cell_pressure,
                 temperature=cell_temperature,

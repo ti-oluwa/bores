@@ -151,22 +151,40 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="full-si",
+    scheme="impes",
     pressure_solver="direct",
     transport_solver="direct",
     pressure_preconditioner=None,
     transport_preconditioner="ilu",
     maximum_pressure_change=500,
+    maximum_water_saturation_change=0.05,
+    maximum_oil_saturation_change=0.05,
     # freeze_saturation_pressure=True,
     # disable_capillary_effects=True,
-    cfl_threshold=0.5,
+    cfl_threshold=0.3,
     # use_nonlinear_pressure_solve=True
 )
 
 run = bores.Run(model, config)
 run.validate()
+
+
+def diagnostic(result: bores.StepResult) -> None:
+    fp = result.fluid_properties
+
+    for label, (i, j, k) in [
+        ("INJ", (0, 0, 2)),
+        ("PROD", (9, 9, 1)),
+    ]:
+        p = fp.pressure_grid[i, j, k]
+        sg = fp.gas_saturation_grid[i, j, k]
+        so = fp.oil_saturation_grid[i, j, k]
+        sw = fp.water_saturation_grid[i, j, k]
+        print(f"  {label}({i},{j},{k}): P={p:.0f} So={so:.3f} Sw={sw:.4f} Sg={sg:.4f}")
+
+
 # Run and monitor the simulation and collect states
-states = list(bores.monitor(run))
+states = list(bores.monitor(run, on_step_accepted=diagnostic))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(

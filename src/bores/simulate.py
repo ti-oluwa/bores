@@ -29,7 +29,6 @@ from bores.grids.rock_fluid import (
 )
 from bores.initialization import (
     apply_minimum_injector_saturations,
-    check_zero_flow_initialization,
     seed_injection_saturations,
 )
 from bores.material_balance import (
@@ -1322,13 +1321,24 @@ def _run_full_sequential_implicit_step(
     previous_oil_saturation_grid = fluid_properties.oil_saturation_grid.copy()
     previous_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
 
-    # Copy before transport update
+    # Copy at old time before transport update
     if hysteresis_state is not None:
         old_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
         old_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
     else:
         old_water_saturation_grid = None
         old_gas_saturation_grid = None
+
+    # Copy at old time before any PVT update
+    old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
+    old_gas_solubility_in_water_grid = (
+        fluid_properties.gas_solubility_in_water_grid.copy()
+    )
+    old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
+    old_gas_fvf_grid = fluid_properties.gas_formation_volume_factor_grid.copy()
+    old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
+    old_water_density_grid = fluid_properties.water_density_grid.copy()
+    old_gas_density_grid = fluid_properties.gas_density_grid.copy()
 
     iter_fluid_properties = fluid_properties
     iter_relative_mobility_grids = relative_mobility_grids
@@ -1491,21 +1501,6 @@ def _run_full_sequential_implicit_step(
         logger.debug(
             "Pressure updated in fluid properties for outer iteration saturation solve."
         )
-
-        # Copy before PVT updates
-        old_solution_gor_grid = (
-            iter_fluid_properties.solution_gas_to_oil_ratio_grid.copy()
-        )
-        old_gas_solubility_in_water_grid = (
-            iter_fluid_properties.gas_solubility_in_water_grid.copy()
-        )
-        old_oil_fvf_grid = iter_fluid_properties.oil_formation_volume_factor_grid.copy()
-        old_gas_fvf_grid = iter_fluid_properties.gas_formation_volume_factor_grid.copy()
-        old_water_fvf_grid = (
-            iter_fluid_properties.water_formation_volume_factor_grid.copy()
-        )
-        old_water_density_grid = iter_fluid_properties.water_density_grid.copy()
-        old_gas_density_grid = iter_fluid_properties.gas_density_grid.copy()
 
         logger.debug(
             "Updating fluid properties to reflect pressure change for outer iteration..."

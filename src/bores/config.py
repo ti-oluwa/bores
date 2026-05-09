@@ -520,7 +520,7 @@ class Config(
         with self._lock:
             return attrs.evolve(self, **kwargs)
 
-    def with_updates(self, **kwargs: typing.Any) -> Self:
+    def update(self, **kwargs: typing.Any) -> Self:
         """
         Return a new `Config` with updated parameters (immutable pattern).
 
