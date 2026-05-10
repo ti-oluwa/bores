@@ -778,7 +778,7 @@ class InjectedFluid(WellFluid):
         Lookup priority:
 
         1. `self.density` scalar override. Returned directly if set.
-        2. `self.pvt_table.density(pressure, temperature, salinity=...)` — used
+        2. `self.pvt_table.density(pressure, temperature, salinity=...)` - used
            when a PVT table is available and returns a non-`None` result.
         3. Correlation fallback. Uses `specific_gravity` via the
            appropriate phase correlation (McCain for water, real-gas law for gas).
@@ -818,10 +818,10 @@ class InjectedFluid(WellFluid):
 
         vectorize_pressure = isinstance(pressure, np.ndarray)
         vectorize_temperature = isinstance(temperature, np.ndarray)
-        use_vectorization = vectorize_pressure or vectorize_temperature
-        if use_vectorization and not vectorize_pressure:
+        use_vector = vectorize_pressure or vectorize_temperature
+        if use_vector and not vectorize_pressure:
             pressure = np.full_like(temperature, pressure)
-        elif use_vectorization and not vectorize_temperature:
+        elif use_vector and not vectorize_temperature:
             temperature = np.full_like(pressure, temperature)
 
         if self.phase == FluidPhase.WATER:
@@ -829,7 +829,7 @@ class InjectedFluid(WellFluid):
                 "gas_free_water_formation_volume_factor", None
             )
             if gas_free_water_fvf is None:
-                if use_vectorization:
+                if use_vector:
                     gas_free_water_fvf = (
                         compute_gas_free_water_formation_volume_factor_vectorized(
                             pressure=pressure,  # type: ignore
@@ -849,7 +849,7 @@ class InjectedFluid(WellFluid):
             if "gas_gravity" not in kwargs:
                 kwargs["gas_gravity"] = self.specific_gravity
 
-            if use_vectorization:
+            if use_vector:
                 return compute_water_density_vectorized(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
@@ -866,7 +866,7 @@ class InjectedFluid(WellFluid):
 
         gas_z_factor = kwargs.get("gas_compressibility_factor", None)
         if gas_z_factor is None:
-            if use_vectorization:
+            if use_vector:
                 gas_z_factor = compute_gas_compressibility_factor_vectorized(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
@@ -881,7 +881,7 @@ class InjectedFluid(WellFluid):
                     method="dak",
                 )
 
-        if use_vectorization:
+        if use_vector:
             return compute_gas_density_vectorized(
                 pressure=pressure,  # type: ignore
                 temperature=temperature,  # type: ignore
@@ -936,14 +936,14 @@ class InjectedFluid(WellFluid):
 
         vectorize_pressure = isinstance(pressure, np.ndarray)
         vectorize_temperature = isinstance(temperature, np.ndarray)
-        use_vectorization = vectorize_pressure or vectorize_temperature
-        if use_vectorization and not vectorize_pressure:
+        use_vector = vectorize_pressure or vectorize_temperature
+        if use_vector and not vectorize_pressure:
             pressure = np.full_like(temperature, pressure)
-        elif use_vectorization and not vectorize_temperature:
+        elif use_vector and not vectorize_temperature:
             temperature = np.full_like(pressure, temperature)
 
         if self.phase == FluidPhase.WATER:
-            if use_vectorization:
+            if use_vector:
                 return compute_water_viscosity_vectorized(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
@@ -968,7 +968,7 @@ class InjectedFluid(WellFluid):
         if gas_density is None:
             gas_z_factor = kwargs.get("gas_compressibility_factor", None)
             if gas_z_factor is None:
-                if use_vectorization:
+                if use_vector:
                     gas_z_factor = compute_gas_compressibility_factor_vectorized(
                         pressure=pressure,  # type: ignore
                         temperature=temperature,  # type: ignore
@@ -983,7 +983,7 @@ class InjectedFluid(WellFluid):
                         method="dak",
                     )
 
-            if use_vectorization:
+            if use_vector:
                 gas_density = compute_gas_density_vectorized(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
@@ -998,7 +998,7 @@ class InjectedFluid(WellFluid):
                     gas_compressibility_factor=gas_z_factor,  # type: ignore
                 )
 
-        if use_vectorization:
+        if use_vector:
             return compute_gas_viscosity_vectorized(
                 temperature=temperature,  # type: ignore
                 gas_density=gas_density,  # type: ignore
@@ -1009,6 +1009,90 @@ class InjectedFluid(WellFluid):
             gas_density=gas_density,  # type: ignore
             gas_molecular_weight=self.molecular_weight,
         )
+
+    def get_mobility(
+        self,
+        relative_permeability: FloatOrArray,
+        endpoint_relative_permeability: float,
+        pressure: typing.Optional[FloatOrArray] = None,
+        temperature: typing.Optional[FloatOrArray] = None,
+        viscosity: typing.Optional[FloatOrArray] = None,
+        eta: float = 1e-3,
+        **kwargs: typing.Any,
+    ) -> FloatOrArray:
+        """
+        Compute the effective well-connection mobility for this injected fluid,
+        applying a startup floor to prevent zero injectivity when the reservoir
+        cell has not yet been contacted by the injected phase.
+
+        The mobility floor ensures that at early time, when the reservoir relative
+        permeability of the injected phase is zero (e.g. Sw ≈ Swc), the well
+        connection still has a physically-meaningful minimum injectivity. As the
+        injected phase accumulates in the wellblock, the reservoir relative
+        permeability naturally rises above the floor and the standard reservoir
+        value takes over - no explicit switch is needed.
+
+        The effective kr used in the well connection flux is:
+
+            effective_relative_permeability = max(kr_reservoir, η * kr_endpoint)
+
+        and the returned mobility is:
+
+            λ_eff = effective_relative_permeability / μ
+
+        This affects only the well connection rate / BHP calculation. It must
+        never be used for intercell transport upwinding, which uses standard
+        reservoir-state mobilities.
+
+        :param relative_permeability: Reservoir-cell relative permeability of the
+            injected phase at the current saturation state (dimensionless).
+            For a water injector this is krw(Sw); for a gas injector krg(Sg).
+        :param endpoint_relative_permeability: Endpoint (maximum) relative
+            permeability of the injected phase from the two-phase table
+            (e.g. krw at Sor for water, krg at Swc for gas). For unit-normalized
+            tables this is 1.0. The caller is responsible for supplying the
+            correct value from whichever relperm table is active.
+        :param pressure: Reservoir pressure at the perforation (psi). Used to
+            compute viscosity when *viscosity* is not provided.
+        :param temperature: Reservoir temperature at the perforation (°F). Used
+            to compute viscosity when *viscosity* is not provided.
+        :param viscosity: Pre-computed viscosity of the injected fluid (cP).
+            When provided, the internal `get_viscosity` call is skipped.
+            Pass `None` (default) to compute viscosity from pressure and
+            temperature using the fluid's PVT table or correlation.
+        :param eta: Mobility floor fraction (dimensionless). The floor mobility
+            is `η * kr_endpoint / μ`. Default `1e-3` is consistent with
+            typical commercial simulator practice (CMG, Eclipse). Reduce toward
+            `1e-4` for tighter reservoirs or increase toward `0.1` if
+            startup stalls persist.
+        :return: Effective well-connection mobility `λ_eff = effective_relative_permeability / μ (mD/cP)`
+            in the unit system used throughout; the caller applies the unit
+            conversion factor via the well transmissibility).
+        """
+        if viscosity is None:
+            if pressure is None or temperature is None:
+                raise ValidationError(
+                    "`pressure` and `temperature` are both required when `viscosity` is not explicitly provided."
+                )
+            viscosity = self.get_viscosity(
+                pressure=pressure, temperature=temperature, **kwargs
+            )
+
+        use_vector = isinstance(relative_permeability, np.ndarray) or isinstance(
+            viscosity, np.ndarray
+        )
+        relative_permeability_floor = eta * endpoint_relative_permeability
+
+        if use_vector:
+            effective_relative_permeability = np.maximum(
+                np.atleast_1d(relative_permeability), relative_permeability_floor
+            )
+            return effective_relative_permeability / viscosity
+
+        effective_relative_permeability = max(
+            relative_permeability, relative_permeability_floor
+        )
+        return effective_relative_permeability / viscosity
 
     def get_compressibility(
         self, pressure: FloatOrArray, temperature: FloatOrArray, **kwargs: typing.Any
@@ -1050,10 +1134,10 @@ class InjectedFluid(WellFluid):
 
         vectorize_pressure = isinstance(pressure, np.ndarray)
         vectorize_temperature = isinstance(temperature, np.ndarray)
-        use_vectorization = vectorize_pressure or vectorize_temperature
-        if use_vectorization and not vectorize_pressure:
+        use_vector = vectorize_pressure or vectorize_temperature
+        if use_vector and not vectorize_pressure:
             pressure = np.full_like(temperature, pressure)
-        elif use_vectorization and not vectorize_temperature:
+        elif use_vector and not vectorize_temperature:
             temperature = np.full_like(pressure, temperature)
 
         if self.phase == FluidPhase.WATER:
@@ -1061,7 +1145,7 @@ class InjectedFluid(WellFluid):
                 "gas_free_water_formation_volume_factor", None
             )
             if gas_free_water_fvf is None:
-                if use_vectorization:
+                if use_vector:
                     gas_free_water_fvf = (
                         compute_gas_free_water_formation_volume_factor_vectorized(
                             pressure=pressure,  # type: ignore
@@ -1075,7 +1159,7 @@ class InjectedFluid(WellFluid):
                     )
                 kwargs["gas_free_water_formation_volume_factor"] = gas_free_water_fvf
 
-            if use_vectorization:
+            if use_vector:
                 return compute_water_compressibility_vectorized(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
@@ -1091,7 +1175,7 @@ class InjectedFluid(WellFluid):
             )
 
         kwargs.setdefault("gas_gravity", self.specific_gravity)
-        if use_vectorization:
+        if use_vector:
             if "gas_gravity" not in kwargs:
                 kwargs["gas_gravity"] = np.full_like(pressure, self.specific_gravity)
             return compute_gas_compressibility_vectorized(
@@ -1141,10 +1225,10 @@ class InjectedFluid(WellFluid):
 
         vectorize_pressure = isinstance(pressure, np.ndarray)
         vectorize_temperature = isinstance(temperature, np.ndarray)
-        use_vectorization = vectorize_pressure or vectorize_temperature
-        if use_vectorization and not vectorize_pressure:
+        use_vector = vectorize_pressure or vectorize_temperature
+        if use_vector and not vectorize_pressure:
             pressure = np.full_like(temperature, pressure)
-        elif use_vectorization and not vectorize_temperature:
+        elif use_vector and not vectorize_temperature:
             temperature = np.full_like(pressure, temperature)
 
         if self.phase == FluidPhase.WATER:
@@ -1152,7 +1236,7 @@ class InjectedFluid(WellFluid):
             if water_density is None:
                 # No need for gas-free FVF or gas FVF here since injection water
                 # is typically gas-free fresh water or degassed formation water.
-                if use_vectorization:
+                if use_vector:
                     water_density = compute_water_density_vectorized(
                         pressure=pressure,  # type: ignore
                         temperature=temperature,  # type: ignore
@@ -1165,7 +1249,7 @@ class InjectedFluid(WellFluid):
                         salinity=self.salinity or 0.0,
                     )
 
-            if use_vectorization:
+            if use_vector:
                 return compute_water_formation_volume_factor_vectorized(
                     salinity=self.salinity or 0.0,
                     water_density=water_density,  # type: ignore
@@ -1182,7 +1266,7 @@ class InjectedFluid(WellFluid):
 
         gas_z_factor = kwargs.get("gas_compressibility_factor", None)
         if gas_z_factor is None:
-            if use_vectorization:
+            if use_vector:
                 gas_z_factor = compute_gas_compressibility_factor_vectorized(
                     pressure=pressure,  # type: ignore
                     temperature=temperature,  # type: ignore
@@ -1197,7 +1281,7 @@ class InjectedFluid(WellFluid):
                     method="dak",
                 )
 
-        if use_vectorization:
+        if use_vector:
             return compute_gas_formation_volume_factor_vectorized(
                 pressure=pressure,  # type: ignore
                 temperature=temperature,  # type: ignore

@@ -1186,8 +1186,16 @@ class KilloughLandRelPermModel(
         return self.gas_oil_drainage_table.get_gas_oil_wetting_phase()
 
     def get_oil_relperm_endpoint(self) -> float:
-        """Resolve kro at connate water from the drainage table."""
+        """Oil relative permeability endpoint from the primary drainage table."""
         return self.oil_water_drainage_table.get_oil_relperm_endpoint()
+
+    def get_water_relperm_endpoint(self) -> float:
+        """Water relative permeability endpoint from the primary drainage table."""
+        return self.oil_water_drainage_table.get_water_relperm_endpoint()
+
+    def get_gas_relperm_endpoint(self) -> float:
+        """Gas relative permeability endpoint from the primary drainage table."""
+        return self.gas_oil_drainage_table.get_gas_relperm_endpoint()
 
     def _parse_hysteresis_kwargs(
         self,

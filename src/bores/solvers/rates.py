@@ -4,6 +4,7 @@ import attrs
 import numpy as np
 import numpy.typing as npt
 
+from bores import RelativeMobilityGrids
 from bores.config import Config
 from bores.constants import c
 from bores.datastructures import (
@@ -13,14 +14,15 @@ from bores.datastructures import (
     Rates,
     SparseTensor,
 )
+from bores.grids.base import RelPermGrids
 from bores.models import FluidProperties
+from bores.rock_fluid.relperm import RelPermEndpoints
 from bores.solvers.base import _warn_injection_rate, _warn_production_rate, to_1D_index
 from bores.types import (
     FluidPhase,
     NDimension,
     NDimensionalGrid,
     OneDimension,
-    ThreeDimensionalGrid,
     ThreeDimensions,
 )
 from bores.wells.base import Wells
@@ -87,9 +89,9 @@ class WellRates(typing.Generic[NDimension]):
 
 def compute_well_rates(
     fluid_properties: FluidProperties[ThreeDimensions],
-    water_relative_mobility_grid: ThreeDimensionalGrid,
-    oil_relative_mobility_grid: ThreeDimensionalGrid,
-    gas_relative_mobility_grid: ThreeDimensionalGrid,
+    relperm_grids: RelPermGrids[ThreeDimensions],
+    relperm_endpoints: RelPermEndpoints,
+    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     time: float,
     config: Config,
@@ -124,6 +126,9 @@ def compute_well_rates(
     grid_shape = pressure_grid.shape
     cell_count_x, cell_count_y, cell_count_z = grid_shape
     cell_count = cell_count_x * cell_count_y * cell_count_z
+    water_relative_mobility_grid = relative_mobility_grids.water_relative_mobility
+    oil_relative_mobility_grid = relative_mobility_grids.oil_relative_mobility
+    gas_relative_mobility_grid = relative_mobility_grids.gas_relative_mobility
 
     net_water_well_rate_grid = np.zeros(
         (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
@@ -239,7 +244,17 @@ def compute_well_rates(
             if is_gas:
                 # Only needed for oil and water
                 phase_compressibility = None
-                phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
+                phase_mobility = typing.cast(
+                    float,
+                    injected_fluid.get_mobility(
+                        relative_permeability=relperm_grids.krg[i, j, k],
+                        endpoint_relative_permeability=relperm_endpoints.gas,
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        viscosity=phase_viscosity,
+                        eta=0.1,
+                    ),
+                )
             else:
                 phase_compressibility = typing.cast(
                     float,
@@ -254,7 +269,15 @@ def compute_well_rates(
                     ),
                 )
                 phase_mobility = typing.cast(
-                    float, water_relative_mobility_grid[i, j, k]
+                    float,
+                    injected_fluid.get_mobility(
+                        relative_permeability=relperm_grids.krw[i, j, k],
+                        endpoint_relative_permeability=relperm_endpoints.water,
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        viscosity=phase_viscosity,
+                        eta=0.1,
+                    ),
                 )
 
             control = well.get_control(

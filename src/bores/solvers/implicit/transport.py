@@ -2978,7 +2978,7 @@ def assemble_analytical_jacobian(
     all_vals = np.concatenate([flux_vals, well_vals])
     return coo_matrix(
         (all_vals, (all_rows, all_cols)),
-        shape=(system_size, system_size),
+        shape=(system_size, system_size), 
         dtype=np.float64,
     )
 

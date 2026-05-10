@@ -35,6 +35,7 @@ __all__ = [
     "BrooksCoreyRelPermModel",
     "LETParameters",
     "LETThreePhaseRelPermModel",
+    "RelPermEndpoints",
     "ThreePhaseRelPermTable",
     "TwoPhaseRelPermTable",
     "arithmetic_mean_rule",
@@ -1792,6 +1793,33 @@ def get_mixing_rule_partial_derivatives(
     )
 
 
+@attrs.frozen
+class RelPermEndpoints:
+    """
+    Relative permeability endpoint values for all three phases.
+
+    All values are dimensionless and in [0, 1] for normalized tables.
+    """
+
+    oil: float
+    """
+    Oil relative permeability at connate water saturation with no gas (krocw).
+    Reference value for three-phase mixing rule normalization.
+    """
+
+    water: float
+    """
+    Water relative permeability endpoint (krw at residual oil saturation, Sor).
+    Used as the injector mobility floor reference for water injectors.
+    """
+
+    gas: float
+    """
+    Gas relative permeability endpoint (krg at connate water + residual oil).
+    Used as the injector mobility floor reference for gas injectors.
+    """
+
+
 class RelativePermeabilityTable(StoreSerializable):
     """
     Protocol for a relative permeability table that computes relative permeabilities based on fluid saturations.
@@ -1806,8 +1834,42 @@ class RelativePermeabilityTable(StoreSerializable):
         raise NotImplementedError
 
     def get_oil_relperm_endpoint(self) -> float:
-        """Resolve the oil relative permeability at connate water saturation. Defaults to 1.0"""
+        """Oil relative permeability at connate water saturation (krocw). Defaults to 1.0."""
         return 1.0
+
+    def get_water_relperm_endpoint(self) -> float:
+        """
+        Water relative permeability endpoint (krw at residual oil saturation).
+
+        Returns the maximum krw value from the two-phase oil-water table.
+        Defaults to 1.0 for unit-normalized tables and analytical models.
+        """
+        return 1.0
+
+    def get_gas_relperm_endpoint(self) -> float:
+        """
+        Gas relative permeability endpoint (krg at connate water + residual oil).
+
+        Returns the maximum krg value from the two-phase gas-oil table.
+        Defaults to 1.0 for unit-normalized tables and analytical models.
+        """
+        return 1.0
+
+    def get_relperm_endpoints(self) -> RelPermEndpoints:
+        """
+        Compute all three phase relative permeability endpoints in a single call.
+
+        Returns a `RelPermEndpoints` container holding kro, krw, and krg endpoint
+        values. For unit-normalized tables all three are 1.0. For unnormalized
+        tabular data the values are read from the stored kr arrays.
+
+        :return: `RelPermEndpoints` with oil, water, and gas endpoint values.
+        """
+        return RelPermEndpoints(
+            oil=self.get_oil_relperm_endpoint(),
+            water=self.get_water_relperm_endpoint(),
+            gas=self.get_gas_relperm_endpoint(),
+        )
 
     def get_relative_permeabilities(
         self,
@@ -2388,17 +2450,27 @@ class TwoPhaseRelPermTable(
         return _apply_relperm_floor_to_derivative(dkr, kr_raw, floor)
 
     def get_oil_relperm_endpoint(self) -> float:
-        """
-        Resolve the oil relative permeability endpoint.
-
-        For a two-phase table acting as a three-phase table, the endpoint is
-        the maximum of whichever phase array holds oil kr values.
-        """
         if self.non_wetting_phase == FluidPhase.OIL:
             return float(np.max(self.non_wetting_phase_relative_permeability))
         elif self.wetting_phase == FluidPhase.OIL:
             return float(np.max(self.wetting_phase_relative_permeability))
         return 1.0
+
+    def get_water_relperm_endpoint(self) -> float:
+        phases = {self.wetting_phase, self.non_wetting_phase}
+        if FluidPhase.WATER not in phases:
+            return 1.0  # gas-oil table, water not represented
+        if self.wetting_phase == FluidPhase.WATER:
+            return float(np.max(self.wetting_phase_relative_permeability))
+        return float(np.max(self.non_wetting_phase_relative_permeability))
+
+    def get_gas_relperm_endpoint(self) -> float:
+        phases = {self.wetting_phase, self.non_wetting_phase}
+        if FluidPhase.GAS not in phases:
+            return 1.0  # oil-water table, gas not represented
+        if self.wetting_phase == FluidPhase.GAS:
+            return float(np.max(self.wetting_phase_relative_permeability))
+        return float(np.max(self.non_wetting_phase_relative_permeability))
 
     def get_relative_permeabilities(
         self,
@@ -2738,16 +2810,13 @@ class ThreePhaseRelPermTable(
         return self.gas_oil_table.wetting_phase  # type:ignore[return-value]    # ty:ignore[invalid-return-type]
 
     def get_oil_relperm_endpoint(self) -> float:
-        """
-        Resolve the oil relative permeability at connate water saturation.
-
-        For a normalized table this equals 1.0. We approximate it as the
-        maximum value of the non-wetting (oil) phase kr in the oil-water
-        table, which equals kro(Sw=Swc, Sg=0).
-
-        :return: kro endpoint scalar.
-        """
         return self.oil_water_table.get_oil_relperm_endpoint()
+
+    def get_water_relperm_endpoint(self) -> float:
+        return self.oil_water_table.get_water_relperm_endpoint()
+
+    def get_gas_relperm_endpoint(self) -> float:
+        return self.gas_oil_table.get_gas_relperm_endpoint()
 
     def get_relative_permeabilities(
         self,
@@ -4116,8 +4185,6 @@ class BrooksCoreyRelPermModel(
             d_kro_d_so_raw = f * d_kro_ww_d_so + (1.0 - f) * d_kro_ow_d_so
             d_kro_d_sg_raw = f * d_kro_ww_d_sg + (1.0 - f) * zeros
 
-            d_krg_d_sw_raw = zeros.copy()
-            d_krg_d_so_raw = zeros.copy()
             d_krg_d_sg_raw = f * d_krg_ww_d_sg_raw + (1.0 - f) * d_krg_ow_d_sg
 
             # Apply floors to blended derivatives
@@ -4920,6 +4987,15 @@ class LETThreePhaseRelPermModel(
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         return FluidPhase.OIL
 
+    def get_oil_relperm_endpoint(self) -> float:
+        return self.maximum_oil_relperm
+
+    def get_water_relperm_endpoint(self) -> float:
+        return self.maximum_water_relperm
+
+    def get_gas_relperm_endpoint(self) -> float:
+        return self.maximum_gas_relperm
+
     def get_relative_permeabilities(
         self,
         water_saturation: FloatOrArray,
@@ -5121,7 +5197,7 @@ class LETThreePhaseRelPermModel(
         floor_g = _resolve_relperm_floor(self.minimum_gas_relperm)
 
         # kro_endpoint for mixing rule calls: maximum_oil_relperm for LET
-        kro_endpoint = kro_max
+        kro_endpoint = self.get_oil_relperm_endpoint()
 
         is_scalar = (
             np.isscalar(water_saturation)
@@ -5599,8 +5675,6 @@ class LETThreePhaseRelPermModel(
             d_kro_d_so_raw = f * d_kro_ww_d_so + (1.0 - f) * d_kro_ow_d_so
             d_kro_d_sg_raw = f * d_kro_ww_d_sg
 
-            d_krg_d_sw_raw = zeros.copy()
-            d_krg_d_so_raw = zeros.copy()
             d_krg_d_sg_raw = f * d_krg_ww_d_sg_raw + (1.0 - f) * d_krg_ow_d_sg
 
             # Apply floors to blended derivatives
@@ -5856,7 +5930,7 @@ class LETThreePhaseRelPermModel(
             d_krg_d_sg,
         )
         if is_scalar:
-            results = tuple(r.item() for r in results)
+            results = tuple(r.item() for r in results)  # type: ignore
             return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],

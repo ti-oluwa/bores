@@ -674,7 +674,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         cfl_threshold=0.3,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
-    return (wells,)
+    return
 
 
 @app.cell
@@ -1098,11 +1098,11 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 @app.cell
 def _(bores):
     viz = bores.pyvista3d.DataVisualizer(config=bores.pyvista3d.PlotConfig(off_screen=False))
-    return (viz,)
+    return
 
 
-@app.cell
-def _(bores, states, viz, wells):
+app._unparsable_cell(
+    r"""
     injector_locations, producer_locations = wells.locations
     injector_names, producer_names = wells.names
     well_positions = [*injector_locations, *producer_locations]
@@ -1127,9 +1127,9 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "oil-sat"
+    property = "gas-sat"
     figures = []
-    timesteps = [360]
+    timesteps = [1q50]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],
@@ -1144,7 +1144,9 @@ def _(bores, states, viz, wells):
         plots.show()
     else:
         figures[0].show()
-    return
+    """,
+    name="_"
+)
 
 
 @app.cell

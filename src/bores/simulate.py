@@ -42,6 +42,7 @@ from bores.models import (
     RockProperties,
 )
 from bores.precision import get_dtype
+from bores.rock_fluid.relperm import RelPermEndpoints
 from bores.solvers import explicit, implicit
 from bores.solvers.base import normalize_saturations
 from bores.solvers.rates import WellRates, compute_well_rates
@@ -352,6 +353,7 @@ def _run_impes_step(
     fluid_properties: FluidProperties[ThreeDimensions],
     hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     relperm_grids: RelPermGrids[ThreeDimensions],
+    relperm_endpoints: RelPermEndpoints,
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
@@ -415,9 +417,9 @@ def _run_impes_step(
         logger.debug("Computing well rates...")
         well_rates = compute_well_rates(
             fluid_properties=fluid_properties,
-            water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
-            oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
-            gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+            relperm_grids=relperm_grids,
+            relative_mobility_grids=relative_mobility_grids,
+            relperm_endpoints=relperm_endpoints,
             wells=wells,
             time=time,
             config=config,
@@ -572,9 +574,9 @@ def _run_impes_step(
         logger.debug("Re-computing well rates after pressure solve for consistency...")
         well_rates = compute_well_rates(
             fluid_properties=fluid_properties,
-            water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
-            oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
-            gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+            relperm_grids=relperm_grids,
+            relative_mobility_grids=relative_mobility_grids,
+            relperm_endpoints=relperm_endpoints,
             wells=wells,
             time=time,
             config=config,
@@ -806,6 +808,7 @@ def _run_sequential_implicit_step(
     fluid_properties: FluidProperties[ThreeDimensions],
     hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     relperm_grids: RelPermGrids[ThreeDimensions],
+    relperm_endpoints: RelPermEndpoints,
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
@@ -873,9 +876,9 @@ def _run_sequential_implicit_step(
         logger.debug("Computing well rates...")
         well_rates = compute_well_rates(
             fluid_properties=fluid_properties,
-            water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
-            oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
-            gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+            relperm_grids=relperm_grids,
+            relative_mobility_grids=relative_mobility_grids,
+            relperm_endpoints=relperm_endpoints,
             wells=wells,
             time=time,
             config=config,
@@ -1028,9 +1031,9 @@ def _run_sequential_implicit_step(
         logger.debug("Re-computing well rates after pressure solve for consistency...")
         well_rates = compute_well_rates(
             fluid_properties=fluid_properties,
-            water_relative_mobility_grid=relative_mobility_grids.water_relative_mobility,
-            oil_relative_mobility_grid=relative_mobility_grids.oil_relative_mobility,
-            gas_relative_mobility_grid=relative_mobility_grids.gas_relative_mobility,
+            relperm_grids=relperm_grids,
+            relative_mobility_grids=relative_mobility_grids,
+            relperm_endpoints=relperm_endpoints,
             wells=wells,
             time=time,
             config=config,
@@ -1262,6 +1265,7 @@ def _run_full_sequential_implicit_step(
     fluid_properties: FluidProperties[ThreeDimensions],
     hysteresis_state: typing.Optional[HysteresisState[ThreeDimensions]],
     relperm_grids: RelPermGrids[ThreeDimensions],
+    relperm_endpoints: RelPermEndpoints,
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
@@ -1386,9 +1390,9 @@ def _run_full_sequential_implicit_step(
             logger.debug("Computing well rates...")
             well_rates = compute_well_rates(
                 fluid_properties=iter_fluid_properties,
-                water_relative_mobility_grid=iter_relative_mobility_grids.water_relative_mobility,
-                oil_relative_mobility_grid=iter_relative_mobility_grids.oil_relative_mobility,
-                gas_relative_mobility_grid=iter_relative_mobility_grids.gas_relative_mobility,
+                relperm_grids=iter_relperm_grids,
+                relative_mobility_grids=iter_relative_mobility_grids,
+                relperm_endpoints=relperm_endpoints,
                 wells=wells,
                 time=time,
                 config=config,
@@ -2087,6 +2091,9 @@ def run(
         config.minimum_injector_water_saturation
         and config.minimum_injector_gas_saturation
     )
+    relperm_endpoints = (
+        config.rock_fluid_tables.relative_permeability_table.get_relperm_endpoints()
+    )
 
     logger.info("Starting simulation workflow...")
     logger.info(
@@ -2270,6 +2277,7 @@ def run(
                     fluid_properties=fluid_properties,
                     hysteresis_state=hysteresis_state,
                     relperm_grids=relperm_grids,
+                    relperm_endpoints=relperm_endpoints,
                     relative_mobility_grids=relative_mobility_grids,
                     capillary_pressure_grids=capillary_pressure_grids,
                     wells=wells,

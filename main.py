@@ -151,7 +151,7 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="impes",
+    scheme="si",
     pressure_solver="direct",
     transport_solver="direct",
     pressure_preconditioner=None,
@@ -184,7 +184,12 @@ def diagnostic(result: bores.StepResult) -> None:
 
 
 # Run and monitor the simulation and collect states
-states = list(bores.monitor(run, on_step_accepted=diagnostic))
+states = list(
+    bores.monitor(
+        run,
+        # on_step_accepted=diagnostic,
+    )
+)
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
