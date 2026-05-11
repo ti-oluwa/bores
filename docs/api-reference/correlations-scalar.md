@@ -379,7 +379,7 @@ compute_gas_compressibility_factor(
     pressure: float, temperature: float, gas_gravity: float,
     h2s_mole_fraction: float = 0.0, co2_mole_fraction: float = 0.0,
     n2_mole_fraction: float = 0.0,
-    method: GasZFactorMethod = "dak"
+    method: ZFactorMethod = "dak"
 ) -> float
 ```
 

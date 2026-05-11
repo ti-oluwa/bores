@@ -67,9 +67,9 @@ def build_three_phase_capillary_pressure_grids(
     one = water_saturation_grid.dtype.type(1.0)
     oil_saturation_grid = one - water_saturation_grid - gas_saturation_grid
     # Check if table supports array/vectorized operations
-    supports_arrays = getattr(capillary_pressure_table, "supports_arrays", False)
+    supports_vector = getattr(capillary_pressure_table, "supports_vector", False)
 
-    if supports_arrays:
+    if supports_vector:
         hysteresis_kwargs = {}
         if max_water_saturation is not None:
             hysteresis_kwargs["max_water_saturation"] = max_water_saturation
@@ -215,8 +215,8 @@ def build_three_phase_relative_permeabilities_grids(
     :return: Tuple of (water_relative_permeability_grid, oil_relative_permeability_grid, gas_relative_permeability_grid) as fractions.
     """
     # Check if table supports array operations
-    supports_arrays = getattr(relative_permeability_table, "supports_arrays", False)
-    if supports_arrays:
+    supports_vector = getattr(relative_permeability_table, "supports_vector", False)
+    if supports_vector:
         hysteresis_kwargs = {}
         if max_water_saturation is not None:
             hysteresis_kwargs["max_water_saturation"] = max_water_saturation

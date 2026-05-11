@@ -190,14 +190,7 @@ class MixingRuleFunc(typing.Protocol):
     Protocol for a mixing rule function that combines two-phase oil relative
     permeabilities into a three-phase estimate.
 
-    The extended signature provides every quantity a mixing rule could need,
-    including the actual two-phase water and gas relative permeabilities and
-    the oil endpoint, so that rules requiring the full Stone II normalization
-    or saturation-weighted interpolations can be implemented without
-    approximation.
-
-    Parameters that a simple rule (e.g. geometric mean) does not need can
-    simply be ignored in the implementation.
+    Parameters that a simple rules does not need can simply be ignored in the implementation.
     """
 
     def __call__(
@@ -207,7 +200,7 @@ class MixingRuleFunc(typing.Protocol):
         kro_g: FloatOrArray,
         krw: FloatOrArray,
         krg: FloatOrArray,
-        kro_endpoint: FloatOrArray,
+        kr_max: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
@@ -223,9 +216,8 @@ class MixingRuleFunc(typing.Protocol):
             table at the current water saturation.
         :param krg: Two-phase gas relative permeability from the gas-oil
             table at the current gas saturation.
-        :param kro_endpoint: Oil relative permeability at connate water
-            saturation (kro at Sw=Swc, Sg=0).  Equal to ``max_oil_relperm``
-            for normalized tables; 1.0 for unit-endpoint tables.
+        :param kr_max: Usually oil relative permeability at connate water
+            saturation (kro at Sw=Swc, Sg=0).
         :param water_saturation: Current water saturation.
         :param oil_saturation: Current oil saturation.
         :param gas_saturation: Current gas saturation.
@@ -242,7 +234,7 @@ class MixingRulePartialDerivatives(TypedDict):
 
     The mixing rule signature is:
 
-        kro = rule(kro_w, kro_g, krw, krg, kro_endpoint,
+        kro = rule(kro_w, kro_g, krw, krg, kr_max,
                    water_saturation, oil_saturation, gas_saturation)
 
     The derivatives here are taken with respect to the *inputs that vary
@@ -294,7 +286,7 @@ class MixingRuleDFunc(typing.Protocol):
         kro_g: FloatOrArray,
         krw: FloatOrArray,
         krg: FloatOrArray,
-        kro_endpoint: FloatOrArray,
+        kr_max: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
@@ -322,7 +314,7 @@ class MixingRuleDFunc(typing.Protocol):
         :param kro_g: Two-phase oil kr from gas-oil table.
         :param krw: Two-phase water kr from oil-water table.
         :param krg: Two-phase gas kr from gas-oil table.
-        :param kro_endpoint: Oil kr at connate water (normalization reference).
+        :param kr_max: Oil kr at connate water (normalization reference).
         :param water_saturation: Current water saturation.
         :param oil_saturation: Current oil saturation.
         :param gas_saturation: Current gas saturation.

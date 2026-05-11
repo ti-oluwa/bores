@@ -178,7 +178,9 @@ def get_capillary_pressure_table(name: str) -> typing.Type[CapillaryPressureTabl
 
 @attrs.frozen
 class TwoPhaseCapillaryPressureTable(
-    Serializable, load_exclude={"_pchip", "_dpchip"}, dump_exclude={"_pchip", "_dpchip"}
+    Serializable,
+    load_exclude={"_pchip", "_dpchip"},
+    dump_exclude={"_pchip", "_dpchip"},
 ):
     """
     Two-phase capillary pressure lookup table backed by a PCHIP interpolant.
@@ -426,8 +428,8 @@ class TwoPhaseCapillaryPressureTable(
 @attrs.frozen
 class ThreePhaseCapillaryPressureTable(
     CapillaryPressureTable,
-    load_exclude={"supports_arrays"},
-    dump_exclude={"supports_arrays"},
+    load_exclude={"supports_vector"},
+    dump_exclude={"supports_vector"},
 ):
     """
     Three-phase capillary pressure lookup table.
@@ -456,7 +458,7 @@ class ThreePhaseCapillaryPressureTable(
     A table of Pcgo against oil saturation.
     """
 
-    supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     def __attrs_post_init__(self) -> None:
@@ -1018,42 +1020,42 @@ def compute_brooks_corey_capillary_pressures(
         and np.isscalar(residual_gas_saturation)
     ):
         return _compute_brooks_corey_capillary_pressures_scalar(
-            water_saturation,  # type: ignore[arg-type]
-            oil_saturation,  # type: ignore[arg-type]
-            gas_saturation,  # type: ignore[arg-type]
-            irreducible_water_saturation,  # type: ignore[arg-type]
-            residual_oil_saturation_water,  # type: ignore[arg-type]
-            residual_oil_saturation_gas,  # type: ignore[arg-type]
-            residual_gas_saturation,  # type: ignore[arg-type]
-            wettability,
-            oil_water_entry_pressure_water_wet,
-            oil_water_entry_pressure_oil_wet,
-            oil_water_pore_size_distribution_index_water_wet,
-            oil_water_pore_size_distribution_index_oil_wet,
-            gas_oil_entry_pressure,
-            gas_oil_pore_size_distribution_index,
-            mixed_wet_water_fraction,
-            saturation_epsilon,
-            minimum_mobile_pore_space,
+            water_saturation=water_saturation,  # type: ignore[arg-type]
+            oil_saturation=oil_saturation,  # type: ignore[arg-type]
+            gas_saturation=gas_saturation,  # type: ignore[arg-type]
+            irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+            residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+            residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+            wettability=wettability,
+            oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
+            oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
+            oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
+            oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
+            gas_oil_entry_pressure=gas_oil_entry_pressure,
+            gas_oil_pore_size_distribution_index=gas_oil_pore_size_distribution_index,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
     return _compute_brooks_corey_capillary_pressures_array(
-        water_saturation,  # type: ignore[arg-type]
-        oil_saturation,  # type: ignore[arg-type]
-        gas_saturation,  # type: ignore[arg-type]
-        irreducible_water_saturation,  # type: ignore[arg-type]
-        residual_oil_saturation_water,  # type: ignore[arg-type]
-        residual_oil_saturation_gas,  # type: ignore[arg-type]
-        residual_gas_saturation,  # type: ignore[arg-type]
-        wettability,
-        oil_water_entry_pressure_water_wet,
-        oil_water_entry_pressure_oil_wet,
-        oil_water_pore_size_distribution_index_water_wet,
-        oil_water_pore_size_distribution_index_oil_wet,
-        gas_oil_entry_pressure,
-        gas_oil_pore_size_distribution_index,
-        mixed_wet_water_fraction,
-        saturation_epsilon,
-        minimum_mobile_pore_space,
+        water_saturation=water_saturation,  # type: ignore[arg-type]
+        oil_saturation=oil_saturation,  # type: ignore[arg-type]
+        gas_saturation=gas_saturation,  # type: ignore[arg-type]
+        irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+        residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+        residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+        residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+        wettability=wettability,
+        oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
+        oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
+        oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
+        oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
+        gas_oil_entry_pressure=gas_oil_entry_pressure,
+        gas_oil_pore_size_distribution_index=gas_oil_pore_size_distribution_index,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
     )
 
 
@@ -1323,40 +1325,40 @@ def compute_brooks_corey_derivatives(
         and np.isscalar(residual_gas_saturation)
     ):
         return _compute_brooks_corey_derivatives_scalar(
-            water_saturation,  # type: ignore[arg-type]
-            gas_saturation,  # type: ignore[arg-type]
-            irreducible_water_saturation,  # type: ignore[arg-type]
-            residual_oil_saturation_water,  # type: ignore[arg-type]
-            residual_oil_saturation_gas,  # type: ignore[arg-type]
-            residual_gas_saturation,  # type: ignore[arg-type]
-            wettability,
-            oil_water_pore_size_distribution_index_water_wet,
-            oil_water_pore_size_distribution_index_oil_wet,
-            oil_water_entry_pressure_water_wet,
-            oil_water_entry_pressure_oil_wet,
-            gas_oil_pore_size_distribution_index,
-            gas_oil_entry_pressure,
-            mixed_wet_water_fraction,
-            saturation_epsilon,
-            minimum_mobile_pore_space,
+            water_saturation=water_saturation,  # type: ignore[arg-type]
+            gas_saturation=gas_saturation,  # type: ignore[arg-type]
+            irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+            residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+            residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+            wettability=wettability,
+            oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
+            oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
+            oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
+            oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
+            gas_oil_pore_size_distribution_index=gas_oil_pore_size_distribution_index,
+            gas_oil_entry_pressure=gas_oil_entry_pressure,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
     return _compute_brooks_corey_derivatives_array(
-        water_saturation,  # type: ignore[arg-type]
-        gas_saturation,  # type: ignore[arg-type]
-        irreducible_water_saturation,  # type: ignore[arg-type]
-        residual_oil_saturation_water,  # type: ignore[arg-type]
-        residual_oil_saturation_gas,  # type: ignore[arg-type]
-        residual_gas_saturation,  # type: ignore[arg-type]
-        wettability,
-        oil_water_pore_size_distribution_index_water_wet,
-        oil_water_pore_size_distribution_index_oil_wet,
-        oil_water_entry_pressure_water_wet,
-        oil_water_entry_pressure_oil_wet,
-        gas_oil_pore_size_distribution_index,
-        gas_oil_entry_pressure,
-        mixed_wet_water_fraction,
-        saturation_epsilon,
-        minimum_mobile_pore_space,
+        water_saturation=water_saturation,  # type: ignore[arg-type]
+        gas_saturation=gas_saturation,  # type: ignore[arg-type]
+        irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+        residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+        residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+        residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+        wettability=wettability,
+        oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
+        oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
+        oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
+        oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
+        gas_oil_pore_size_distribution_index=gas_oil_pore_size_distribution_index,
+        gas_oil_entry_pressure=gas_oil_entry_pressure,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
     )
 
 
@@ -1364,8 +1366,8 @@ def compute_brooks_corey_derivatives(
 @attrs.frozen
 class BrooksCoreyCapillaryPressureModel(
     CapillaryPressureTable,
-    load_exclude={"supports_arrays"},
-    dump_exclude={"supports_arrays"},
+    load_exclude={"supports_vector"},
+    dump_exclude={"supports_vector"},
 ):
     """
     Brooks-Corey capillary pressure model for three-phase systems.
@@ -1402,7 +1404,7 @@ class BrooksCoreyCapillaryPressureModel(
     mixed_wet_water_fraction: float = 0.5
     """Fraction of pore space that is water-wet in mixed-wet systems (0-1)."""
 
-    supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
@@ -1970,42 +1972,42 @@ def compute_van_genuchten_capillary_pressures(
         and np.isscalar(residual_gas_saturation)
     ):
         return _compute_van_genuchten_capillary_pressures_scalar(
-            water_saturation,  # type: ignore[arg-type]
-            oil_saturation,  # type: ignore[arg-type]
-            gas_saturation,  # type: ignore[arg-type]
-            irreducible_water_saturation,  # type: ignore[arg-type]
-            residual_oil_saturation_water,  # type: ignore[arg-type]
-            residual_oil_saturation_gas,  # type: ignore[arg-type]
-            residual_gas_saturation,  # type: ignore[arg-type]
-            wettability,
-            oil_water_alpha_water_wet,
-            oil_water_alpha_oil_wet,
-            oil_water_n_water_wet,
-            oil_water_n_oil_wet,
-            gas_oil_alpha,
-            gas_oil_n,
-            mixed_wet_water_fraction,
-            saturation_epsilon,
-            minimum_mobile_pore_space,
+            water_saturation=water_saturation,  # type: ignore[arg-type]
+            oil_saturation=oil_saturation,  # type: ignore[arg-type]
+            gas_saturation=gas_saturation,  # type: ignore[arg-type]
+            irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+            residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+            residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+            wettability=wettability,
+            oil_water_alpha_water_wet=oil_water_alpha_water_wet,
+            oil_water_alpha_oil_wet=oil_water_alpha_oil_wet,
+            oil_water_n_water_wet=oil_water_n_water_wet,
+            oil_water_n_oil_wet=oil_water_n_oil_wet,
+            gas_oil_alpha=gas_oil_alpha,
+            gas_oil_n=gas_oil_n,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
     return _compute_van_genuchten_capillary_pressures_array(
-        water_saturation,  # type: ignore[arg-type]
-        oil_saturation,  # type: ignore[arg-type]
-        gas_saturation,  # type: ignore[arg-type]
-        irreducible_water_saturation,  # type: ignore[arg-type]
-        residual_oil_saturation_water,  # type: ignore[arg-type]
-        residual_oil_saturation_gas,  # type: ignore[arg-type]
-        residual_gas_saturation,  # type: ignore[arg-type]
-        wettability,
-        oil_water_alpha_water_wet,
-        oil_water_alpha_oil_wet,
-        oil_water_n_water_wet,
-        oil_water_n_oil_wet,
-        gas_oil_alpha,
-        gas_oil_n,
-        mixed_wet_water_fraction,
-        saturation_epsilon,
-        minimum_mobile_pore_space,
+        water_saturation=water_saturation,  # type: ignore[arg-type]
+        oil_saturation=oil_saturation,  # type: ignore[arg-type]
+        gas_saturation=gas_saturation,  # type: ignore[arg-type]
+        irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+        residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+        residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+        residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+        wettability=wettability,
+        oil_water_alpha_water_wet=oil_water_alpha_water_wet,
+        oil_water_alpha_oil_wet=oil_water_alpha_oil_wet,
+        oil_water_n_water_wet=oil_water_n_water_wet,
+        oil_water_n_oil_wet=oil_water_n_oil_wet,
+        gas_oil_alpha=gas_oil_alpha,
+        gas_oil_n=gas_oil_n,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
     )
 
 
@@ -2384,40 +2386,40 @@ def compute_van_genuchten_derivatives(
         and np.isscalar(residual_gas_saturation)
     ):
         return _compute_van_genuchten_derivatives_scalar(
-            water_saturation,  # type: ignore[arg-type]
-            gas_saturation,  # type: ignore[arg-type]
-            irreducible_water_saturation,  # type: ignore[arg-type]
-            residual_oil_saturation_water,  # type: ignore[arg-type]
-            residual_oil_saturation_gas,  # type: ignore[arg-type]
-            residual_gas_saturation,  # type: ignore[arg-type]
-            wettability,
-            oil_water_alpha_water_wet,
-            oil_water_alpha_oil_wet,
-            oil_water_n_water_wet,
-            oil_water_n_oil_wet,
-            gas_oil_alpha,
-            gas_oil_n,
-            mixed_wet_water_fraction,
-            saturation_epsilon,
-            minimum_mobile_pore_space,
+            water_saturation=water_saturation,  # type: ignore[arg-type]
+            gas_saturation=gas_saturation,  # type: ignore[arg-type]
+            irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+            residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+            residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+            wettability=wettability,
+            oil_water_alpha_water_wet=oil_water_alpha_water_wet,
+            oil_water_alpha_oil_wet=oil_water_alpha_oil_wet,
+            oil_water_n_water_wet=oil_water_n_water_wet,
+            oil_water_n_oil_wet=oil_water_n_oil_wet,
+            gas_oil_alpha=gas_oil_alpha,
+            gas_oil_n=gas_oil_n,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
     return _compute_van_genuchten_derivatives_array(
-        water_saturation,  # type: ignore[arg-type]
-        gas_saturation,  # type: ignore[arg-type]
-        irreducible_water_saturation,  # type: ignore[arg-type]
-        residual_oil_saturation_water,  # type: ignore[arg-type]
-        residual_oil_saturation_gas,  # type: ignore[arg-type]
-        residual_gas_saturation,  # type: ignore[arg-type]
-        wettability,
-        oil_water_alpha_water_wet,
-        oil_water_alpha_oil_wet,
-        oil_water_n_water_wet,
-        oil_water_n_oil_wet,
-        gas_oil_alpha,
-        gas_oil_n,
-        mixed_wet_water_fraction,
-        saturation_epsilon,
-        minimum_mobile_pore_space,
+        water_saturation=water_saturation,  # type: ignore[arg-type]
+        gas_saturation=gas_saturation,  # type: ignore[arg-type]
+        irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+        residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+        residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+        residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+        wettability=wettability,
+        oil_water_alpha_water_wet=oil_water_alpha_water_wet,
+        oil_water_alpha_oil_wet=oil_water_alpha_oil_wet,
+        oil_water_n_water_wet=oil_water_n_water_wet,
+        oil_water_n_oil_wet=oil_water_n_oil_wet,
+        gas_oil_alpha=gas_oil_alpha,
+        gas_oil_n=gas_oil_n,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
     )
 
 
@@ -2425,8 +2427,8 @@ def compute_van_genuchten_derivatives(
 @attrs.frozen
 class VanGenuchtenCapillaryPressureModel(
     CapillaryPressureTable,
-    load_exclude={"supports_arrays"},
-    dump_exclude={"supports_arrays"},
+    load_exclude={"supports_vector"},
+    dump_exclude={"supports_vector"},
 ):
     """
     van Genuchten capillary pressure model for three-phase systems.
@@ -2462,7 +2464,7 @@ class VanGenuchtenCapillaryPressureModel(
     """Wettability type (`WATER_WET`, `OIL_WET`, or `MIXED_WET`)."""
     mixed_wet_water_fraction: float = 0.5
     """Fraction of pore space that is water-wet in mixed-wet systems (0-1)."""
-    supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
@@ -3024,48 +3026,48 @@ def compute_leverett_j_capillary_pressures(
         and np.isscalar(porosity)
     ):
         return _compute_leverett_j_capillary_pressures_scalar(
-            water_saturation,  # type: ignore[arg-type]
-            oil_saturation,  # type: ignore[arg-type]
-            gas_saturation,  # type: ignore[arg-type]
-            irreducible_water_saturation,  # type: ignore[arg-type]
-            residual_oil_saturation_water,  # type: ignore[arg-type]
-            residual_oil_saturation_gas,  # type: ignore[arg-type]
-            residual_gas_saturation,  # type: ignore[arg-type]
-            permeability,  # type: ignore[arg-type]
-            porosity,  # type: ignore[arg-type]
-            oil_water_interfacial_tension,
-            gas_oil_interfacial_tension,
-            oil_water_contact_angle,
-            gas_oil_contact_angle,
-            j_function_coefficient,
-            j_function_exponent,
-            mixed_wet_water_fraction,
-            wettability,
-            saturation_epsilon,
-            minimum_mobile_pore_space,
-            dyne_per_cm_to_psi,
+            water_saturation=water_saturation,  # type: ignore[arg-type]
+            oil_saturation=oil_saturation,  # type: ignore[arg-type]
+            gas_saturation=gas_saturation,  # type: ignore[arg-type]
+            irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+            residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+            residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+            permeability=permeability,  # type: ignore[arg-type]
+            porosity=porosity,  # type: ignore[arg-type]
+            oil_water_interfacial_tension=oil_water_interfacial_tension,
+            gas_oil_interfacial_tension=gas_oil_interfacial_tension,
+            oil_water_contact_angle=oil_water_contact_angle,
+            gas_oil_contact_angle=gas_oil_contact_angle,
+            j_function_coefficient=j_function_coefficient,
+            j_function_exponent=j_function_exponent,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            wettability=wettability,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+            dyne_per_cm_to_psi=dyne_per_cm_to_psi,
         )
     return _compute_leverett_j_capillary_pressures_array(
-        water_saturation,  # type: ignore[arg-type]
-        oil_saturation,  # type: ignore[arg-type]
-        gas_saturation,  # type: ignore[arg-type]
-        irreducible_water_saturation,  # type: ignore[arg-type]
-        residual_oil_saturation_water,  # type: ignore[arg-type]
-        residual_oil_saturation_gas,  # type: ignore[arg-type]
-        residual_gas_saturation,  # type: ignore[arg-type]
-        permeability,  # type: ignore[arg-type]
-        porosity,  # type: ignore[arg-type]
-        oil_water_interfacial_tension,
-        gas_oil_interfacial_tension,
-        oil_water_contact_angle,
-        gas_oil_contact_angle,
-        j_function_coefficient,
-        j_function_exponent,
-        mixed_wet_water_fraction,
-        wettability,
-        saturation_epsilon,
-        minimum_mobile_pore_space,
-        dyne_per_cm_to_psi,
+        water_saturation=water_saturation,  # type: ignore[arg-type]
+        oil_saturation=oil_saturation,  # type: ignore[arg-type]
+        gas_saturation=gas_saturation,  # type: ignore[arg-type]
+        irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+        residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+        residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+        residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+        permeability=permeability,  # type: ignore[arg-type]
+        porosity=porosity,  # type: ignore[arg-type]
+        oil_water_interfacial_tension=oil_water_interfacial_tension,
+        gas_oil_interfacial_tension=gas_oil_interfacial_tension,
+        oil_water_contact_angle=oil_water_contact_angle,
+        gas_oil_contact_angle=gas_oil_contact_angle,
+        j_function_coefficient=j_function_coefficient,
+        j_function_exponent=j_function_exponent,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        wettability=wettability,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        dyne_per_cm_to_psi=dyne_per_cm_to_psi,
     )
 
 
@@ -3371,7 +3373,6 @@ def compute_leverett_j_derivatives(
     """
     if (
         np.isscalar(water_saturation)
-        and np.isscalar(oil_saturation)
         and np.isscalar(gas_saturation)
         and np.isscalar(irreducible_water_saturation)
         and np.isscalar(residual_oil_saturation_water)
@@ -3381,46 +3382,46 @@ def compute_leverett_j_derivatives(
         and np.isscalar(porosity)
     ):
         return _compute_leverett_j_derivatives_scalar(
-            water_saturation,  # type: ignore[arg-type]
-            gas_saturation,  # type: ignore[arg-type]
-            irreducible_water_saturation,  # type: ignore[arg-type]
-            residual_oil_saturation_water,  # type: ignore[arg-type]
-            residual_oil_saturation_gas,  # type: ignore[arg-type]
-            residual_gas_saturation,  # type: ignore[arg-type]
-            permeability,  # type: ignore[arg-type]
-            porosity,  # type: ignore[arg-type]
-            wettability,
-            oil_water_interfacial_tension,
-            gas_oil_interfacial_tension,
-            oil_water_contact_angle,
-            gas_oil_contact_angle,
-            j_function_coefficient,
-            j_function_exponent,
-            mixed_wet_water_fraction,
-            saturation_epsilon,
-            minimum_mobile_pore_space,
-            dyne_per_cm_to_psi,
+            water_saturation=water_saturation,  # type: ignore[arg-type]
+            gas_saturation=gas_saturation,  # type: ignore[arg-type]
+            irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+            residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+            residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+            residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+            permeability=permeability,  # type: ignore[arg-type]
+            porosity=porosity,  # type: ignore[arg-type]
+            wettability=wettability,
+            oil_water_interfacial_tension=oil_water_interfacial_tension,
+            gas_oil_interfacial_tension=gas_oil_interfacial_tension,
+            oil_water_contact_angle=oil_water_contact_angle,
+            gas_oil_contact_angle=gas_oil_contact_angle,
+            j_function_coefficient=j_function_coefficient,
+            j_function_exponent=j_function_exponent,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+            dyne_per_cm_to_psi=dyne_per_cm_to_psi,
         )
     return _compute_leverett_j_derivatives_array(
-        water_saturation,  # type: ignore[arg-type]
-        gas_saturation,  # type: ignore[arg-type]
-        irreducible_water_saturation,  # type: ignore[arg-type]
-        residual_oil_saturation_water,  # type: ignore[arg-type]
-        residual_oil_saturation_gas,  # type: ignore[arg-type]
-        residual_gas_saturation,  # type: ignore[arg-type]
-        permeability,  # type: ignore[arg-type]
-        porosity,  # type: ignore[arg-type]
-        wettability,
-        oil_water_interfacial_tension,
-        gas_oil_interfacial_tension,
-        oil_water_contact_angle,
-        gas_oil_contact_angle,
-        j_function_coefficient,
-        j_function_exponent,
-        mixed_wet_water_fraction,
-        saturation_epsilon,
-        minimum_mobile_pore_space,
-        dyne_per_cm_to_psi,
+        water_saturation=water_saturation,  # type: ignore[arg-type]
+        gas_saturation=gas_saturation,  # type: ignore[arg-type]
+        irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+        residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+        residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+        residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+        permeability=permeability,  # type: ignore[arg-type]
+        porosity=porosity,  # type: ignore[arg-type]
+        wettability=wettability,
+        oil_water_interfacial_tension=oil_water_interfacial_tension,
+        gas_oil_interfacial_tension=gas_oil_interfacial_tension,
+        oil_water_contact_angle=oil_water_contact_angle,
+        gas_oil_contact_angle=gas_oil_contact_angle,
+        j_function_coefficient=j_function_coefficient,
+        j_function_exponent=j_function_exponent,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        dyne_per_cm_to_psi=dyne_per_cm_to_psi,
     )
 
 
@@ -3428,8 +3429,8 @@ def compute_leverett_j_derivatives(
 @attrs.frozen
 class LeverettJCapillaryPressureModel(
     CapillaryPressureTable,
-    load_exclude={"supports_arrays"},
-    dump_exclude={"supports_arrays"},
+    load_exclude={"supports_vector"},
+    dump_exclude={"supports_vector"},
 ):
     """
     Leverett J-function capillary pressure model for three-phase systems.
@@ -3471,7 +3472,7 @@ class LeverettJCapillaryPressureModel(
     """Empirical coefficient 'a' in J(Se) = a * Se^(-b). Fit to core data (can be tuned to match experimental data)."""
     j_function_exponent: float = 0.5
     """Empirical exponent 'b' in J(Se) = a * Se^(-b). Fit to core data (can be tuned to match experimental data)."""
-    supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:

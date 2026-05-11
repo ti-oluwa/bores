@@ -60,97 +60,97 @@ __all__ = [
 
 
 #: Sentinel type for the `minimum_*_relperm` attributes on relperm tables and
-#: analytical models. `"auto"` derives the floor from the active dtype;
-#: `None` disables the floor entirely; a `float` sets an explicit floor.
-RelPermFloor = typing.Union[typing.Literal["auto"], None, float]
+#: analytical models. `"auto"` derives the min_value from the active dtype;
+#: `None` disables the min/floor value entirely; a `float` sets an explicit min_value.
+MinimumRelPerm = typing.Union[typing.Literal["auto"], None, float]
 
 
-def _resolve_relperm_floor(floor: RelPermFloor) -> typing.Optional[float]:
+def _resolve_min_relperm(min_value: MinimumRelPerm) -> typing.Optional[float]:
     """
-    Resolve a `RelPermFloor` sentinel to a concrete float or `None`.
+    Resolve a `MinimumRelPerm` sentinel to a concrete float or `None`.
 
     `"auto"` - `max(4 * machine_epsilon, 1e-8)`, consistent with the
-    approach used by CMG IMEX/GEM for minimum mobility floors: tight enough
+    approach used by CMG IMEX/GEM for minimum mobility min_values: tight enough
     that it does not distort the physics, but sufficient to prevent
     near-singular transmissibility rows in the Jacobian.
 
-    `None` - `None` (no floor; kr can reach zero exactly).
+    `None` - `None` (no min_value; kr can reach zero exactly).
 
     `float` - that value, used as-is after a sign / sanity check.
 
-    :param floor: Sentinel value from a relperm table or analytical model.
-    :return: Resolved float floor or `None`.
+    :param min_value: Sentinel value from a relperm table or analytical model.
+    :return: Resolved float min_value or `None`.
     """
-    if floor is None:
+    if min_value is None:
         return None
 
-    if floor == "auto":
+    if min_value == "auto":
         info = get_floating_point_info()
         return float(max(4.0 * float(info.eps), 1e-8))
 
-    if not isinstance(floor, (int, float)):
+    if not isinstance(min_value, (int, float)):
         raise ValidationError(
-            f"`min_*_relperm` must be 'auto', None, or a float. Got {floor!r}."
+            f"`min_*_relperm` must be 'auto', None, or a float. Got {min_value!r}."
         )
 
-    if floor < 0.0:
+    if min_value < 0.0:
         raise ValidationError(
-            f"`min_*_relperm` floor must be non-negative. Got {floor}."
+            f"`min_*_relperm` min_value must be non-negative. Got {min_value}."
         )
-    return float(floor)
+    return float(min_value)
 
 
 @numba.njit(cache=True, inline="always")
-def _apply_relperm_floor(
+def _clamp_relperm(
     kr: FloatOrArray,
-    floor: typing.Optional[float],
+    min_value: typing.Optional[float],
 ) -> FloatOrArray:
     """
-    Clamp `kr` to `[floor, ∞)` in-place-compatible fashion.
+    Clamp `kr` to `[min_value, ∞)` in-place-compatible fashion.
 
-    Smoothly transitions from the raw `kr` values to the floored value, avoiding
+    Smoothly transitions from the raw `kr` values to the min_value value, avoiding
     non-differentiability and ensuring well-behaved derivatives for solvers.
 
-    When `floor` is `None` the array is returned unchanged.
+    When `min_value` is `None` the array is returned unchanged.
 
     :param kr: Relative permeability value(s).
-    :param floor: Resolved floor value or `None`.
+    :param min_value: Resolved min_value/minimum value or `None`.
     :return: Floored relative permeability value(s).
     """
-    if floor is None:
+    if min_value is None:
         return kr
-    return np.sqrt(kr**2 + floor**2).astype(kr.dtype)
+    return np.sqrt(kr**2 + min_value**2).astype(kr.dtype)
 
 
 @numba.njit(cache=True, inline="always")
-def _apply_relperm_floor_to_derivative(
+def _clamp_relperm_derivative(
     dkr: FloatOrArray,
     kr_raw: FloatOrArray,
-    floor: typing.Optional[float],
+    min_value: typing.Optional[float],
 ) -> FloatOrArray:
     """
-    Smoothly clamp the derivative of `kr` to zero in the floored region.
-    When `kr` is above the floor, the derivative is unchanged. As `kr` approaches
-    and falls below the floor, the derivative transitions smoothly to zero, ensuring
+    Smoothly clamp the derivative of `kr` to zero in the min_value region.
+    When `kr` is above the min_value, the derivative is unchanged. As `kr` approaches
+    and falls below the min_value, the derivative transitions smoothly to zero, ensuring
     that the Jacobian remains well-conditioned and solvers remain stable.
 
-    When `floor` is `None` the derivative is returned unchanged.
+    When `min_value` is `None` the derivative is returned unchanged.
 
-    The derivative of `max(kr, floor)` w.r.t. any variable is:
+    The derivative of `max(kr, min_value)` w.r.t. any variable is:
 
-    - `dkr / d(var)`  when `kr > floor`  (active region)
-    - `kr / np.sqrt(kr**2 + floor**2)`  when `kr <= floor` (floored / flat region)
+    - `dkr / d(var)`  when `kr > min_value`  (active region)
+    - `kr / np.sqrt(kr**2 + min_value**2)`  when `kr <= min_value` (min_value / flat region)
 
-    :param dkr: Derivative of the raw (pre-floor) kr w.r.t. some variable.
-    :param kr_raw: Raw (pre-floor) kr value(s), used to identify floored cells.
-    :param floor: Resolved floor value or `None`.
-    :return: Derivative with floored cells zeroed out.
+    :param dkr: Derivative of the raw (pre-min_value) kr w.r.t. some variable.
+    :param kr_raw: Raw (pre-min_value) kr value(s), used to identify min_value cells.
+    :param min_value: Resolved min_value/minimum value or `None`.
+    :return: Derivative with min_value cells zeroed out.
     """
-    if floor is None:
+    if min_value is None:
         return dkr
-    return np.where(kr_raw > floor, dkr, kr_raw / np.sqrt(kr_raw**2 + floor**2)).astype(
-        dkr.dtype
-    )
+    return np.where(
+        kr_raw > min_value, dkr, kr_raw / np.sqrt(kr_raw**2 + min_value**2)
+    ).astype(dkr.dtype)
 
 
 """
@@ -199,7 +199,7 @@ class MixingRule:
 
     ```python
     @my_rule.dfunc
-    def _(kro_w, kro_g, krw, krg, kro_endpoint,
+    def _(kro_w, kro_g, krw, krg, kr_max,
           water_saturation, oil_saturation, gas_saturation):
         ...
         return MixingRulePartialDerivatives(...)
@@ -233,7 +233,7 @@ class MixingRule:
 
         ```python
         @stone_I_rule.dfunc
-        def _(kro_w, kro_g, krw, krg, kro_endpoint,
+        def _(kro_w, kro_g, krw, krg, kr_max,
               water_saturation, oil_saturation, gas_saturation):
             ...
             return MixingRulePartialDerivatives(...)
@@ -248,7 +248,7 @@ class MixingRule:
         kro_g: FloatOrArray,
         krw: FloatOrArray,
         krg: FloatOrArray,
-        kro_endpoint: FloatOrArray,
+        kr_max: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
@@ -258,7 +258,7 @@ class MixingRule:
             kro_g=kro_g,
             krw=krw,
             krg=krg,
-            kro_endpoint=kro_endpoint,
+            kr_max=kr_max,
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
@@ -270,7 +270,7 @@ class MixingRule:
         kro_g: FloatOrArray,
         krw: FloatOrArray,
         krg: FloatOrArray,
-        kro_endpoint: FloatOrArray,
+        kr_max: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
@@ -292,7 +292,7 @@ class MixingRule:
             table at the current iterate.
         :param krg: Two-phase gas relative permeability from the gas-oil
             table at the current iterate.
-        :param kro_endpoint: Oil relative permeability at connate water
+        :param kr_max: Oil relative permeability at connate water
             (normalization reference).
         :param water_saturation: Current water saturation.
         :param oil_saturation: Current oil saturation.
@@ -308,7 +308,7 @@ class MixingRule:
                 kro_g=kro_g,
                 krw=krw,
                 krg=krg,
-                kro_endpoint=kro_endpoint,
+                kr_max=kr_max,
                 water_saturation=water_saturation,
                 oil_saturation=oil_saturation,
                 gas_saturation=gas_saturation,
@@ -331,7 +331,7 @@ class MixingRule:
             kro_g=kro_g,
             krw=krw,
             krg=krg,
-            kro_endpoint=kro_endpoint,
+            kr_max=kr_max,
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
@@ -362,7 +362,7 @@ def _central_difference_partial_derivatives(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -393,7 +393,7 @@ def _central_difference_partial_derivatives(
     :param kro_g: Oil relative permeability from the gas-oil two-phase table.
     :param krw: Water relative permeability from the oil-water two-phase table.
     :param krg: Gas relative permeability from the gas-oil two-phase table.
-    :param kro_endpoint: Oil relative permeability at connate water.
+    :param kr_max: Oil relative permeability at connate water.
     :param water_saturation: Current water saturation.
     :param oil_saturation: Current oil saturation.
     :param gas_saturation: Current gas saturation.
@@ -444,7 +444,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -454,7 +454,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -467,7 +467,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g + h_kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -477,7 +477,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g - h_kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -490,7 +490,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw + h_krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -500,7 +500,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw - h_krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -513,7 +513,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg + h_krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -523,7 +523,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg - h_krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -536,7 +536,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation + h_sw,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -546,7 +546,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation - h_sw,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -559,7 +559,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation + h_so,
         gas_saturation=gas_saturation,
@@ -569,7 +569,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation - h_so,
         gas_saturation=gas_saturation,
@@ -582,7 +582,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation + h_sg,
@@ -592,7 +592,7 @@ def _central_difference_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation - h_sg,
@@ -672,7 +672,7 @@ def mixing_rule(
 
     ```python
     @mixing_rule
-    def my_rule(kro_w, kro_g, krw, krg, kro_endpoint,
+    def my_rule(kro_w, kro_g, krw, krg, kr_max,
                 water_saturation, oil_saturation, gas_saturation):
         return (kro_w + kro_g) / 2.0
     ```
@@ -681,8 +681,8 @@ def mixing_rule(
 
     ```python
     class MyRule:
-        def __call__(self, *, kro_w, kro_g, krw, krg, kro_endpoint, ...): ...
-        def partial_derivatives(self, *, kro_w, kro_g, krw, krg, kro_endpoint, ...): ...
+        def __call__(self, *, kro_w, kro_g, krw, krg, kr_max, ...): ...
+        def partial_derivatives(self, *, kro_w, kro_g, krw, krg, kr_max, ...): ...
 
     my_rule = mixing_rule(MyRule())
     ```
@@ -831,7 +831,7 @@ def min_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -851,7 +851,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -889,7 +889,7 @@ def stone_I_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -911,7 +911,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -953,7 +953,7 @@ def stone_II_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -970,7 +970,7 @@ def stone_II_rule(
         - krog  = kro_g  (oil relperm from gas-oil table at current Sg)
         - krw            = two-phase water relperm at current Sw
         - krg            = two-phase gas relperm at current Sg
-        - krocw = kro_endpoint  (oil relperm at connate water, normalization ref)
+        - krocw = kr_max  (oil relperm at connate water, normalization ref)
 
     This is the **exact** Stone II formulation, valid for both normalized
     (krocw = 1) and non-normalized tables.  Using the actual krw and krg
@@ -983,8 +983,10 @@ def stone_II_rule(
     Aziz, K. & Settari, A. (1979). Petroleum Reservoir Simulation. Applied
     Science Publishers, London.
     """
-    krocw = np.maximum(kro_endpoint, 1e-12)
-    result = krocw * ((kro_w / krocw + krw) * (kro_g / krocw + krg) - krw - krg)
+    krocw = np.maximum(kr_max, 1e-12)
+    result = (
+        (kro_w / krocw + krw) * (kro_g / krocw + krg) - krw - krg
+    )  # Normalization should occur in caller
     # Clamp negative values (can occur when both kro_w and kro_g are small)
     result = np.maximum(result, 0.0)
     # Return zero if either two-phase oil relperm is zero (conservative)
@@ -998,7 +1000,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1014,7 +1016,7 @@ def _(
     """
     Analytical derivatives for Stone II (full normalized form).
 
-    Let krocw = kro_endpoint,  A = kro_w/krocw + krw,  B = kro_g/krocw + krg
+    Let krocw = kr_max,  A = kro_w/krocw + krw,  B = kro_g/krocw + krg
 
     kro = krocw * (A * B - krw - krg)
 
@@ -1027,7 +1029,7 @@ def _(
 
     No explicit saturation dependence.
     """
-    krocw = np.maximum(kro_endpoint, 1e-12)
+    krocw = np.maximum(kr_max, 1e-12)
     kw = np.asarray(kro_w, dtype=np.float64)
     kg = np.asarray(kro_g, dtype=np.float64)
     w = np.asarray(krw, dtype=np.float64)
@@ -1053,7 +1055,7 @@ def arithmetic_mean_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1078,7 +1080,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1104,7 +1106,7 @@ def geometric_mean_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1129,7 +1131,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1166,7 +1168,7 @@ def harmonic_mean_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1200,7 +1202,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1237,7 +1239,7 @@ def baker_linear_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1277,7 +1279,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1322,7 +1324,7 @@ def blunt_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1352,7 +1354,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1391,7 +1393,7 @@ def hustad_hansen_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1419,7 +1421,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1493,7 +1495,7 @@ def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
         kro_g: FloatOrArray,
         krw: FloatOrArray,
         krg: FloatOrArray,
-        kro_endpoint: FloatOrArray,
+        kr_max: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
@@ -1515,7 +1517,7 @@ def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
         kro_g: FloatOrArray,
         krw: FloatOrArray,
         krg: FloatOrArray,
-        kro_endpoint: FloatOrArray,
+        kr_max: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
@@ -1557,7 +1559,7 @@ def eclipse_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1597,7 +1599,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1668,7 +1670,7 @@ def max_rule(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1693,7 +1695,7 @@ def _(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1728,7 +1730,7 @@ def get_mixing_rule_partial_derivatives(
     kro_g: FloatOrArray,
     krw: FloatOrArray,
     krg: FloatOrArray,
-    kro_endpoint: FloatOrArray,
+    kr_max: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
@@ -1741,7 +1743,7 @@ def get_mixing_rule_partial_derivatives(
     The mixing rule signature is:
 
     ```python
-    kro = mixing_rule(kro_w, kro_g, krw, krg, kro_endpoint,
+    kro = mixing_rule(kro_w, kro_g, krw, krg, kr_max,
                       water_saturation, oil_saturation, gas_saturation)
     ```
 
@@ -1760,7 +1762,7 @@ def get_mixing_rule_partial_derivatives(
     :param kro_g: Oil relative permeability from the gas-oil two-phase table.
     :param krw: Water relative permeability from the oil-water two-phase table.
     :param krg: Gas relative permeability from the gas-oil two-phase table.
-    :param kro_endpoint: Oil relative permeability at connate water.
+    :param kr_max: Oil relative permeability at connate water.
     :param water_saturation: Current water saturation.
     :param oil_saturation: Current oil saturation.
     :param gas_saturation: Current gas saturation.
@@ -1773,7 +1775,7 @@ def get_mixing_rule_partial_derivatives(
             kro_g=kro_g,
             krw=krw,
             krg=krg,
-            kro_endpoint=kro_endpoint,
+            kr_max=kr_max,
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
@@ -1785,7 +1787,7 @@ def get_mixing_rule_partial_derivatives(
         kro_g=kro_g,
         krw=krw,
         krg=krg,
-        kro_endpoint=kro_endpoint,
+        kr_max=kr_max,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -1810,13 +1812,13 @@ class RelPermEndpoints:
     water: float
     """
     Water relative permeability endpoint (krw at residual oil saturation, Sor).
-    Used as the injector mobility floor reference for water injectors.
+    Used as the injector mobility min_value reference for water injectors.
     """
 
     gas: float
     """
     Gas relative permeability endpoint (krg at connate water + residual oil).
-    Used as the injector mobility floor reference for gas injectors.
+    Used as the injector mobility min_value reference for gas injectors.
     """
 
 
@@ -2042,15 +2044,15 @@ class TwoPhaseRelPermTable(
     the caller to pre-supply a dense grid.  Pass `number_of_base_points=0` to
     disable scaling entirely and use the raw knots directly.
 
-    **Minimum relperm floors** (`min_wetting_relperm` / `min_non_wetting_relperm`):
+    **Minimum relperm min_values** (`min_wetting_relperm` / `min_non_wetting_relperm`):
 
-    When non-`None`, a floor is applied to the interpolated kr value and
-    the derivative is zeroed out wherever the raw (pre-floor) kr is at or
-    below the floor. This gives a derivative that is exactly consistent with
-    the floored kr, preventing Jacobian-residual mismatches that cause MBE.
+    When non-`None`, a min_value is applied to the interpolated kr value and
+    the derivative is zeroed out wherever the raw (pre-min_value) kr is at or
+    below the min_value. This gives a derivative that is exactly consistent with
+    the min_value kr, preventing Jacobian-residual mismatches that cause MBE.
 
-    `"auto"` derives the floor from the active floating-point dtype:
-    `max(4 * machine_epsilon, 1e-8)`. `None` disables the floor (kr can
+    `"auto"` derives the min_value from the active floating-point dtype:
+    `max(4 * machine_epsilon, 1e-8)`. `None` disables the min_value (kr can
     reach zero exactly).
     """
 
@@ -2096,22 +2098,22 @@ class TwoPhaseRelPermTable(
     correct saturation grid without hard-coding assumptions.
     """
 
-    min_wetting_relperm: RelPermFloor = None
+    min_wetting_relperm: MinimumRelPerm = None
     """
-    Minimum floor for the wetting-phase relative permeability.
+    Minimum min_value for the wetting-phase relative permeability.
  
     `"auto"` — `max(4 * machine_epsilon, 1e-8)` (dtype-aware).
-    `None` — no floor; kr can reach zero exactly.
-    `float` — explicit user-supplied floor value.
+    `None` — no min_value; kr can reach zero exactly.
+    `float` — explicit user-supplied min_value value.
  
-    The floor is applied to the interpolated kr value, and the derivative is
-    zeroed out in the floored region so that the Jacobian is consistent with
+    The min_value is applied to the interpolated kr value, and the derivative is
+    zeroed out in the min_value region so that the Jacobian is consistent with
     the kr value (no MBE from mismatched kr/derivative pairs).
     """
 
-    min_non_wetting_relperm: RelPermFloor = None
+    min_non_wetting_relperm: MinimumRelPerm = None
     """
-    Minimum floor for the non-wetting-phase relative permeability.
+    Minimum min_value for the non-wetting-phase relative permeability.
  
     Same semantics as `min_wetting_relperm`.
     """
@@ -2178,9 +2180,9 @@ class TwoPhaseRelPermTable(
                 "`reference_saturation` must be monotonically increasing"
             )
 
-        # Validate floor sentinels eagerly so errors surface at construction time
-        _resolve_relperm_floor(self.min_wetting_relperm)
-        _resolve_relperm_floor(self.min_non_wetting_relperm)
+        # Validate min_value sentinels eagerly so errors surface at construction time
+        _resolve_min_relperm(self.min_wetting_relperm)
+        _resolve_min_relperm(self.min_non_wetting_relperm)
 
         # Build interpolants
         wetting_pchip, wetting_dpchip = build_pchip_interpolant(
@@ -2290,7 +2292,7 @@ class TwoPhaseRelPermTable(
         When `reference_phase="wetting"`, only `wetting_saturation` is
         needed. When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
 
-        The `min_wetting_relperm` floor (if set) is applied to the result.
+        The `min_wetting_relperm` min_value (if set) is applied to the result.
 
         :param wetting_saturation: Wetting phase saturation (scalar or array).
         :param non_wetting_saturation: Non-wetting phase saturation (scalar or array).
@@ -2309,8 +2311,8 @@ class TwoPhaseRelPermTable(
             extrapolate_left=float(self.wetting_phase_relative_permeability[0]),
             extrapolate_right=float(self.wetting_phase_relative_permeability[-1]),
         )
-        floor = _resolve_relperm_floor(self.min_wetting_relperm)
-        return _apply_relperm_floor(kr, floor)
+        min_value = _resolve_min_relperm(self.min_wetting_relperm)
+        return _clamp_relperm(kr, min_value)
 
     def get_non_wetting_phase_relative_permeability(
         self,
@@ -2323,7 +2325,7 @@ class TwoPhaseRelPermTable(
         When `reference_phase="wetting"`, only `wetting_saturation` is
         needed. When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
 
-        The `min_non_wetting_relperm` floor (if set) is applied to the result.
+        The `min_non_wetting_relperm` min_value (if set) is applied to the result.
 
         :param wetting_saturation: Wetting phase saturation (scalar or array).
         :param non_wetting_saturation: Non-wetting phase saturation (scalar or array).
@@ -2342,8 +2344,8 @@ class TwoPhaseRelPermTable(
             extrapolate_left=float(self.non_wetting_phase_relative_permeability[0]),
             extrapolate_right=float(self.non_wetting_phase_relative_permeability[-1]),
         )
-        floor = _resolve_relperm_floor(self.min_non_wetting_relperm)
-        return _apply_relperm_floor(kr, floor)
+        min_value = _resolve_min_relperm(self.min_non_wetting_relperm)
+        return _clamp_relperm(kr, min_value)
 
     def get_two_phase_relative_permeabilities(
         self,
@@ -2379,8 +2381,8 @@ class TwoPhaseRelPermTable(
         The derivative is zero outside the tabulated saturation range
         (constant extrapolation = zero slope).
 
-        Where the `min_wetting_relperm` floor is active (raw kr ≤ floor),
-        the derivative is zeroed out to be consistent with the floored
+        Where the `min_wetting_relperm` min_value is active (raw kr ≤ min_value),
+        the derivative is zeroed out to be consistent with the min_value
         (constant) kr value, preventing Jacobian-residual mismatches.
 
         :param wetting_saturation: Wetting-phase saturation (scalar or array).
@@ -2395,18 +2397,18 @@ class TwoPhaseRelPermTable(
             else wetting_saturation,
         )
         dkr = self._query_dpchip(self._wetting_dpchip, ref)
-        floor = _resolve_relperm_floor(self.min_wetting_relperm)
-        if floor is None:
+        min_value = _resolve_min_relperm(self.min_wetting_relperm)
+        if min_value is None:
             return dkr
 
-        # Need raw kr to decide where floor is active
+        # Need raw kr to decide where min_value is active
         kr_raw = self._query_pchip(
             self._wetting_pchip,
             ref,
             extrapolate_left=float(self.wetting_phase_relative_permeability[0]),
             extrapolate_right=float(self.wetting_phase_relative_permeability[-1]),
         )
-        return _apply_relperm_floor_to_derivative(dkr, kr_raw, floor)
+        return _clamp_relperm_derivative(dkr, kr_raw, min_value)
 
     def get_non_wetting_phase_relative_permeability_derivative(
         self,
@@ -2421,8 +2423,8 @@ class TwoPhaseRelPermTable(
         The derivative is zero outside the tabulated saturation range
         (constant extrapolation = zero slope).
 
-        Where the `min_non_wetting_relperm` floor is active (raw kr ≤
-        floor), the derivative is zeroed out to be consistent with the floored
+        Where the `min_non_wetting_relperm` min_value is active (raw kr ≤
+        min_value), the derivative is zeroed out to be consistent with the min_value
         (constant) kr value, preventing Jacobian-residual mismatches.
 
         :param wetting_saturation: Wetting-phase saturation (scalar or array).
@@ -2437,8 +2439,8 @@ class TwoPhaseRelPermTable(
             else wetting_saturation,
         )
         dkr = self._query_dpchip(self._non_wetting_dpchip, ref)
-        floor = _resolve_relperm_floor(self.min_non_wetting_relperm)
-        if floor is None:
+        min_value = _resolve_min_relperm(self.min_non_wetting_relperm)
+        if min_value is None:
             return dkr
 
         kr_raw = self._query_pchip(
@@ -2447,7 +2449,7 @@ class TwoPhaseRelPermTable(
             extrapolate_left=float(self.non_wetting_phase_relative_permeability[0]),
             extrapolate_right=float(self.non_wetting_phase_relative_permeability[-1]),
         )
-        return _apply_relperm_floor_to_derivative(dkr, kr_raw, floor)
+        return _clamp_relperm_derivative(dkr, kr_raw, min_value)
 
     def get_oil_relperm_endpoint(self) -> float:
         if self.non_wetting_phase == FluidPhase.OIL:
@@ -2491,7 +2493,7 @@ class TwoPhaseRelPermTable(
         - **Gas-oil table** (phases are GAS and OIL): krw = 0.  So or Sg is
         forwarded according to `reference_phase`.
 
-        Minimum relperm floors declared on the table are applied automatically
+        Minimum relperm min_values declared on the table are applied automatically
         inside the underlying query methods and propagate transparently.
 
         :param water_saturation: Water saturation (fraction) — scalar or array.
@@ -2579,9 +2581,9 @@ class TwoPhaseRelPermTable(
         phases contribute only along their natural saturation axis; all cross
         derivatives (e.g. dkrw/dSg for an oil-water table) are zero.
 
-        Where a minimum relperm floor is active on this table (raw kr ≤ floor),
+        Where a minimum relperm min_value is active on this table (raw kr ≤ min_value),
         the corresponding derivative is zeroed out by the underlying query method,
-        keeping the Jacobian consistent with the floored kr value.
+        keeping the Jacobian consistent with the min_value kr value.
 
         Returned layout (same as `ThreePhaseRelPermTable`):
 
@@ -2739,8 +2741,8 @@ class ThreePhaseRelPermTable(
     RelativePermeabilityTable,
     serializers={"mixing_rule": serialize_mixing_rule},
     deserializers={"mixing_rule": deserialize_mixing_rule},
-    load_exclude={"supports_arrays"},
-    dump_exclude={"supports_arrays"},
+    load_exclude={"supports_vector"},
+    dump_exclude={"supports_vector"},
 ):
     """
     Three-phase relative permeability lookup table, with mixing rules.
@@ -2753,9 +2755,9 @@ class ThreePhaseRelPermTable(
     "non_wetting"), so the correct saturation is dispatched automatically —
     no assumptions are hard-coded about whether a table is indexed by So or Sg.
 
-    Minimum relperm floors on the two-phase tables propagate automatically
+    Minimum relperm min_values on the two-phase tables propagate automatically
     into this three-phase table since the two-phase table methods apply the
-    floor before returning.  For the mixing-rule chain rule the floored
+    min_value before returning.  For the mixing-rule chain rule the min_value
     derivative (zeroed in the flat region) is also used consistently, so the
     assembled Jacobian never disagrees with the kr values.
 
@@ -2775,13 +2777,13 @@ class ThreePhaseRelPermTable(
     Mixing rule function or name to compute oil relative permeability in the
     three-phase system. Signature:
 
-        rule(kro_w, kro_g, krw, krg, kro_endpoint,
+        rule(kro_w, kro_g, krw, krg, kr_max,
              water_saturation, oil_saturation, gas_saturation) -> kro
 
     If None, falls back to min(kro_w, kro_g).
     """
 
-    supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     def __attrs_post_init__(self) -> None:
@@ -2832,7 +2834,7 @@ class ThreePhaseRelPermTable(
         - `reference_phase="wetting"` - the wetting phase saturation is passed
         - `reference_phase="non_wetting"` - the non-wetting phase saturation is passed
 
-        Minimum relperm floors declared on the two-phase tables are applied
+        Minimum relperm min_values declared on the two-phase tables are applied
         automatically inside the table query methods and propagate into the
         mixing-rule inputs transparently.
 
@@ -2896,7 +2898,7 @@ class ThreePhaseRelPermTable(
                 sg, non_wetting_saturation=so
             )
 
-        kro_endpoint = self.get_oil_relperm_endpoint()
+        kr_max = self.get_oil_relperm_endpoint()
 
         # Three-phase oil mixing rule
         if self.mixing_rule is not None:
@@ -2905,7 +2907,7 @@ class ThreePhaseRelPermTable(
                 kro_g=kro_g,
                 krw=krw,
                 krg=krg,
-                kro_endpoint=kro_endpoint,
+                kr_max=kr_max,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -2942,10 +2944,10 @@ class ThreePhaseRelPermTable(
 
         Water and gas relative permeability derivatives are computed analytically
         from the slopes of the underlying two-phase lookup tables.  Where a
-        minimum relperm floor is active on a two-phase table, the derivative
-        returned by that table is already zeroed out in the floored region,
+        minimum relperm min_value is active on a two-phase table, the derivative
+        returned by that table is already zeroed out in the min_value region,
         so the assembled nine-derivative Jacobian is automatically consistent
-        with the floored kr values.
+        with the min_value kr values.
 
         Oil relative permeability derivatives use the full extended chain rule
         through the three-phase mixing rule:
@@ -3149,7 +3151,7 @@ class ThreePhaseRelPermTable(
                 sg, non_wetting_saturation=so
             )
 
-        kro_endpoint = self.get_oil_relperm_endpoint()
+        kr_max = self.get_oil_relperm_endpoint()
 
         # Three-phase oil mixing rule derivatives
         mixing_rule = typing.cast(typing.Optional[MixingRule], self.mixing_rule)
@@ -3171,7 +3173,7 @@ class ThreePhaseRelPermTable(
                 kro_g=kro_g,
                 krw=krw,
                 krg=krg,
-                kro_endpoint=kro_endpoint,
+                kr_max=kr_max,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -3262,6 +3264,9 @@ def compute_corey_three_phase_relative_permeabilities(
     water_exponent: float,
     oil_exponent: float,
     gas_exponent: float,
+    maximum_water_relperm: float = 1.0,
+    maximum_oil_relperm: float = 1.0,
+    maximum_gas_relperm: float = 1.0,
     wettability: Wettability = Wettability.WATER_WET,
     mixed_wet_water_fraction: float = 0.5,
     mixing_rule: MixingRule = eclipse_rule,
@@ -3294,9 +3299,9 @@ def compute_corey_three_phase_relative_permeabilities(
     :param mixing_rule: Mixing rule function for three-phase oil relative permeability.
     :param saturation_epsilon: Tolerance for checking if saturations sum to 1.
     :param minimum_mobile_pore_space: Minimum mobile pore space to avoid division by zero in effective saturation calculations.
-    :param minimum_water_relperm: Resolved minimum floor for water kr (`None` = no floor).
-    :param minimum_oil_relperm: Resolved minimum floor for oil kr (`None` = no floor).
-    :param minimum_gas_relperm: Resolved minimum floor for gas kr (`None` = no floor).
+    :param minimum_water_relperm: Resolved minimum min_value for water kr (`None` = no min_value).
+    :param minimum_oil_relperm: Resolved minimum min_value for oil kr (`None` = no min_value).
+    :param minimum_gas_relperm: Resolved minimum min_value for gas kr (`None` = no min_value).
     :return: Tuple of (water_relative_permeability, oil_relative_permeability, gas_relative_permeability)
     """
     # Convert to arrays for vectorized operations
@@ -3330,9 +3335,6 @@ def compute_corey_three_phase_relative_permeabilities(
         so = np.where(needs_norm, so / total_saturation, so)
         sg = np.where(needs_norm, sg / total_saturation, sg)
 
-    # kro_endpoint for mixing rule: 1.0 for unit-endpoint Corey models
-    kro_endpoint = 1.0
-
     if wettability == Wettability.WATER_WET:
         # 1. Water relperm (wetting phase)
         movable_water_range = (
@@ -3345,7 +3347,7 @@ def compute_corey_three_phase_relative_permeabilities(
                 (sw - irreducible_water_saturation) / movable_water_range, 0.0, 1.0
             ),
         )
-        krw = effective_water_saturation**water_exponent
+        krw = maximum_water_relperm * effective_water_saturation**water_exponent
 
         # 2. Gas relperm (nonwetting)
         movable_gas_range = (  # type: ignore[operator]
@@ -3359,23 +3361,27 @@ def compute_corey_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - residual_gas_saturation) / movable_gas_range, 0.0, 1.0),
         )
-        krg = effective_gas_saturation**gas_exponent
+        krg = maximum_gas_relperm * effective_gas_saturation**gas_exponent
 
         # 3. Oil relperm (intermediate phase) - mixing rule blending
         # Make sure to apply oil curvature to the two-phase oil kr inputs before mixing,
-        # not to the mixed output. (1-krw) and (1-krg) are the two-phase
+        # not to the mixed output. (1-krw/krw_max) and (1-krg/krg_max) are the two-phase
         # oil kr approximations; so we shape them with `oil_exponent` before blending.
-        kro_w_shaped = (1.0 - krw) ** oil_exponent
-        kro_g_shaped = (1.0 - krg) ** oil_exponent
-        kro = mixing_rule(
-            kro_w=kro_w_shaped,
-            kro_g=kro_g_shaped,
-            krw=krw,
-            krg=krg,
-            kro_endpoint=kro_endpoint,
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+        kro_w_shaped = (1.0 - krw / maximum_water_relperm) ** oil_exponent
+        kro_g_shaped = (1.0 - krg / maximum_gas_relperm) ** oil_exponent
+        kro = maximum_oil_relperm * np.clip(
+            mixing_rule(
+                kro_w=kro_w_shaped,
+                kro_g=kro_g_shaped,
+                krw=krw,
+                krg=krg,
+                kr_max=maximum_oil_relperm,
+                water_saturation=sw,
+                oil_saturation=so,
+                gas_saturation=sg,
+            ),
+            0.0,
+            1.0,
         )
 
     elif wettability == Wettability.OIL_WET:
@@ -3392,7 +3398,7 @@ def compute_corey_three_phase_relative_permeabilities(
             np.zeros_like(so),
             np.clip((so - max_residual) / movable_oil_range, 0.0, 1.0),
         )
-        kro = effective_oil_saturation**oil_exponent
+        kro = maximum_oil_relperm * effective_oil_saturation**oil_exponent
 
         # 2. Gas relperm (nonwetting phase)
         movable_gas_range = 1.0 - residual_gas_saturation - irreducible_water_saturation  # type: ignore[operator]
@@ -3401,20 +3407,24 @@ def compute_corey_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - residual_gas_saturation) / movable_gas_range, 0.0, 1.0),
         )
-        krg = effective_gas_saturation**gas_exponent
+        krg = maximum_gas_relperm * effective_gas_saturation**gas_exponent
 
         # 3. Water relperm (intermediate phase, use mixing rule style blending)
-        kro_proxy_shaped = (1.0 - kro) ** water_exponent
-        krg_proxy_shaped = (1.0 - krg) ** water_exponent
-        krw = mixing_rule(  # type: ignore[assignment]
-            kro_w=kro_proxy_shaped,  # treat oil as wetting
-            kro_g=krg_proxy_shaped,  # treat gas as nonwetting
-            krw=kro,
-            krg=krg,
-            kro_endpoint=kro_endpoint,
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+        kro_proxy_shaped = (1.0 - kro / maximum_oil_relperm) ** water_exponent
+        krg_proxy_shaped = (1.0 - krg / maximum_gas_relperm) ** water_exponent
+        krw = maximum_water_relperm * np.clip(
+            mixing_rule(  # type: ignore[assignment]
+                kro_w=kro_proxy_shaped,  # treat oil as wetting
+                kro_g=krg_proxy_shaped,  # treat gas as nonwetting
+                krw=kro,
+                krg=krg,
+                kr_max=maximum_water_relperm,
+                water_saturation=sw,
+                oil_saturation=so,
+                gas_saturation=sg,
+            ),
+            0.0,
+            1.0,
         )
 
     elif wettability == Wettability.MIXED_WET:
@@ -3430,7 +3440,7 @@ def compute_corey_three_phase_relative_permeabilities(
                 (sw - irreducible_water_saturation) / movable_water_range_ww, 0.0, 1.0
             ),
         )
-        krw_ww = effective_water_saturation_ww**water_exponent
+        krw_ww = maximum_water_relperm * effective_water_saturation_ww**water_exponent
 
         movable_gas_range_ww = (  # type: ignore[operator]
             1.0
@@ -3443,18 +3453,22 @@ def compute_corey_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - residual_gas_saturation) / movable_gas_range_ww, 0.0, 1.0),
         )
-        krg_ww = effective_gas_saturation_ww**gas_exponent
-        kro_w_ww = (1.0 - krw_ww) ** oil_exponent
-        kro_g_ww = (1.0 - krg_ww) ** oil_exponent
-        kro_ww = mixing_rule(
-            kro_w=kro_w_ww,
-            kro_g=kro_g_ww,
-            krw=krw_ww,
-            krg=krg_ww,
-            kro_endpoint=kro_endpoint,
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+        krg_ww = maximum_gas_relperm * effective_gas_saturation_ww**gas_exponent
+        kro_w_ww = (1.0 - krw_ww / maximum_water_relperm) ** oil_exponent
+        kro_g_ww = (1.0 - krg_ww / maximum_gas_relperm) ** oil_exponent
+        kro_ww = maximum_oil_relperm * np.clip(
+            mixing_rule(
+                kro_w=kro_w_ww,
+                kro_g=kro_g_ww,
+                krw=krw_ww,
+                krg=krg_ww,
+                kr_max=maximum_oil_relperm,
+                water_saturation=sw,
+                oil_saturation=so,
+                gas_saturation=sg,
+            ),
+            0.0,
+            1.0,
         )
 
         # Oil-wet contribution
@@ -3469,7 +3483,7 @@ def compute_corey_three_phase_relative_permeabilities(
             np.zeros_like(so),
             np.clip((so - max_residual_ow) / movable_oil_range_ow, 0.0, 1.0),
         )
-        kro_ow = effective_oil_saturation_ow**oil_exponent
+        kro_ow = maximum_oil_relperm * effective_oil_saturation_ow**oil_exponent
 
         movable_gas_range_ow = (
             1.0 - residual_gas_saturation - irreducible_water_saturation  # type: ignore[operator]
@@ -3479,18 +3493,22 @@ def compute_corey_three_phase_relative_permeabilities(
             np.zeros_like(sg),
             np.clip((sg - residual_gas_saturation) / movable_gas_range_ow, 0.0, 1.0),
         )
-        krg_ow = effective_gas_saturation_ow**gas_exponent
-        kro_proxy_ow = (1.0 - kro_ow) ** water_exponent
-        krg_proxy_ow = (1.0 - krg_ow) ** water_exponent
-        krw_ow = mixing_rule(
-            kro_w=kro_proxy_ow,
-            kro_g=krg_proxy_ow,
-            krw=kro_ow,
-            krg=krg_ow,
-            kro_endpoint=kro_endpoint,
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+        krg_ow = maximum_gas_relperm * effective_gas_saturation_ow**gas_exponent
+        kro_proxy_ow = (1.0 - kro_ow / maximum_oil_relperm) ** water_exponent
+        krg_proxy_ow = (1.0 - krg_ow / maximum_gas_relperm) ** water_exponent
+        krw_ow = maximum_water_relperm * np.clip(
+            mixing_rule(
+                kro_w=kro_proxy_ow,
+                kro_g=krg_proxy_ow,
+                krw=kro_ow,
+                krg=krg_ow,
+                kr_max=maximum_water_relperm,
+                water_saturation=sw,
+                oil_saturation=so,
+                gas_saturation=sg,
+            ),
+            0.0,
+            1.0,
         )
 
         # Weighted blend
@@ -3510,13 +3528,13 @@ def compute_corey_three_phase_relative_permeabilities(
     else:
         raise ValidationError(f"Wettability {wettability!r} not implemented.")
 
-    # Clip all results to [0, 1] then apply per-phase minimum floors
+    # Clip all results to [0, 1] and apply per-phase minimum
     krw = np.clip(krw, 0.0, 1.0)
     kro = np.clip(kro, 0.0, 1.0)
     krg = np.clip(krg, 0.0, 1.0)
-    krw = _apply_relperm_floor(krw, minimum_water_relperm)
-    kro = _apply_relperm_floor(kro, minimum_oil_relperm)
-    krg = _apply_relperm_floor(krg, minimum_gas_relperm)
+    krw = _clamp_relperm(krw, minimum_water_relperm)
+    kro = _clamp_relperm(kro, minimum_oil_relperm)
+    krg = _clamp_relperm(krg, minimum_gas_relperm)
     if is_scalar:
         krw = krw.item()  # type: ignore
         kro = kro.item()  # type: ignore
@@ -3530,23 +3548,23 @@ class BrooksCoreyRelPermModel(
     RelativePermeabilityTable,
     serializers={"mixing_rule": serialize_mixing_rule},
     deserializers={"mixing_rule": deserialize_mixing_rule},
-    load_exclude={"supports_arrays"},
-    dump_exclude={"supports_arrays"},
+    load_exclude={"supports_vector"},
+    dump_exclude={"supports_vector"},
 ):
     """
     Brooks-Corey-type three-phase relative permeability model.
 
     Supports water-wet and oil-wet wettability assumptions.
 
-    **Minimum relperm floors** (`minimum_water_relperm`, `minimum_oil_relperm`, `minimum_gas_relperm`):
+    **Minimum relperm min_values** (`minimum_water_relperm`, `minimum_oil_relperm`, `minimum_gas_relperm`):
 
     `"auto"` - `max(4 * machine_epsilon, 1e-8)` (dtype-aware, same as
-    the CMG IMEX/GEM minimum mobility approach). `None` - no floor
+    the CMG IMEX/GEM minimum mobility approach). `None` - no min_value
     (default, kr can reach zero exactly). `float` - explicit user-set
     value.
 
-    The floor is applied to the computed kr value and the derivative is
-    zeroed out in the floored region, so the Jacobian is always consistent
+    The min_value is applied to the computed kr value and the derivative is
+    zeroed out in the min_value region, so the Jacobian is always consistent
     with the kr value (no MBE from mismatched kr/derivative pairs).
     """
 
@@ -3578,6 +3596,12 @@ class BrooksCoreyRelPermModel(
 
     Meaning slower krg increase with saturation.
     """
+    maximum_water_relperm: float = 1.0
+    """Endpoint (maximum) relative permeability for water (krw at residual oil)."""
+    maximum_oil_relperm: float = 1.0
+    """Endpoint (maximum) relative permeability for oil (krocw)."""
+    maximum_gas_relperm: float = 1.0
+    """Endpoint (maximum) relative permeability for gas (krg at connate water + residual oil)."""
     wettability: Wettability = Wettability.WATER_WET
     """Wettability type (water-wet or oil-wet)."""
 
@@ -3593,45 +3617,45 @@ class BrooksCoreyRelPermModel(
     - kro_g: Oil relative permeability from oil-gas table
     - krw: Water relative permeability from oil-water table
     - krg: Gas relative permeability from gas-oil table
-    - kro_endpoint: Oil relative permeability at connate water
+    - kr_max: Oil relative permeability at connate water
     - Sw: Water saturation
     - So: Oil saturation
     - Sg: Gas saturation
     and return the mixed oil relative permeability.
     """
 
-    minimum_water_relperm: RelPermFloor = "auto"
+    minimum_water_relperm: MinimumRelPerm = "auto"
     """
-    Minimum floor for the water relative permeability.
+    Minimum min_value for the water relative permeability.
 
-    `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
-    """
-
-    minimum_oil_relperm: RelPermFloor = "auto"
-    """
-    Minimum floor for the oil relative permeability.
-
-    `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
+    `"auto"` - dtype-aware min_value; `None` - no min_value; `float` - explicit value.
     """
 
-    minimum_gas_relperm: RelPermFloor = "auto"
+    minimum_oil_relperm: MinimumRelPerm = "auto"
     """
-    Minimum floor for the gas relative permeability.
+    Minimum min_value for the oil relative permeability.
 
-    `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
+    `"auto"` - dtype-aware min_value; `None` - no min_value; `float` - explicit value.
     """
 
-    supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
-    """Flag indicating support for array inputs."""
+    minimum_gas_relperm: MinimumRelPerm = "auto"
+    """
+    Minimum min_value for the gas relative permeability.
+
+    `"auto"` - dtype-aware min_value; `None` - no min_value; `float` - explicit value.
+    """
+
+    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
+    """Flag indicating support for array/vector inputs."""
 
     def __attrs_post_init__(self) -> None:
         mixing_rule = self.mixing_rule
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
-        # Validate floor sentinels eagerly
-        _resolve_relperm_floor(self.minimum_water_relperm)
-        _resolve_relperm_floor(self.minimum_oil_relperm)
-        _resolve_relperm_floor(self.minimum_gas_relperm)
+
+        _resolve_min_relperm(self.minimum_water_relperm)
+        _resolve_min_relperm(self.minimum_oil_relperm)
+        _resolve_min_relperm(self.minimum_gas_relperm)
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
         wettability = self.wettability
@@ -3645,6 +3669,15 @@ class BrooksCoreyRelPermModel(
 
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         return FluidPhase.OIL
+
+    def get_oil_relperm_endpoint(self) -> float:
+        return self.maximum_oil_relperm
+
+    def get_water_relperm_endpoint(self) -> float:
+        return self.maximum_water_relperm
+
+    def get_gas_relperm_endpoint(self) -> float:
+        return self.maximum_gas_relperm
 
     def get_relative_permeabilities(
         self,
@@ -3717,14 +3750,17 @@ class BrooksCoreyRelPermModel(
             water_exponent=self.water_exponent,
             oil_exponent=self.oil_exponent,
             gas_exponent=self.gas_exponent,
+            maximum_water_relperm=self.get_water_relperm_endpoint(),
+            maximum_oil_relperm=self.get_oil_relperm_endpoint(),
+            maximum_gas_relperm=self.get_gas_relperm_endpoint(),
             wettability=self.wettability,
             mixed_wet_water_fraction=self.mixed_wet_water_fraction,
             mixing_rule=self.mixing_rule,  # type: ignore[arg-type]
             saturation_epsilon=c.SATURATION_EPSILON,
             minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
-            minimum_water_relperm=_resolve_relperm_floor(self.minimum_water_relperm),
-            minimum_oil_relperm=_resolve_relperm_floor(self.minimum_oil_relperm),
-            minimum_gas_relperm=_resolve_relperm_floor(self.minimum_gas_relperm),
+            minimum_water_relperm=_resolve_min_relperm(self.minimum_water_relperm),
+            minimum_oil_relperm=_resolve_min_relperm(self.minimum_oil_relperm),
+            minimum_gas_relperm=_resolve_min_relperm(self.minimum_gas_relperm),
         )
         return RelativePermeabilities(water=krw, oil=kro, gas=krg)  # type: ignore[typeddict-item]
 
@@ -3759,9 +3795,9 @@ class BrooksCoreyRelPermModel(
         `d_kro/d_krw` and `d_kro/d_krg` terms for rules like Stone II that
         use the actual two-phase water/gas kr values).
 
-        Wherever a minimum relperm floor is active (raw kr ≤ floor), the
+        Wherever a minimum relperm min_value is active (raw kr ≤ min_value), the
         corresponding derivative is zeroed out, keeping the Jacobian consistent
-        with the floored kr value and preventing MBE.
+        with the min_value kr value and preventing MBE.
 
         :param water_saturation: Water saturation (fraction, 0 to 1).
         :param oil_saturation: Oil saturation (fraction, 0 to 1).
@@ -3821,9 +3857,9 @@ class BrooksCoreyRelPermModel(
         wettability = self.wettability
         mixing_rule = typing.cast(MixingRule, self.mixing_rule)
 
-        floor_w = _resolve_relperm_floor(self.minimum_water_relperm)
-        floor_o = _resolve_relperm_floor(self.minimum_oil_relperm)
-        floor_g = _resolve_relperm_floor(self.minimum_gas_relperm)
+        krw_min = _resolve_min_relperm(self.minimum_water_relperm)
+        kro_min = _resolve_min_relperm(self.minimum_oil_relperm)
+        krg_min = _resolve_min_relperm(self.minimum_gas_relperm)
 
         is_scalar = (
             np.isscalar(water_saturation)
@@ -3841,6 +3877,10 @@ class BrooksCoreyRelPermModel(
         zeros = np.zeros_like(sw)
         minimum_mobile_pore_space = c.MINIMUM_MOBILE_PORE_SPACE
 
+        krw_max = self.get_water_relperm_endpoint()
+        kro_max = self.get_oil_relperm_endpoint()
+        krg_max = self.get_gas_relperm_endpoint()
+
         if wettability == Wettability.OIL_WET:
             # kro (wetting, depends on So)
             movable_oil_range = 1.0 - Sorw - Sorg  # type: ignore
@@ -3851,17 +3891,15 @@ class BrooksCoreyRelPermModel(
                 0.0,
                 1.0,
             )
-            kro_vals = se_o**oil_exponent
+            kro_vals = kro_max * se_o**oil_exponent
 
-            d_kro_d_so_raw = np.where(
+            d_kro_d_so_raw = kro_max * np.where(
                 valid_oil & (se_o > 0.0),
                 oil_exponent * se_o ** max(oil_exponent - 1.0, 0.0) / movable_oil_range,
                 zeros,
             )
-            # Apply floor: zero derivative where raw kro ≤ floor
-            d_kro_d_so = _apply_relperm_floor_to_derivative(
-                d_kro_d_so_raw, kro_vals, floor_o
-            )
+            # Apply min_value: zero derivative where raw kro ≤ min_value
+            d_kro_d_so = _clamp_relperm_derivative(d_kro_d_so_raw, kro_vals, kro_min)
             d_kro_d_sw = zeros.copy()
             d_kro_d_sg = zeros.copy()
 
@@ -3873,22 +3911,20 @@ class BrooksCoreyRelPermModel(
                 0.0,
                 1.0,
             )
-            krg_vals = se_g**gas_exponent
+            krg_vals = krg_max * se_g**gas_exponent
 
-            d_krg_d_sg_raw = np.where(
+            d_krg_d_sg_raw = krg_max * np.where(
                 valid_gas & (se_g > 0.0),
                 gas_exponent * se_g ** max(gas_exponent - 1.0, 0.0) / movable_gas_range,
                 zeros,
             )
-            d_krg_d_sg = _apply_relperm_floor_to_derivative(
-                d_krg_d_sg_raw, krg_vals, floor_g
-            )
+            d_krg_d_sg = _clamp_relperm_derivative(d_krg_d_sg_raw, krg_vals, krg_min)
             d_krg_d_sw = zeros.copy()
             d_krg_d_so = zeros.copy()
 
             # krw (intermediate phase, via mixing rule)
-            one_minus_kro = np.clip(1.0 - kro_vals, 0.0, None)
-            one_minus_krg = np.clip(1.0 - krg_vals, 0.0, None)
+            one_minus_kro = np.clip(1.0 - kro_vals / kro_max, 0.0, None)
+            one_minus_krg = np.clip(1.0 - krg_vals / krg_max, 0.0, None)
             kro_proxy = one_minus_kro**water_exponent
             krg_proxy = one_minus_krg**water_exponent
 
@@ -3918,7 +3954,7 @@ class BrooksCoreyRelPermModel(
                 kro_g=krg_proxy,  # type: ignore[arg-type]
                 krw=kro_vals,
                 krg=krg_vals,
-                kro_endpoint=1.0,
+                kr_max=krw_max,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -3931,41 +3967,39 @@ class BrooksCoreyRelPermModel(
             d_krw_d_sg_explicit = derivatives["d_kro_d_sg_explicit"]
 
             # Chain rule for krw
-            krw_raw = mixing_rule(
-                kro_w=kro_proxy,
-                kro_g=krg_proxy,
-                krw=kro_vals,
-                krg=krg_vals,
-                kro_endpoint=1.0,
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
+            krw_raw = krw_max * np.clip(
+                mixing_rule(
+                    kro_w=kro_proxy,
+                    kro_g=krg_proxy,
+                    krw=kro_vals,
+                    krg=krg_vals,
+                    kr_max=krw_max,
+                    water_saturation=sw,
+                    oil_saturation=so,
+                    gas_saturation=sg,
+                ),
+                0.0,
+                1.0,
             )
-            d_krw_d_sw_raw = (
+            d_krw_d_sw_raw = krw_max * (
                 d_krw_d_kro_proxy * d_kro_proxy_d_sw
                 + d_krw_d_krg_proxy * d_krg_proxy_d_sw
                 + d_krw_d_sw_explicit
             )
-            d_krw_d_so_raw = (
+            d_krw_d_so_raw = krw_max * (
                 d_krw_d_kro_proxy * d_kro_proxy_d_so
                 + d_krw_d_krg_proxy * d_krg_proxy_d_so
                 + d_krw_d_so_explicit
             )
-            d_krw_d_sg_raw = (
+            d_krw_d_sg_raw = krw_max * (
                 d_krw_d_kro_proxy * d_kro_proxy_d_sg
                 + d_krw_d_krg_proxy * d_krg_proxy_d_sg
                 + d_krw_d_sg_explicit
             )
-            # Apply floor to krw derivatives
-            d_krw_d_sw = _apply_relperm_floor_to_derivative(
-                d_krw_d_sw_raw, krw_raw, floor_w
-            )
-            d_krw_d_so = _apply_relperm_floor_to_derivative(
-                d_krw_d_so_raw, krw_raw, floor_w
-            )
-            d_krw_d_sg = _apply_relperm_floor_to_derivative(
-                d_krw_d_sg_raw, krw_raw, floor_w
-            )
+            # Apply min_value to krw derivatives
+            d_krw_d_sw = _clamp_relperm_derivative(d_krw_d_sw_raw, krw_raw, krw_min)
+            d_krw_d_so = _clamp_relperm_derivative(d_krw_d_so_raw, krw_raw, krw_min)
+            d_krw_d_sg = _clamp_relperm_derivative(d_krw_d_sg_raw, krw_raw, krw_min)
 
             results = (
                 d_krw_d_sw,
@@ -4003,8 +4037,8 @@ class BrooksCoreyRelPermModel(
                 0.0,
                 1.0,
             )
-            krw_ww = se_w_ww**water_exponent
-            d_krw_ww_d_sw_raw = np.where(
+            krw_ww = krw_max * se_w_ww**water_exponent
+            d_krw_ww_d_sw_raw = krw_max * np.where(
                 valid_water_ww & (se_w_ww > 0.0),
                 water_exponent
                 * (se_w_ww ** max(water_exponent - 1.0, 0.0))
@@ -4019,8 +4053,8 @@ class BrooksCoreyRelPermModel(
                 0.0,
                 1.0,
             )
-            krg_ww = se_g_ww**gas_exponent
-            d_krg_ww_d_sg_raw = np.where(
+            krg_ww = krg_max * se_g_ww**gas_exponent
+            d_krg_ww_d_sg_raw = krg_max * np.where(
                 valid_gas_ww & (se_g_ww > 0.0),
                 gas_exponent
                 * (se_g_ww ** max(gas_exponent - 1.0, 0.0))
@@ -4028,7 +4062,7 @@ class BrooksCoreyRelPermModel(
                 zeros,
             )
 
-            one_minus_krw_ww = np.clip(1.0 - krw_ww, 0.0, None)
+            one_minus_krw_ww = np.clip(1.0 - krw_ww / krw_max, 0.0, None)
             kro_w_ww = one_minus_krw_ww**oil_exponent
             d_kro_w_ww_d_sw = np.where(
                 one_minus_krw_ww > 0.0,
@@ -4038,7 +4072,7 @@ class BrooksCoreyRelPermModel(
                 zeros,
             )
 
-            one_minus_krg_ww = np.clip(1.0 - krg_ww, 0.0, None)
+            one_minus_krg_ww = np.clip(1.0 - krg_ww / krg_max, 0.0, None)
             kro_g_ww = one_minus_krg_ww**oil_exponent
             d_kro_g_ww_d_sg = np.where(
                 one_minus_krg_ww > 0.0,
@@ -4054,31 +4088,35 @@ class BrooksCoreyRelPermModel(
                 kro_g=kro_g_ww,  # type: ignore[arg-type]
                 krw=krw_ww,
                 krg=krg_ww,
-                kro_endpoint=1.0,
+                kr_max=kro_max,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
                 epsilon=c.FINITE_DIFFERENCE_EPSILON,
             )
-            kro_ww_raw = mixing_rule(
-                kro_w=kro_w_ww,
-                kro_g=kro_g_ww,
-                krw=krw_ww,
-                krg=krg_ww,
-                kro_endpoint=1.0,
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
+            kro_ww_raw = kro_max * np.clip(
+                mixing_rule(
+                    kro_w=kro_w_ww,
+                    kro_g=kro_g_ww,
+                    krw=krw_ww,
+                    krg=krg_ww,
+                    kr_max=kro_max,
+                    water_saturation=sw,
+                    oil_saturation=so,
+                    gas_saturation=sg,
+                ),
+                0.0,
+                1.0,
             )
-            d_kro_ww_d_sw = (
+            d_kro_ww_d_sw = kro_max * (
                 derivs_ww["d_kro_d_kro_w"] * d_kro_w_ww_d_sw
                 + derivs_ww["d_kro_d_kro_g"] * zeros  # kro_g_ww has no Sw dependence
                 + derivs_ww["d_kro_d_sw_explicit"]
             )
-            d_kro_ww_d_so = derivs_ww[
-                "d_kro_d_so_explicit"
-            ]  # neither shaped input depends on So
-            d_kro_ww_d_sg = (
+            d_kro_ww_d_so = (
+                kro_max * derivs_ww["d_kro_d_so_explicit"]
+            )  # neither shaped input depends on So
+            d_kro_ww_d_sg = kro_max * (
                 derivs_ww["d_kro_d_kro_w"] * zeros  # kro_w_ww has no Sg dependence
                 + derivs_ww["d_kro_d_kro_g"] * d_kro_g_ww_d_sg
                 + derivs_ww["d_kro_d_sg_explicit"]
@@ -4094,8 +4132,8 @@ class BrooksCoreyRelPermModel(
                 0.0,
                 1.0,
             )
-            kro_ow = se_o_ow**oil_exponent
-            d_kro_ow_d_so = np.where(
+            kro_ow = kro_max * se_o_ow**oil_exponent
+            d_kro_ow_d_so = kro_max * np.where(
                 valid_oil_ow & (se_o_ow > 0.0),
                 oil_exponent
                 * (se_o_ow ** max(oil_exponent - 1.0, 0.0))
@@ -4110,8 +4148,8 @@ class BrooksCoreyRelPermModel(
                 0.0,
                 1.0,
             )
-            krg_ow = se_g_ow**gas_exponent
-            d_krg_ow_d_sg = np.where(
+            krg_ow = krg_max * se_g_ow**gas_exponent
+            d_krg_ow_d_sg = krg_max * np.where(
                 valid_gas_ow & (se_g_ow > 0.0),
                 gas_exponent
                 * (se_g_ow ** max(gas_exponent - 1.0, 0.0))
@@ -4119,7 +4157,7 @@ class BrooksCoreyRelPermModel(
                 zeros,
             )
 
-            one_minus_kro_ow = np.clip(1.0 - kro_ow, 0.0, None)
+            one_minus_kro_ow = np.clip(1.0 - kro_ow / kro_max, 0.0, None)
             kro_proxy_ow = one_minus_kro_ow**water_exponent
             d_kro_proxy_ow_d_so = np.where(
                 one_minus_kro_ow > 0.0,
@@ -4129,7 +4167,7 @@ class BrooksCoreyRelPermModel(
                 zeros,
             )
 
-            one_minus_krg_ow = np.clip(1.0 - krg_ow, 0.0, None)
+            one_minus_krg_ow = np.clip(1.0 - krg_ow / krg_max, 0.0, None)
             krg_proxy_ow = one_minus_krg_ow**water_exponent
             d_krg_proxy_ow_d_sg = np.where(
                 one_minus_krg_ow > 0.0,
@@ -4145,33 +4183,37 @@ class BrooksCoreyRelPermModel(
                 kro_g=krg_proxy_ow,  # type: ignore[arg-type]
                 krw=kro_ow,
                 krg=krg_ow,
-                kro_endpoint=1.0,
+                kr_max=krw_max,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
                 epsilon=c.FINITE_DIFFERENCE_EPSILON,
             )
-            krw_ow_raw = mixing_rule(
-                kro_w=kro_proxy_ow,
-                kro_g=krg_proxy_ow,
-                krw=kro_ow,
-                krg=krg_ow,
-                kro_endpoint=1.0,
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
+            krw_ow_raw = krw_max * np.clip(
+                mixing_rule(
+                    kro_w=kro_proxy_ow,
+                    kro_g=krg_proxy_ow,
+                    krw=kro_ow,
+                    krg=krg_ow,
+                    kr_max=krw_max,
+                    water_saturation=sw,
+                    oil_saturation=so,
+                    gas_saturation=sg,
+                ),
+                0.0,
+                1.0,
             )
-            d_krw_ow_d_sw = derivs_ow["d_kro_d_sw_explicit"]
-            d_krw_ow_d_so = (
+            d_krw_ow_d_sw = krw_max * derivs_ow["d_kro_d_sw_explicit"]
+            d_krw_ow_d_so = krw_max * (
                 derivs_ow["d_kro_d_kro_w"] * d_kro_proxy_ow_d_so
                 + derivs_ow["d_kro_d_so_explicit"]
             )
-            d_krw_ow_d_sg = (
+            d_krw_ow_d_sg = krw_max * (
                 derivs_ow["d_kro_d_kro_g"] * d_krg_proxy_ow_d_sg
                 + derivs_ow["d_kro_d_sg_explicit"]
             )
 
-            # Blend raw values for floor masking
+            # Blend raw values for min_value masking
             krw_blend_raw = f * krw_ww + (1.0 - f) * krw_ow_raw
             kro_blend_raw = f * kro_ww_raw + (1.0 - f) * kro_ow
             krg_blend_raw = f * krg_ww + (1.0 - f) * krg_ow
@@ -4187,29 +4229,29 @@ class BrooksCoreyRelPermModel(
 
             d_krg_d_sg_raw = f * d_krg_ww_d_sg_raw + (1.0 - f) * d_krg_ow_d_sg
 
-            # Apply floors to blended derivatives
-            d_krw_d_sw = _apply_relperm_floor_to_derivative(
-                d_krw_d_sw_raw, krw_blend_raw, floor_w
+            # Apply min_values to blended derivatives
+            d_krw_d_sw = _clamp_relperm_derivative(
+                d_krw_d_sw_raw, krw_blend_raw, krw_min
             )
-            d_krw_d_so = _apply_relperm_floor_to_derivative(
-                d_krw_d_so_raw, krw_blend_raw, floor_w
+            d_krw_d_so = _clamp_relperm_derivative(
+                d_krw_d_so_raw, krw_blend_raw, krw_min
             )
-            d_krw_d_sg = _apply_relperm_floor_to_derivative(
-                d_krw_d_sg_raw, krw_blend_raw, floor_w
+            d_krw_d_sg = _clamp_relperm_derivative(
+                d_krw_d_sg_raw, krw_blend_raw, krw_min
             )
-            d_kro_d_sw = _apply_relperm_floor_to_derivative(
-                d_kro_d_sw_raw, kro_blend_raw, floor_o
+            d_kro_d_sw = _clamp_relperm_derivative(
+                d_kro_d_sw_raw, kro_blend_raw, kro_min
             )
-            d_kro_d_so = _apply_relperm_floor_to_derivative(
-                d_kro_d_so_raw, kro_blend_raw, floor_o
+            d_kro_d_so = _clamp_relperm_derivative(
+                d_kro_d_so_raw, kro_blend_raw, kro_min
             )
-            d_kro_d_sg = _apply_relperm_floor_to_derivative(
-                d_kro_d_sg_raw, kro_blend_raw, floor_o
+            d_kro_d_sg = _clamp_relperm_derivative(
+                d_kro_d_sg_raw, kro_blend_raw, kro_min
             )
             d_krg_d_sw = zeros.copy()
             d_krg_d_so = zeros.copy()
-            d_krg_d_sg = _apply_relperm_floor_to_derivative(
-                d_krg_d_sg_raw, krg_blend_raw, floor_g
+            d_krg_d_sg = _clamp_relperm_derivative(
+                d_krg_d_sg_raw, krg_blend_raw, krg_min
             )
 
             results = (
@@ -4246,17 +4288,15 @@ class BrooksCoreyRelPermModel(
             0.0,
             1.0,
         )
-        krw_values = se_w**water_exponent
-        d_krw_d_sw_raw = np.where(
+        krw_values = krw_max * se_w**water_exponent
+        d_krw_d_sw_raw = krw_max * np.where(
             valid_water & (se_w > 0.0),
             water_exponent
             * (se_w ** max(water_exponent - 1.0, 0.0))
             / mobile_water_range,
             zeros,
         )
-        d_krw_d_sw = _apply_relperm_floor_to_derivative(
-            d_krw_d_sw_raw, krw_values, floor_w
-        )
+        d_krw_d_sw = _clamp_relperm_derivative(d_krw_d_sw_raw, krw_values, krw_min)
         d_krw_d_so = zeros.copy()
         d_krw_d_sg = zeros.copy()
 
@@ -4268,20 +4308,18 @@ class BrooksCoreyRelPermModel(
             0.0,
             1.0,
         )
-        krg_values = se_g**gas_exponent
-        d_krg_d_sg_raw = np.where(
+        krg_values = krg_max * se_g**gas_exponent
+        d_krg_d_sg_raw = krg_max * np.where(
             valid_gas & (se_g > 0.0),
             gas_exponent * (se_g ** max(gas_exponent - 1.0, 0.0)) / mobile_gas_range,
             zeros,
         )
-        d_krg_d_sg = _apply_relperm_floor_to_derivative(
-            d_krg_d_sg_raw, krg_values, floor_g
-        )
+        d_krg_d_sg = _clamp_relperm_derivative(d_krg_d_sg_raw, krg_values, krg_min)
         d_krg_d_sw = zeros.copy()
         d_krg_d_so = zeros.copy()
 
         # kro_w shaped = (1 - krw)^no
-        one_minus_krw = np.clip(1.0 - krw_values, 0.0, None)
+        one_minus_krw = np.clip(1.0 - krw_values / krw_max, 0.0, None)
         kro_w_shaped = one_minus_krw**oil_exponent
         d_kro_w_d_sw = np.where(
             one_minus_krw > 0.0,
@@ -4294,7 +4332,7 @@ class BrooksCoreyRelPermModel(
         d_kro_w_d_sg = zeros.copy()
 
         # kro_g shaped = (1 - krg)^no
-        one_minus_krg = np.clip(1.0 - krg_values, 0.0, None)
+        one_minus_krg = np.clip(1.0 - krg_values / krg_max, 0.0, None)
         kro_g_shaped = one_minus_krg**oil_exponent
         d_kro_g_d_sg = np.where(
             one_minus_krg > 0.0,
@@ -4312,7 +4350,7 @@ class BrooksCoreyRelPermModel(
             kro_g=kro_g_shaped,  # type: ignore[arg-type]
             krw=krw_values,
             krg=krg_values,
-            kro_endpoint=1.0,
+            kr_max=kro_max,
             water_saturation=sw,
             oil_saturation=so,
             gas_saturation=sg,
@@ -4326,33 +4364,37 @@ class BrooksCoreyRelPermModel(
         d_kro_d_oil_saturation_explicit = derivatives["d_kro_d_so_explicit"]
         d_kro_d_gas_saturation_explicit = derivatives["d_kro_d_sg_explicit"]
 
-        # Forward evaluate kro for floor masking
-        kro_raw = mixing_rule(
-            kro_w=kro_w_shaped,
-            kro_g=kro_g_shaped,
-            krw=krw_values,
-            krg=krg_values,
-            kro_endpoint=1.0,
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+        # Forward evaluate kro for min_value masking
+        kro_raw = kro_max * np.clip(
+            mixing_rule(
+                kro_w=kro_w_shaped,
+                kro_g=kro_g_shaped,
+                krw=krw_values,
+                krg=krg_values,
+                kr_max=kro_max,
+                water_saturation=sw,
+                oil_saturation=so,
+                gas_saturation=sg,
+            ),
+            0.0,
+            1.0,
         )
 
-        d_kro_d_sw_raw = (
+        d_kro_d_sw_raw = kro_max * (
             d_kro_d_kro_w * d_kro_w_d_sw
             + d_kro_d_kro_g * d_kro_g_d_sw
             + d_kro_d_krw_mix * d_krw_d_sw_raw
             + d_kro_d_krg_mix * zeros
             + d_kro_d_water_saturation_explicit
         )
-        d_kro_d_so_raw = (
+        d_kro_d_so_raw = kro_max * (
             d_kro_d_kro_w * d_kro_w_d_so
             + d_kro_d_kro_g * d_kro_g_d_so
             + d_kro_d_krw_mix * zeros
             + d_kro_d_krg_mix * zeros
             + d_kro_d_oil_saturation_explicit
         )
-        d_kro_d_sg_raw = (
+        d_kro_d_sg_raw = kro_max * (
             d_kro_d_kro_w * d_kro_w_d_sg
             + d_kro_d_kro_g * d_kro_g_d_sg
             + d_kro_d_krw_mix * zeros
@@ -4360,15 +4402,9 @@ class BrooksCoreyRelPermModel(
             + d_kro_d_gas_saturation_explicit
         )
 
-        d_kro_d_sw = _apply_relperm_floor_to_derivative(
-            d_kro_d_sw_raw, kro_raw, floor_o
-        )
-        d_kro_d_so = _apply_relperm_floor_to_derivative(
-            d_kro_d_so_raw, kro_raw, floor_o
-        )
-        d_kro_d_sg = _apply_relperm_floor_to_derivative(
-            d_kro_d_sg_raw, kro_raw, floor_o
-        )
+        d_kro_d_sw = _clamp_relperm_derivative(d_kro_d_sw_raw, kro_raw, kro_min)
+        d_kro_d_so = _clamp_relperm_derivative(d_kro_d_so_raw, kro_raw, kro_min)
+        d_kro_d_sg = _clamp_relperm_derivative(d_kro_d_sg_raw, kro_raw, kro_min)
 
         results = (
             d_krw_d_sw,
@@ -4553,9 +4589,9 @@ def compute_let_three_phase_relative_permeabilities(
     :param wettability: Wettability type (water-wet or oil-wet).
     :param mixed_wet_water_fraction: Fraction of water-wet behavior in mixed-wet case (0 to 1).
     :param mixing_rule: Three-phase mixing rule for oil relative permeability.
-    :param minimum_water_relperm: Resolved minimum floor for water kr (`None` = no floor).
-    :param minimum_oil_relperm: Resolved minimum floor for oil kr (`None` = no floor).
-    :param minimum_gas_relperm: Resolved minimum floor for gas kr (`None` = no floor).
+    :param minimum_water_relperm: Resolved minimum min_value for water kr (`None` = no min_value).
+    :param minimum_oil_relperm: Resolved minimum min_value for oil kr (`None` = no min_value).
+    :param minimum_gas_relperm: Resolved minimum min_value for gas kr (`None` = no min_value).
     :return: (krw, kro, krg) tuple of relative permeabilities.
     """
     sw = np.atleast_1d(water_saturation)
@@ -4589,9 +4625,6 @@ def compute_let_three_phase_relative_permeabilities(
     Sorw = residual_oil_saturation_water
     Sorg = residual_oil_saturation_gas
     Sgr = residual_gas_saturation
-
-    # kro_endpoint for LET models: maximum_oil_relperm
-    kro_endpoint = maximum_oil_relperm
 
     if wettability == Wettability.WATER_WET:
         # Water kr (wetting phase)
@@ -4634,7 +4667,7 @@ def compute_let_three_phase_relative_permeabilities(
             kro_g=kro_g,
             krw=krw,
             krg=krg,
-            kro_endpoint=kro_endpoint,
+            kr_max=maximum_oil_relperm,
             water_saturation=sw,
             oil_saturation=so,
             gas_saturation=sg,
@@ -4683,7 +4716,7 @@ def compute_let_three_phase_relative_permeabilities(
             kro_g=krw_gw,
             krw=kro,
             krg=krg,
-            kro_endpoint=kro_endpoint,
+            kr_max=maximum_water_relperm,
             water_saturation=sw,
             oil_saturation=so,
             gas_saturation=sg,
@@ -4732,7 +4765,7 @@ def compute_let_three_phase_relative_permeabilities(
                 kro_g=kro_g_ww,
                 krw=krw_ww,
                 krg=krg_ww,
-                kro_endpoint=kro_endpoint,
+                kr_max=maximum_oil_relperm,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -4783,7 +4816,7 @@ def compute_let_three_phase_relative_permeabilities(
                 kro_g=krw_gw_proxy,
                 krw=kro_ow,
                 krg=krg_ow,
-                kro_endpoint=kro_endpoint,
+                kr_max=maximum_water_relperm,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -4812,9 +4845,9 @@ def compute_let_three_phase_relative_permeabilities(
     krw = np.clip(krw, 0.0, 1.0)
     kro = np.clip(kro, 0.0, 1.0)
     krg = np.clip(krg, 0.0, 1.0)
-    krw = _apply_relperm_floor(krw, minimum_water_relperm)
-    kro = _apply_relperm_floor(kro, minimum_oil_relperm)
-    krg = _apply_relperm_floor(krg, minimum_gas_relperm)
+    krw = _clamp_relperm(krw, minimum_water_relperm)
+    kro = _clamp_relperm(kro, minimum_oil_relperm)
+    krg = _clamp_relperm(krg, minimum_gas_relperm)
     if is_scalar:
         krw = krw.item()  # type: ignore
         kro = kro.item()  # type: ignore
@@ -4876,8 +4909,8 @@ class LETThreePhaseRelPermModel(
     RelativePermeabilityTable,
     serializers={"mixing_rule": serialize_mixing_rule},
     deserializers={"mixing_rule": deserialize_mixing_rule},
-    load_exclude={"supports_arrays"},
-    dump_exclude={"supports_arrays"},
+    load_exclude={"supports_vector"},
+    dump_exclude={"supports_vector"},
 ):
     """
     LET (Lomeland-Ebeltoft-Thomas) three-phase relative permeability model.
@@ -4897,9 +4930,9 @@ class LETThreePhaseRelPermModel(
     - `gas`: Parameters for the gas kr curve (non-wetting phase).
 
     Supports water-wet and oil-wet wettability assumptions. Supports both
-    scalar and array inputs for saturations (`supports_arrays=True`).
+    scalar and array inputs for saturations (`supports_vector=True`).
 
-    **Minimum relperm floors** (``minimum_water_relperm``, ``minimum_oil_relperm``,
+    **Minimum relperm min_values** (``minimum_water_relperm``, ``minimum_oil_relperm``,
     ``minimum_gas_relperm``): same semantics as ``BrooksCoreyRelPermModel``.
     """
 
@@ -4941,38 +4974,38 @@ class LETThreePhaseRelPermModel(
     three-phase system. Accepts a function or a registered name string.
     """
 
-    minimum_water_relperm: RelPermFloor = "auto"
+    minimum_water_relperm: MinimumRelPerm = "auto"
     """
-    Minimum floor for the water relative permeability.
+    Minimum min_value for the water relative permeability.
 
-    `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
-    """
-
-    minimum_oil_relperm: RelPermFloor = "auto"
-    """
-    Minimum floor for the oil relative permeability.
-
-    `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
+    `"auto"` - dtype-aware min_value; `None` - no min_value; `float` - explicit value.
     """
 
-    minimum_gas_relperm: RelPermFloor = "auto"
+    minimum_oil_relperm: MinimumRelPerm = "auto"
     """
-    Minimum floor for the gas relative permeability.
+    Minimum min_value for the oil relative permeability.
 
-    `"auto"` - dtype-aware floor; `None` - no floor; `float` - explicit value.
+    `"auto"` - dtype-aware min_value; `None` - no min_value; `float` - explicit value.
     """
 
-    supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
-    """Flag indicating support for array inputs."""
+    minimum_gas_relperm: MinimumRelPerm = "auto"
+    """
+    Minimum min_value for the gas relative permeability.
+
+    `"auto"` - dtype-aware min_value; `None` - no min_value; `float` - explicit value.
+    """
+
+    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
+    """Flag indicating support for array/vector inputs."""
 
     def __attrs_post_init__(self) -> None:
         mixing_rule = self.mixing_rule
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
-        # Validate floor sentinels eagerly
-        _resolve_relperm_floor(self.minimum_water_relperm)
-        _resolve_relperm_floor(self.minimum_oil_relperm)
-        _resolve_relperm_floor(self.minimum_gas_relperm)
+
+        _resolve_min_relperm(self.minimum_water_relperm)
+        _resolve_min_relperm(self.minimum_oil_relperm)
+        _resolve_min_relperm(self.minimum_gas_relperm)
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
         wettability = self.wettability
@@ -5077,17 +5110,17 @@ class LETThreePhaseRelPermModel(
             gas_L=self.gas.L,
             gas_E=self.gas.E,
             gas_T=self.gas.T,
-            maximum_water_relperm=self.maximum_water_relperm,
-            maximum_oil_relperm=self.maximum_oil_relperm,
-            maximum_gas_relperm=self.maximum_gas_relperm,
+            maximum_water_relperm=self.get_water_relperm_endpoint(),
+            maximum_oil_relperm=self.get_oil_relperm_endpoint(),
+            maximum_gas_relperm=self.get_gas_relperm_endpoint(),
             wettability=self.wettability,
             mixed_wet_water_fraction=self.mixed_wet_water_fraction,
             mixing_rule=self.mixing_rule,  # type: ignore[arg-type]
             saturation_epsilon=c.SATURATION_EPSILON,
             minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
-            minimum_water_relperm=_resolve_relperm_floor(self.minimum_water_relperm),
-            minimum_oil_relperm=_resolve_relperm_floor(self.minimum_oil_relperm),
-            minimum_gas_relperm=_resolve_relperm_floor(self.minimum_gas_relperm),
+            minimum_water_relperm=_resolve_min_relperm(self.minimum_water_relperm),
+            minimum_oil_relperm=_resolve_min_relperm(self.minimum_oil_relperm),
+            minimum_gas_relperm=_resolve_min_relperm(self.minimum_gas_relperm),
         )
         return RelativePermeabilities(water=krw, oil=kro, gas=krg)  # type: ignore[typeddict-item]
 
@@ -5125,9 +5158,9 @@ class LETThreePhaseRelPermModel(
         ``d_kro/d_krw`` and ``d_kro/d_krg`` terms for rules like Stone II that
         use the actual two-phase water/gas kr values).
 
-        Wherever a minimum relperm floor is active (raw kr ≤ floor), the
+        Wherever a minimum relperm min_value is active (raw kr ≤ min_value), the
         corresponding derivative is zeroed out, keeping the Jacobian consistent
-        with the floored kr value and preventing MBE.
+        with the min_value kr value and preventing MBE.
 
         :param water_saturation: Water saturation (fraction, 0 to 1).
         :param oil_saturation: Oil saturation (fraction, 0 to 1).
@@ -5187,17 +5220,14 @@ class LETThreePhaseRelPermModel(
         oil_water_params = self.oil_water
         gas_oil_params = self.gas_oil
         gas_params = self.gas
-        krw_max = self.maximum_water_relperm
-        kro_max = self.maximum_oil_relperm
-        krg_max = self.maximum_gas_relperm
+        krw_max = self.get_water_relperm_endpoint()
+        kro_max = self.get_oil_relperm_endpoint()
+        krg_max = self.get_gas_relperm_endpoint()
 
-        # Resolve floors once up front
-        floor_w = _resolve_relperm_floor(self.minimum_water_relperm)
-        floor_o = _resolve_relperm_floor(self.minimum_oil_relperm)
-        floor_g = _resolve_relperm_floor(self.minimum_gas_relperm)
-
-        # kro_endpoint for mixing rule calls: maximum_oil_relperm for LET
-        kro_endpoint = self.get_oil_relperm_endpoint()
+        # Resolve min_values once up front
+        krw_min = _resolve_min_relperm(self.minimum_water_relperm)
+        kro_min = _resolve_min_relperm(self.minimum_oil_relperm)
+        krg_min = _resolve_min_relperm(self.minimum_gas_relperm)
 
         is_scalar = (
             np.isscalar(water_saturation)
@@ -5244,9 +5274,7 @@ class LETThreePhaseRelPermModel(
                 / movable_oil_range,
                 zeros,
             )
-            d_kro_d_so = _apply_relperm_floor_to_derivative(
-                d_kro_d_so_raw, kro_raw, floor_o
-            )
+            d_kro_d_so = _clamp_relperm_derivative(d_kro_d_so_raw, kro_raw, kro_min)
             d_kro_d_sw = zeros.copy()
             d_kro_d_sg = zeros.copy()
 
@@ -5273,9 +5301,7 @@ class LETThreePhaseRelPermModel(
                 / movable_gas_range,
                 zeros,
             )
-            d_krg_d_sg = _apply_relperm_floor_to_derivative(
-                d_krg_d_sg_raw, krg_raw, floor_g
-            )
+            d_krg_d_sg = _clamp_relperm_derivative(d_krg_d_sg_raw, krg_raw, krg_min)
             d_krg_d_sw = zeros.copy()
             d_krg_d_so = zeros.copy()
 
@@ -5338,7 +5364,7 @@ class LETThreePhaseRelPermModel(
                 kro_g=krw_gw,
                 krw=kro_raw,
                 krg=krg_raw,
-                kro_endpoint=kro_endpoint,
+                kr_max=krw_max,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -5350,16 +5376,20 @@ class LETThreePhaseRelPermModel(
             d_krw_d_so_explicit = derivatives["d_kro_d_so_explicit"]
             d_krw_d_sg_explicit = derivatives["d_kro_d_sg_explicit"]
 
-            # Forward evaluate krw for floor masking
-            krw_raw = mixing_rule(
-                kro_w=krw_ow,
-                kro_g=krw_gw,
-                krw=kro_raw,
-                krg=krg_raw,
-                kro_endpoint=kro_endpoint,
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
+            # Forward evaluate krw for min_value masking
+            krw_raw = krw_max * np.clip(
+                mixing_rule(
+                    kro_w=krw_ow,
+                    kro_g=krw_gw,
+                    krw=kro_raw,
+                    krg=krg_raw,
+                    kr_max=krw_max,
+                    water_saturation=sw,
+                    oil_saturation=so,
+                    gas_saturation=sg,
+                ),
+                0.0,
+                1.0,
             )
 
             d_krw_d_sw_raw = krw_max * (
@@ -5377,15 +5407,9 @@ class LETThreePhaseRelPermModel(
                 + d_krw_d_krw_gw * d_krw_gw_d_sg
                 + d_krw_d_sg_explicit
             )
-            d_krw_d_sw = _apply_relperm_floor_to_derivative(
-                d_krw_d_sw_raw, krw_raw, floor_w
-            )
-            d_krw_d_so = _apply_relperm_floor_to_derivative(
-                d_krw_d_so_raw, krw_raw, floor_w
-            )
-            d_krw_d_sg = _apply_relperm_floor_to_derivative(
-                d_krw_d_sg_raw, krw_raw, floor_w
-            )
+            d_krw_d_sw = _clamp_relperm_derivative(d_krw_d_sw_raw, krw_raw, krw_min)
+            d_krw_d_so = _clamp_relperm_derivative(d_krw_d_so_raw, krw_raw, krw_min)
+            d_krw_d_sg = _clamp_relperm_derivative(d_krw_d_sg_raw, krw_raw, krw_min)
 
             results = (
                 d_krw_d_sw,
@@ -5507,7 +5531,7 @@ class LETThreePhaseRelPermModel(
                 kro_g=kro_g_ww,
                 krw=krw_ww,
                 krg=krg_ww,
-                kro_endpoint=kro_endpoint,
+                kr_max=kro_max,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -5519,7 +5543,7 @@ class LETThreePhaseRelPermModel(
                     kro_g=kro_g_ww,
                     krw=krw_ww,
                     krg=krg_ww,
-                    kro_endpoint=kro_endpoint,
+                    kr_max=kro_max,
                     water_saturation=sw,
                     oil_saturation=so,
                     gas_saturation=sg,
@@ -5633,7 +5657,7 @@ class LETThreePhaseRelPermModel(
                 kro_g=krw_gw_proxy,
                 krw=kro_ow,
                 krg=krg_ow,
-                kro_endpoint=kro_endpoint,
+                kr_max=krw_max,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -5645,7 +5669,7 @@ class LETThreePhaseRelPermModel(
                     kro_g=krw_gw_proxy,
                     krw=kro_ow,
                     krg=krg_ow,
-                    kro_endpoint=kro_endpoint,
+                    kr_max=krw_max,
                     water_saturation=sw,
                     oil_saturation=so,
                     gas_saturation=sg,
@@ -5661,7 +5685,7 @@ class LETThreePhaseRelPermModel(
             d_krw_ow_d_so = krw_max * derivs_ow["d_kro_d_so_explicit"]
             d_krw_ow_d_sg = krw_max * derivs_ow["d_kro_d_sg_explicit"]
 
-            # Blend raw kr values for floor masking
+            # Blend raw kr values for min_value masking
             krw_blend_raw = f * krw_ww + (1.0 - f) * krw_ow_raw
             kro_blend_raw = f * kro_ww_raw + (1.0 - f) * kro_ow
             krg_blend_raw = f * krg_ww + (1.0 - f) * krg_ow
@@ -5677,29 +5701,29 @@ class LETThreePhaseRelPermModel(
 
             d_krg_d_sg_raw = f * d_krg_ww_d_sg_raw + (1.0 - f) * d_krg_ow_d_sg
 
-            # Apply floors to blended derivatives
-            d_krw_d_sw = _apply_relperm_floor_to_derivative(
-                d_krw_d_sw_raw, krw_blend_raw, floor_w
+            # Apply min_values to blended derivatives
+            d_krw_d_sw = _clamp_relperm_derivative(
+                d_krw_d_sw_raw, krw_blend_raw, krw_min
             )
-            d_krw_d_so = _apply_relperm_floor_to_derivative(
-                d_krw_d_so_raw, krw_blend_raw, floor_w
+            d_krw_d_so = _clamp_relperm_derivative(
+                d_krw_d_so_raw, krw_blend_raw, krw_min
             )
-            d_krw_d_sg = _apply_relperm_floor_to_derivative(
-                d_krw_d_sg_raw, krw_blend_raw, floor_w
+            d_krw_d_sg = _clamp_relperm_derivative(
+                d_krw_d_sg_raw, krw_blend_raw, krw_min
             )
-            d_kro_d_sw = _apply_relperm_floor_to_derivative(
-                d_kro_d_sw_raw, kro_blend_raw, floor_o
+            d_kro_d_sw = _clamp_relperm_derivative(
+                d_kro_d_sw_raw, kro_blend_raw, kro_min
             )
-            d_kro_d_so = _apply_relperm_floor_to_derivative(
-                d_kro_d_so_raw, kro_blend_raw, floor_o
+            d_kro_d_so = _clamp_relperm_derivative(
+                d_kro_d_so_raw, kro_blend_raw, kro_min
             )
-            d_kro_d_sg = _apply_relperm_floor_to_derivative(
-                d_kro_d_sg_raw, kro_blend_raw, floor_o
+            d_kro_d_sg = _clamp_relperm_derivative(
+                d_kro_d_sg_raw, kro_blend_raw, kro_min
             )
             d_krg_d_sw = zeros.copy()
             d_krg_d_so = zeros.copy()
-            d_krg_d_sg = _apply_relperm_floor_to_derivative(
-                d_krg_d_sg_raw, krg_blend_raw, floor_g
+            d_krg_d_sg = _clamp_relperm_derivative(
+                d_krg_d_sg_raw, krg_blend_raw, krg_min
             )
 
             results = (
@@ -5754,9 +5778,7 @@ class LETThreePhaseRelPermModel(
             / mobile_water_range,
             zeros,
         )
-        d_krw_d_sw = _apply_relperm_floor_to_derivative(
-            d_krw_d_sw_raw, krw_raw, floor_w
-        )
+        d_krw_d_sw = _clamp_relperm_derivative(d_krw_d_sw_raw, krw_raw, krw_min)
         d_krw_d_so = zeros.copy()
         d_krw_d_sg = zeros.copy()
 
@@ -5786,9 +5808,7 @@ class LETThreePhaseRelPermModel(
             / mobile_gas_range,
             zeros,
         )
-        d_krg_d_sg = _apply_relperm_floor_to_derivative(
-            d_krg_d_sg_raw, krg_raw, floor_g
-        )
+        d_krg_d_sg = _clamp_relperm_derivative(d_krg_d_sg_raw, krg_raw, krg_min)
         d_krg_d_sw = zeros.copy()
         d_krg_d_so = zeros.copy()
 
@@ -5856,7 +5876,7 @@ class LETThreePhaseRelPermModel(
             kro_g=kro_g_vals,
             krw=krw_raw,
             krg=krg_raw,
-            kro_endpoint=kro_endpoint,
+            kr_max=kro_max,
             water_saturation=sw,
             oil_saturation=so,
             gas_saturation=sg,
@@ -5870,14 +5890,14 @@ class LETThreePhaseRelPermModel(
         d_kro_d_oil_saturation_explicit = derivatives["d_kro_d_so_explicit"]
         d_kro_d_gas_saturation_explicit = derivatives["d_kro_d_sg_explicit"]
 
-        # Forward evaluate kro for floor masking
+        # Forward evaluate kro for min_value masking
         kro_mixed_raw = kro_max * np.clip(
             mixing_rule(
                 kro_w=kro_w_vals,
                 kro_g=kro_g_vals,
                 krw=krw_raw,
                 krg=krg_raw,
-                kro_endpoint=kro_endpoint,
+                kr_max=kro_max,
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -5908,15 +5928,9 @@ class LETThreePhaseRelPermModel(
             + d_kro_d_gas_saturation_explicit
         )
 
-        d_kro_d_sw = _apply_relperm_floor_to_derivative(
-            d_kro_d_sw_raw, kro_mixed_raw, floor_o
-        )
-        d_kro_d_so = _apply_relperm_floor_to_derivative(
-            d_kro_d_so_raw, kro_mixed_raw, floor_o
-        )
-        d_kro_d_sg = _apply_relperm_floor_to_derivative(
-            d_kro_d_sg_raw, kro_mixed_raw, floor_o
-        )
+        d_kro_d_sw = _clamp_relperm_derivative(d_kro_d_sw_raw, kro_mixed_raw, kro_min)
+        d_kro_d_so = _clamp_relperm_derivative(d_kro_d_so_raw, kro_mixed_raw, kro_min)
+        d_kro_d_sg = _clamp_relperm_derivative(d_kro_d_sg_raw, kro_mixed_raw, kro_min)
 
         results = (
             d_krw_d_sw,
