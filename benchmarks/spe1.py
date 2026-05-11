@@ -569,7 +569,11 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     )
 
     rock_fluid_tables = bores.RockFluidTables(
-        relative_permeability_table=gas_oil_table
+        relative_permeability_table=bores.ThreePhaseRelPermTable(
+            gas_oil_table=gas_oil_table,
+            oil_water_table=oil_water_table,
+            mixing_rule="eclipse_rule",
+        )
     )
 
 
@@ -657,7 +661,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="si",
+        scheme="full-si",
         output_frequency=1,
         pressure_solver="direct",
         transport_solver="direct",
@@ -674,7 +678,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         cfl_threshold=0.3,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
-    return
+    return (wells,)
 
 
 @app.cell
@@ -1097,12 +1101,18 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 
 @app.cell
 def _(bores):
-    viz = bores.pyvista3d.DataVisualizer(config=bores.pyvista3d.PlotConfig(off_screen=False))
-    return
+    viz = bores.pyvista3d.DataVisualizer(
+        config=bores.pyvista3d.PlotConfig(
+            off_screen=False,
+            background_color="#1a1a2e",
+            text_color="white",
+        )
+    )
+    return (viz,)
 
 
-app._unparsable_cell(
-    r"""
+@app.cell
+def _(bores, states, viz, wells):
     injector_locations, producer_locations = wells.locations
     injector_names, producer_names = wells.names
     well_positions = [*injector_locations, *producer_locations]
@@ -1129,7 +1139,7 @@ app._unparsable_cell(
 
     property = "gas-sat"
     figures = []
-    timesteps = [1q50]
+    timesteps = [550]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],
@@ -1144,9 +1154,7 @@ app._unparsable_cell(
         plots.show()
     else:
         figures[0].show()
-    """,
-    name="_"
-)
+    return
 
 
 @app.cell

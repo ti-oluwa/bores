@@ -380,4 +380,4 @@ Kcon = typing.TypeVar("Kcon", contravariant=True)
 Vcon = typing.TypeVar("Vcon", contravariant=True)
 
 
-GasZFactorMethod = typing.Literal["papay", "hall-yarborough", "dak"]
+ZFactorMethod = typing.Literal["papay", "hall-yarborough", "dak"]

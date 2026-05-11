@@ -189,7 +189,7 @@ pvt_pressures = bores.array(
 )
 
 # Two temperature entries (isothermal at 200 °F; need >= 2 for 2-D table)
-pvt_temperatures = bores.array([200.0, 201.0])
+pvt_temperatures = bores.array([200.0, 201.0, 202.0, 203.0])
 
 # OIL: Solution GOR (Rs), Bo, μo, ρo — all from Table 2
 # Above Pb: Rs is frozen at the bubble-point value (1270 SCF/STB)
@@ -340,8 +340,11 @@ gas_solubility_in_water_values = bores.array([0.0] * 9)
 
 # Build 2-D tables (n_pressures × n_temperatures)
 # Broadcast each 1-D array across the temperature axis (isothermal)
+n_t = len(pvt_temperatures)
+
+
 def make_2d(arr):
-    return np.column_stack([arr, arr])
+    return np.column_stack([arr] * n_t)
 
 
 solution_gor_table = typing.cast(bores.TwoDimensionalGrid, make_2d(solution_gor_values))
@@ -374,12 +377,15 @@ gas_solubility_in_water_table = typing.cast(
     bores.ThreeDimensionalGrid, make_3d(gas_solubility_in_water_values)
 )
 
+bubble_point_pressures = bores.array([4014.7] * n_t)
+salinities = bores.array([0.0])
+
 # Build PVT dataset
 pvt_dataset = bores.build_pvt_dataset(
     pressures=pvt_pressures,
     temperatures=pvt_temperatures,
-    salinities=bores.array([0.0]),
-    bubble_point_pressures=bores.array([4014.7, 4014.7]),
+    salinities=salinities,
+    bubble_point_pressures=bubble_point_pressures,
     oil_specific_gravity=oil_specific_gravity,
     gas_gravity=0.792,
     water_salinity=0.0,
@@ -395,9 +401,7 @@ pvt_dataset = bores.build_pvt_dataset(
     water_density_table=water_density_table,
     gas_solubility_in_water_table=gas_solubility_in_water_table,
 )
-pvt_tables = bores.PVTTables.from_dataset(
-    pvt_dataset, interpolation_method="linear", clamps=False
-)
+pvt_tables = bores.PVTTables.from_dataset(pvt_dataset, clamps=False)
 
 # Build reservoir model
 model = bores.reservoir_model(

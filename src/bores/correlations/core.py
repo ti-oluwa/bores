@@ -12,7 +12,7 @@ from scipy.optimize import brentq, root_scalar  # type: ignore[import-untyped]
 
 from bores.constants import c
 from bores.errors import ComputationError, ValidationError
-from bores.types import FloatOrArray, GasZFactorMethod
+from bores.types import FloatOrArray, ZFactorMethod
 from bores.utils import clip
 
 logger = logging.getLogger(__name__)
@@ -1076,7 +1076,7 @@ def compute_gas_compressibility_factor(
     h2s_mole_fraction: float = 0.0,
     co2_mole_fraction: float = 0.0,
     n2_mole_fraction: float = 0.0,
-    method: GasZFactorMethod = "dak",
+    method: ZFactorMethod = "dak",
 ) -> float:
     """
     Computes (natural) gas compressibility factor.

@@ -135,12 +135,14 @@ def _normalize_data(
 
 def _scalar_bar_args(
     metadata: PropertyMeta,
-    extra: dict[str, typing.Any] | None = None,
-) -> dict[str, typing.Any]:
+    text_color: str = "#121212",
+    extra: typing.Dict[str, typing.Any] | None = None,
+) -> typing.Dict[str, typing.Any]:
     """
     Build PyVista scalar bar configuration dictionary.
 
     :param metadata: Property metadata containing display name, unit, and scale info
+    :param text_color: Scalar bar text color
     :param extra: Optional dictionary to override default scalar bar settings
     :return: Complete scalar bar arguments dict for `pv.Plotter.add_mesh()`
     """
@@ -148,12 +150,13 @@ def _scalar_bar_args(
     if metadata.log_scale:
         label += " (log scale)"
 
-    base: dict[str, typing.Any] = {
+    base: typing.Dict[str, typing.Any] = {
         "title": label,
         "n_labels": 6,
         "fmt": "%.3g",
         "title_font_size": 14,
         "label_font_size": 12,
+        "color": text_color,
     }
     if extra:
         base.update(extra)
@@ -224,6 +227,12 @@ class PlotConfig:
 
     background_color: str = "white"
     """Background color for render window. Accepts CSS colors, hex, or RGB tuples."""
+
+    text_color: str = "#121212"
+    """
+    Color for all overlay text (titles, labels, shortcuts hint).
+    Set to 'white' or '#eeeeee' when using a dark background_color.
+    """
 
     off_screen: bool = False
     """Render off-screen without opening window. Required for headless servers/notebooks."""
@@ -924,7 +933,9 @@ class VolumeRenderer(BaseRenderer):
             "opacity": opacity if opacity is not None else self.config.opacity,
             "cmap": _cmap(kwargs.get("color_scheme", metadata.color_scheme)),
             "show_scalar_bar": self.config.show_colorbar,
-            "scalar_bar_args": _scalar_bar_args(metadata, self.config.scalar_bar_args),
+            "scalar_bar_args": _scalar_bar_args(
+                metadata, self.config.text_color, self.config.scalar_bar_args
+            ),
             "n_colors": n_colors,
             "shade": shade,
             "log_scale": metadata.log_scale,
@@ -1035,7 +1046,9 @@ class IsosurfaceRenderer(BaseRenderer):
             "cmap": _cmap(kwargs.get("color_scheme", metadata.color_scheme)),
             "smooth_shading": self.config.smooth_shading,
             "show_scalar_bar": self.config.show_colorbar,
-            "scalar_bar_args": _scalar_bar_args(metadata, self.config.scalar_bar_args),
+            "scalar_bar_args": _scalar_bar_args(
+                metadata, self.config.text_color, self.config.scalar_bar_args
+            ),
             "n_colors": self.config.n_colors,
             "log_scale": metadata.log_scale,
         }
@@ -1137,7 +1150,9 @@ class CellBlockRenderer(BaseRenderer):
             "line_width": self.config.cell_outline_width,
             "smooth_shading": self.config.smooth_shading,
             "show_scalar_bar": self.config.show_colorbar,
-            "scalar_bar_args": _scalar_bar_args(metadata, self.config.scalar_bar_args),
+            "scalar_bar_args": _scalar_bar_args(
+                metadata, self.config.text_color, self.config.scalar_bar_args
+            ),
             "n_colors": self.config.n_colors,
             "log_scale": metadata.log_scale,
         }
@@ -1240,7 +1255,9 @@ class Scatter3DRenderer(BaseRenderer):
             "opacity": opacity if opacity is not None else self.config.opacity,
             "cmap": _cmap(kwargs.get("color_scheme", metadata.color_scheme)),
             "show_scalar_bar": self.config.show_colorbar,
-            "scalar_bar_args": _scalar_bar_args(metadata, self.config.scalar_bar_args),
+            "scalar_bar_args": _scalar_bar_args(
+                metadata, self.config.text_color, self.config.scalar_bar_args
+            ),
             "n_colors": self.config.n_colors,
             "log_scale": metadata.log_scale,
         }
@@ -1265,23 +1282,17 @@ def _apply_slider_theme() -> None:
     Apply a dark, minimal slider theme to both PyVista slider styles.
 
     Should be called once before any `add_slider_widget` calls so every slider in the plotter picks it up.
-
-    Design:
-    - Thin flat track (tube_width 0.006) in muted steel-blue  #4a90d9
-    - Slim pill handle (slider_width 0.022) in bright white
-    - Zero-opacity caps so only the handle/track are visible
-    - Applies to both "classic" and "modern" named styles
     """
     ss = pv.global_theme.slider_styles
     for style in (ss.classic, ss.modern):
-        style.slider_length = 0.015  # short pill handle
-        style.slider_width = 0.022  # slim — not a fat disk
-        style.slider_color = (1.0, 1.0, 1.0)  # white handle
-        style.tube_width = 0.006  # thin track
-        style.tube_color = (0.29, 0.56, 0.85)  # #4a90d9 steel-blue
-        style.cap_opacity = 0.0  # invisible end-caps
-        style.cap_length = 0.008
-        style.cap_width = 0.02
+        style.slider_length = 0.01
+        style.slider_width = 0.015
+        style.slider_color = (1.0, 1.0, 1.0)
+        style.tube_width = 0.004
+        style.tube_color = (0.18, 0.52, 0.89)
+        style.cap_opacity = 0.0
+        style.cap_length = 0.006
+        style.cap_width = 0.015
 
 
 def _add_styled_slider(
@@ -1301,50 +1312,157 @@ def _add_styled_slider(
     font size and label colour require reaching into the VTK representation
     directly after the widget is created.
 
+    Inversion: PyVista vertical sliders map pointa (top) -> max and pointb
+    (bottom) -> min, which is backwards from convention. The callback inverts
+    the raw value so min-at-bottom / max-at-top behaviour is restored, and the
+    displayed label is updated separately to show the corrected number without
+    touching the handle position (which would cause a fight loop).
+
+    Label strategy (tried in order):
+      1. rep.GetLabelActor()         - preferred, direct vtkTextActor
+      2. rep.GetLabelProperty()      - property object only, SetInput may work
+      3. plotter.add_text() overlay  - always works, positioned near slider mid
+
     :param plotter: Active PyVista Plotter
-    :param callback: Single-argument callable receiving the slider value
+    :param callback: Single-argument callable receiving the corrected value
     :param rng: (min, max) value range
-    :param value: Initial value
+    :param value: Initial value (in corrected / user-facing units)
     :param title: Label shown alongside the slider
-    :param pointa: Normalised (x, y) start position in the viewport
-    :param pointb: Normalised (x, y) end position in the viewport
-    :param fmt: `printf`-style format string for the live value readout
+    :param pointa: Normalised (x, y) start position in the viewport (top)
+    :param pointb: Normalised (x, y) end position in the viewport (bottom)
+    :param fmt: printf-style format string for the live value readout
     """
+    lo, hi = rng
+    _state: typing.Dict[str, typing.Any] = {
+        "label": None,
+        "label_mode": None,  # "actor" | "property" | "overlay"
+    }
+
+    def _update_label(corrected: float) -> None:
+        """Push corrected value string to whichever label mechanism is active."""
+        label = _state["label"]
+        mode = _state["label_mode"]
+        if label is None or mode is None:
+            return
+        text = fmt % corrected
+        try:
+            if mode in ("actor", "property"):
+                label.SetInput(text)
+            elif mode == "overlay":
+                t = (corrected - lo) / (hi - lo) if (hi - lo) != 0 else 0.0
+                track_y = pointb[1] + t * (
+                    pointa[1] - pointb[1]
+                )  # pointb=bottom, pointa=top
+                mid_x = pointb[0] + 0.01
+                plotter.add_text(
+                    text,
+                    position=(mid_x, track_y),
+                    font_size=9,
+                    color="#66c6ff",
+                    name=f"_slider_label_{title}",
+                    viewport=True,
+                )
+        except Exception:
+            pass
+
+    def _inverted_callback(raw: float) -> None:
+        corrected = hi - (raw - lo)
+        callback(corrected)
+        _update_label(corrected)
+
     widget = plotter.add_slider_widget(
-        callback,
-        rng=rng,
-        value=value,
+        _inverted_callback,
+        rng=(lo, hi),
+        value=hi - (value - lo),
         title=title,
         pointa=pointa,
         pointb=pointb,
         style="modern",
         title_height=0.022,
-        title_opacity=0.92,
-        title_color="#e0e8f4",  # cool off-white, readable on dark/light BG
-        color="#4a90d9",  # handle colour echoes the track
-        fmt=fmt,
+        title_opacity=0.95,
+        title_color="#ffffff",
+        color="#2e85e3",
+        fmt="",  # suppress PyVista's own raw-value label
         interaction_event="always",
     )
 
-    # VTK post-creation tweaks, things PyVista doesn't expose in the call sig
     rep = widget.GetRepresentation()
 
-    # Title (static label)
-    title_prop = rep.GetTitleProperty()  # type: ignore[attr-defined]
-    title_prop.SetColor(0.88, 0.91, 0.96)  # #e0e8f4 in float RGB
-    title_prop.SetFontFamilyToArial()
-    title_prop.BoldOff()
-    title_prop.ItalicOff()
-    title_prop.ShadowOff()
+    # Label actor resolution (try best option first)
+    if hasattr(rep, "GetLabelActor"):
+        try:
+            actor = rep.GetLabelActor()  # type: ignore
+            actor.SetInput(fmt % value)
+            _state["label"] = actor
+            _state["label_mode"] = "actor"
+            # Style via the actor's text property
+            tp = actor.GetTextProperty()
+            tp.SetColor(0.4, 0.78, 1.0)
+            tp.SetFontFamilyToArial()
+            tp.BoldOff()
+            tp.ShadowOn()
+            tp.SetFontSize(11)
+        except Exception:
+            pass
 
-    # Live value label
-    label_prop = rep.GetLabelProperty()  # type: ignore[attr-defined]
-    label_prop.SetColor(0.55, 0.75, 0.98)  # brighter accent blue for the number
-    label_prop.SetFontFamilyToArial()
-    label_prop.BoldOff()
-    label_prop.ShadowOff()
+    if _state["label_mode"] is None:
+        # Fallback 1: label property object
+        try:
+            label_prop = rep.GetLabelProperty()  # type: ignore
+            label_prop.SetInput(fmt % value)
+            _state["label"] = label_prop
+            _state["label_mode"] = "property"
+            label_prop.SetColor(0.4, 0.78, 1.0)
+            label_prop.SetFontFamilyToArial()
+            label_prop.BoldOff()
+            label_prop.ShadowOn()
+        except Exception:
+            pass
 
-    rep.SetLabelFormat(fmt)  # type: ignore[attr-defined]
+    if _state["label_mode"] is None:
+        # Fallback 2: floating overlay text actor (always works)
+        mid_x = (pointa[0] + pointb[0]) / 2 + 0.01
+        mid_y = (pointa[1] + pointb[1]) / 2
+        try:
+            plotter.add_text(
+                fmt % value,
+                position=(mid_x, mid_y),
+                font_size=9,
+                color="#66c6ff",
+                name=f"_slider_label_{title}",
+                viewport=True,
+            )
+            # label reference not needed for overlay mode since
+            # add_text with the same name replaces in-place
+            _state["label"] = True  # sentinel so _update_label fires
+            _state["label_mode"] = "overlay"
+        except Exception:
+            pass
+
+    # Title styling
+    try:
+        title_prop = rep.GetTitleProperty()  # type: ignore
+        title_prop.SetColor(0.95, 0.95, 0.95)
+        title_prop.SetFontFamilyToArial()
+        title_prop.BoldOn()
+        title_prop.ItalicOff()
+        title_prop.ShadowOn()
+    except AttributeError:
+        pass
+
+    # Geometry / colour
+    try:
+        rep.GetSliderProperty().SetColor(0.18, 0.52, 0.89)  # type: ignore
+        rep.GetSliderProperty().SetOpacity(1.0)  # type: ignore
+        rep.SetSliderLength(0.01)  # type: ignore
+        rep.SetSliderWidth(0.015)  # type: ignore
+        rep.SetTubeWidth(0.004)  # type: ignore
+        rep.GetTubeProperty().SetColor(0.18, 0.52, 0.89)  # type: ignore
+        rep.GetTubeProperty().SetOpacity(0.85)  # type: ignore
+        rep.GetCapProperty().SetOpacity(0.0)  # type: ignore
+        rep.GetSelectedProperty().SetColor(0.1, 0.6, 1.0)  # type: ignore
+    except AttributeError:
+        pass
 
 
 def _setup_interactive_widgets(
@@ -1386,7 +1504,7 @@ def _setup_interactive_widgets(
     has_grid = mesh is not None and hasattr(mesh, "threshold")
 
     cmap = _cmap(metadata.color_scheme)
-    mesh_kwargs: dict[str, typing.Any] = {
+    mesh_kwargs: typing.Dict[str, typing.Any] = {
         "scalars": "values",
         "cmap": cmap,
         "show_scalar_bar": False,
@@ -1419,7 +1537,7 @@ def _setup_interactive_widgets(
         data_min = float(scalars.min()) if scalars is not None else 0.0
         data_max = float(scalars.max()) if scalars is not None else 1.0
 
-        _thresh: dict[str, typing.Any] = {"actor": None}
+        _thresh: typing.Dict[str, typing.Any] = {"actor": None}
 
         def _apply_threshold(value: float) -> None:
             if _thresh["actor"] is not None:
@@ -1481,7 +1599,7 @@ def _setup_interactive_widgets(
         scalars = mesh.active_scalars  # type: ignore
         _cdata_min = float(scalars.min()) if scalars is not None else 0.0
         _cdata_max = float(scalars.max()) if scalars is not None else 1.0
-        _clim: dict[str, float] = {"lo": _cdata_min, "hi": _cdata_max}
+        _clim: typing.Dict[str, float] = {"lo": _cdata_min, "hi": _cdata_max}
 
         def _apply_clim() -> None:
             """Push current lo/hi to every scalar-bar-linked actor."""
@@ -1524,8 +1642,8 @@ def _setup_interactive_widgets(
     # Slice planes  (1/2/3 keys)
     # Inserts a draggable orange cutting plane.  User clicks the handle
     # and drags it through the volume.  Same key removes it.
-    _slice_actors: dict[str, bool] = {}
-    _slice_status: dict[str, typing.Any] = {"actor": None}
+    _slice_actors: typing.Dict[str, bool] = {}
+    _slice_status: typing.Dict[str, typing.Any] = {"actor": None}
 
     def _update_slice_status() -> None:
         """Show/hide a small HUD line telling the user what to do."""
@@ -1542,7 +1660,7 @@ def _setup_interactive_widgets(
             f"Slice active ({axes_label}). Click the orange handle and drag to move",
             position=(10, 30),
             font_size=8,
-            color="#4a90d9",
+            color=config.text_color,
             name="_bores_slice_hint",
         )
 
@@ -1641,7 +1759,7 @@ def _setup_interactive_widgets(
     # Captured after all meshes have been added so arrows / tubes / wells
     # are already present. Toggle-off restores this instead of forcing True
     # on every actor (which would add outlines to surface markers etc.).
-    _original_edge_vis: dict[int, bool] = {}
+    _original_edge_vis: typing.Dict[int, bool] = {}
     for actor in plotter.renderer.actors.values():
         prop = getattr(actor, "GetProperty", None)
         if prop is not None:
@@ -1716,7 +1834,7 @@ def _setup_interactive_widgets(
                 _HELP_LINES,
                 position="upper_right",
                 font_size=7,
-                color="#2c3e50",
+                color=config.text_color,
                 name="_bores_help",
             )
             _help_state["visible"] = True
@@ -1726,7 +1844,7 @@ def _setup_interactive_widgets(
         "Press 'h' for help | '1/2/3' to slice",
         position=(10, 10),
         font_size=8,
-        color="#aaaaaa",
+        color=config.text_color,
     )
 
 
@@ -2064,7 +2182,7 @@ class DataVisualizer:
                     always_visible=True,
                 )
 
-        plotter.add_title(plot_title, font_size=8)
+        plotter.add_title(plot_title, font_size=8, color=self._config.text_color)
 
         # Enable cell/point picking for interactive data inspection
         if self._config.enable_picking and not self._config.off_screen:

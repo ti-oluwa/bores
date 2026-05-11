@@ -29,7 +29,7 @@ from bores.correlations.core import (
 )
 from bores.errors import ComputationError, ValidationError
 from bores.precision import get_dtype
-from bores.types import FloatOrArray, GasZFactorMethod, NDimension, NDimensionalGrid
+from bores.types import FloatOrArray, NDimension, NDimensionalGrid, ZFactorMethod
 from bores.utils import apply_mask, clip, get_mask, max_, min_
 
 logger = logging.getLogger(__name__)
@@ -1091,7 +1091,7 @@ def compute_gas_compressibility_factor(
     h2s_mole_fraction: FloatOrArray = 0.0,
     co2_mole_fraction: FloatOrArray = 0.0,
     n2_mole_fraction: FloatOrArray = 0.0,
-    method: GasZFactorMethod = "dak",
+    method: ZFactorMethod = "dak",
 ) -> NDimensionalGrid[NDimension]:
     """
     Computes (natural) gas compressibility factor.

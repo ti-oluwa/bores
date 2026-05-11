@@ -566,6 +566,7 @@ class PVTTable(StoreSerializable):
         if salinities is not None:
             if salinities.ndim != 1:
                 raise ValidationError("`salinities` must be 1-dimensional.")
+
             if not np.all(np.diff(salinities) > 0):
                 raise ValidationError(
                     "`salinities` must be strictly monotonically increasing."
@@ -1137,10 +1138,14 @@ class PVTTable(StoreSerializable):
             )
             if "compressibility" in self._interpolatants:
                 co_at_pb = self._pt_interpolate(
-                    "compressibility", pb_arr[undersaturated_mask], t_arr[undersaturated_mask]
+                    "compressibility",
+                    pb_arr[undersaturated_mask],
+                    t_arr[undersaturated_mask],
                 )
                 co_at_p = self._pt_interpolate(
-                    "compressibility", p_arr[undersaturated_mask], t_arr[undersaturated_mask]
+                    "compressibility",
+                    p_arr[undersaturated_mask],
+                    t_arr[undersaturated_mask],
                 )
                 avg_co = 0.5 * (np.asarray(co_at_pb) + np.asarray(co_at_p))
                 result[undersaturated_mask] = np.asarray(oil_fvf_at_pb) * np.exp(
@@ -1819,12 +1824,22 @@ def build_oil_pvt_data(
     if temperatures.ndim != 1 or not np.all(np.diff(temperatures) > 0):
         raise ValidationError("`temperatures` must be a strictly increasing 1D array.")
 
-    _, gas_gravity, gas_pvt_table = _resolve_gas(gas, gas_gravity)
-    assert gas_gravity is not None
-
-    dtype = get_dtype()
     n_p = len(pressures)
     n_t = len(temperatures)
+
+    if (
+        bubble_point_pressures is not None
+        and bubble_point_pressures.ndim == 1
+        and len(bubble_point_pressures) != n_t
+    ):
+        raise ValidationError(
+            f"`bubble_point_pressures` length {len(bubble_point_pressures)} "
+            f"does not match n_temperatures={n_t}."
+        )
+
+    dtype = get_dtype()
+    _, gas_gravity, gas_pvt_table = _resolve_gas(gas, gas_gravity)
+    assert gas_gravity is not None
 
     pressure_grid, temperature_grid = np.meshgrid(
         pressures, temperatures, indexing="ij"
@@ -2021,6 +2036,9 @@ def build_oil_pvt_data(
 
     elif needs_compressibility:
         assert formation_volume_factor_table is not None
+        assert formation_volume_factor_table.shape == (n_p, n_t), (
+            f"FVF shape {formation_volume_factor_table.shape} != expected ({n_p}, {n_t})"
+        )
         compressibility_table = build_oil_compressibility_grid(
             pressure_grid=pressure_grid,  # type: ignore[arg-type]
             temperature_grid=temperature_grid,
